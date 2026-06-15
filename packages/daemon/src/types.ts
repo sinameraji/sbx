@@ -99,6 +99,41 @@ export interface ProcessInfo {
   logPath: string;
 }
 
+/**
+ * A persistent code-interpreter context. Backed by a long-lived kernel process
+ * inside the sandbox that keeps a namespace across `runCode` calls (variables
+ * and imports persist, Jupyter-style).
+ */
+export interface CodeContextInfo {
+  contextId: string;
+  language: "python" | "javascript";
+  /** Context directory inside the sandbox (holds the kernel + its fifos). */
+  dir: string;
+  /** procId of the kernel background process (so it can be killed on cleanup). */
+  procId: string;
+  /** In-container PID of the kernel (target for the kill on cleanup). */
+  pid: number;
+  /** Monotonic cell counter, incremented per `runCode`. */
+  seq: number;
+  createdAt: string;
+}
+
+/** A single rich output from a code cell. */
+export interface CodeOutput {
+  type: "text";
+  text: string;
+}
+
+/** The result of running a code cell. */
+export interface CodeResult {
+  stdout: string;
+  stderr: string;
+  /** Rich outputs (e.g. the value of a trailing expression). */
+  results: CodeOutput[];
+  /** Formatted traceback/stack if the cell raised, else null. */
+  error: string | null;
+}
+
 /** Options for waiting until a TCP port is listening inside a sandbox. */
 export interface WaitForPortOptions {
   timeoutMs?: number;

@@ -5,6 +5,7 @@ import { filesCommand } from "./files.js";
 import { startCommand, psCommand, killCommand } from "./proc.js";
 import { stopCommand, startSandboxCommand } from "./lifecycle.js";
 import { backupCommand, restoreCommand, backupsCommand } from "./backup.js";
+import { runCodeCommand } from "./code.js";
 import { logsCommand } from "./logs.js";
 import { waitPortCommand, exposeCommand } from "./ports.js";
 import { execCommand } from "./exec.js";
@@ -58,6 +59,8 @@ export async function cli(args: string[]): Promise<number> {
       return restoreCommand(positional, globals);
     case "backups":
       return backupsCommand(positional, globals);
+    case "run-code":
+      return runCodeCommand(positional, globals, flags);
     case "ps":
       return psCommand(positional, globals);
     case "kill":
@@ -112,6 +115,9 @@ Commands:
 
   sb backups [<id>]
     List all backups, or just those from one sandbox.
+
+  sb run-code <id> "<code>" [--lang python|javascript]
+    Run a code snippet in the sandbox's interpreter and print its output.
 
   sb rm <id> [--endpoint <url>]
     Destroy a sandbox, including its persistent workspace volume.

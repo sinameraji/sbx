@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import type {
+  CodeContextInfo,
   ExposedPort,
   ProcessInfo,
   SandboxRecord,
@@ -28,9 +29,15 @@ export class SandboxStore {
   private routes = new Map<string, RouteTarget>();
   // sandboxId -> sessionId -> session
   private sessions = new Map<string, Map<string, SessionInfo>>();
+  // sandboxId -> contextId -> code context
+  private contexts = new Map<string, Map<string, CodeContextInfo>>();
 
   static newId(): string {
     return randomBytes(6).toString("hex");
+  }
+
+  static newContextId(): string {
+    return randomBytes(4).toString("hex");
   }
 
   static newProcId(): string {
@@ -145,19 +152,46 @@ export class SandboxStore {
     return this.sessions.get(sandboxId)?.delete(sessionId) ?? false;
   }
 
-  /** Drop all process + exposed-port + session state for a destroyed sandbox. */
+  // --- code contexts -------------------------------------------------------
+
+  addContext(sandboxId: string, ctx: CodeContextInfo): void {
+    let map = this.contexts.get(sandboxId);
+    if (!map) {
+      map = new Map();
+      this.contexts.set(sandboxId, map);
+    }
+    map.set(ctx.contextId, ctx);
+  }
+
+  getContext(sandboxId: string, contextId: string): CodeContextInfo | undefined {
+    return this.contexts.get(sandboxId)?.get(contextId);
+  }
+
+  listContexts(sandboxId: string): CodeContextInfo[] {
+    return [...(this.contexts.get(sandboxId)?.values() ?? [])].sort((a, b) =>
+      a.createdAt < b.createdAt ? 1 : -1,
+    );
+  }
+
+  removeContext(sandboxId: string, contextId: string): boolean {
+    return this.contexts.get(sandboxId)?.delete(contextId) ?? false;
+  }
+
+  /** Drop all process + exposed-port + session + context state for a destroyed sandbox. */
   clearSandbox(sandboxId: string): void {
     this.clearRuntimeState(sandboxId);
     this.sessions.delete(sandboxId);
   }
 
   /**
-   * Drop the state tied to a live container — background processes and exposed
-   * ports — when a sandbox is stopped. Sessions (just cwd/env strings) and the
-   * sandbox record are kept so `start` resumes with them intact.
+   * Drop the state tied to a live container — background processes, exposed
+   * ports, and code-interpreter contexts (their kernels die with the
+   * container) — when a sandbox is stopped. Sessions (just cwd/env strings) and
+   * the sandbox record are kept so `start` resumes with them intact.
    */
   clearRuntimeState(sandboxId: string): void {
     this.procs.delete(sandboxId);
+    this.contexts.delete(sandboxId);
     const ports = this.exposed.get(sandboxId);
     if (ports) {
       for (const exposed of ports.values()) this.routes.delete(exposed.exposeId);

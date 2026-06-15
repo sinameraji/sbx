@@ -114,6 +114,29 @@ export interface CreateSessionOptions {
   env?: Record<string, string>;
 }
 
+export type CodeLanguage = "python" | "javascript";
+
+/** Public view of a code-interpreter context. */
+export interface CodeContextInfo {
+  contextId: string;
+  language: CodeLanguage;
+  createdAt: string;
+}
+
+/** A single rich output from a code cell. */
+export interface CodeOutput {
+  type: "text";
+  text: string;
+}
+
+/** The result of running a code cell. */
+export interface CodeResult {
+  stdout: string;
+  stderr: string;
+  results: CodeOutput[];
+  error: string | null;
+}
+
 /** Metadata for a workspace backup. */
 export interface BackupInfo {
   backupId: string;
@@ -293,6 +316,50 @@ export class Sandbox {
       `/sandboxes/${this.info.id}/backups`,
     );
     return backups;
+  }
+
+  /**
+   * Create a persistent code-interpreter context. Variables and imports persist
+   * across `runCode` calls made against the returned context (Jupyter-style).
+   */
+  async createCodeContext(
+    options: { language?: CodeLanguage } = {},
+  ): Promise<CodeContext> {
+    const info = await this.client.request<CodeContextInfo>(
+      "POST",
+      `/sandboxes/${this.info.id}/code-contexts`,
+      { language: options.language ?? "python" },
+    );
+    return new CodeContext(this, info);
+  }
+
+  /** List the open code-interpreter contexts in this sandbox. */
+  async listCodeContexts(): Promise<CodeContextInfo[]> {
+    const { contexts } = await this.client.request<{ contexts: CodeContextInfo[] }>(
+      "GET",
+      `/sandboxes/${this.info.id}/code-contexts`,
+    );
+    return contexts;
+  }
+
+  /**
+   * Run a code cell and return its captured output. Pass a `context` to keep
+   * state across calls, or omit it for a one-off run in a throwaway kernel.
+   */
+  async runCode(
+    code: string,
+    options: { context?: CodeContext; language?: CodeLanguage; timeoutMs?: number } = {},
+  ): Promise<CodeResult> {
+    return this.client.request<CodeResult>(
+      "POST",
+      `/sandboxes/${this.info.id}/run-code`,
+      {
+        code,
+        contextId: options.context?.contextId,
+        language: options.language,
+        timeoutMs: options.timeoutMs,
+      },
+    );
   }
 
   /** Permanently destroy the sandbox, including its persistent volume. */
@@ -518,6 +585,38 @@ export class Session {
     await this.sandbox._client.request(
       "DELETE",
       `/sandboxes/${this.sandbox.id}/sessions/${this.sessionId}`,
+    );
+  }
+}
+
+/**
+ * A persistent code-interpreter context. `runCode` executes in a kernel that
+ * keeps its namespace across calls, so variables and imports persist.
+ */
+export class CodeContext {
+  constructor(
+    private readonly sandbox: Sandbox,
+    private readonly info: CodeContextInfo,
+  ) {}
+
+  get contextId(): string {
+    return this.info.contextId;
+  }
+
+  get language(): CodeLanguage {
+    return this.info.language;
+  }
+
+  /** Run code in this context, sharing state with previous runs. */
+  runCode(code: string, options: { timeoutMs?: number } = {}): Promise<CodeResult> {
+    return this.sandbox.runCode(code, { context: this, timeoutMs: options.timeoutMs });
+  }
+
+  /** Destroy this context and its kernel. */
+  async destroy(): Promise<void> {
+    await this.sandbox._client.request(
+      "DELETE",
+      `/sandboxes/${this.sandbox.id}/code-contexts/${this.info.contextId}`,
     );
   }
 }

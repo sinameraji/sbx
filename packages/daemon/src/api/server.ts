@@ -2,8 +2,11 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { type BackupInfo, BackupRegistry } from "../backups.js";
 import { previewUrl, type Config } from "../config.js";
 import type { Driver } from "../driver/types.js";
+import { kernelFor, type KernelLanguage } from "../kernels.js";
 import { SandboxStore } from "../store.js";
 import type {
+  CodeContextInfo,
+  CodeResult,
   ExecEvent,
   ExposedPort,
   ProcessInfo,
@@ -32,6 +35,10 @@ interface Deps {
  *   POST   /sandboxes/:id/restore          -> restore /workspace from {backupId}
  *   GET    /backups                        -> list all backups
  *   DELETE /backups/:backupId              -> delete a backup
+ *   POST   /sandboxes/:id/code-contexts        -> create a code-interpreter context
+ *   GET    /sandboxes/:id/code-contexts        -> list code contexts
+ *   DELETE /sandboxes/:id/code-contexts/:ctxId -> destroy a code context
+ *   POST   /sandboxes/:id/run-code             -> run code, returns CodeResult
  *   POST   /sandboxes/:id/exec             -> run command, stream output as SSE
  *   POST   /sandboxes/:id/files/write      -> write file
  *   POST   /sandboxes/:id/files/read       -> read file
@@ -250,6 +257,31 @@ async function handle(
     return restoreBackup(res, deps, restoreMatch[1], body);
   }
 
+  const ctxIdMatch = path.match(/^\/sandboxes\/([^/]+)\/code-contexts\/([^/]+)$/);
+  if (method === "DELETE" && ctxIdMatch) {
+    return deleteCodeContext(res, { driver, store }, ctxIdMatch[1], ctxIdMatch[2]);
+  }
+
+  const ctxMatch = path.match(/^\/sandboxes\/([^/]+)\/code-contexts$/);
+  if (ctxMatch) {
+    if (method === "POST") {
+      const body = await readJson(req);
+      return createCodeContext(res, { driver, store }, ctxMatch[1], body);
+    }
+    if (method === "GET") {
+      if (!store.get(ctxMatch[1])) return sendJson(res, 404, { error: "not found" });
+      return sendJson(res, 200, {
+        contexts: store.listContexts(ctxMatch[1]).map(publicContext),
+      });
+    }
+  }
+
+  const runCodeMatch = path.match(/^\/sandboxes\/([^/]+)\/run-code$/);
+  if (method === "POST" && runCodeMatch) {
+    const body = await readJson(req);
+    return runCode(res, { driver, store }, runCodeMatch[1], body);
+  }
+
   const stopMatch = path.match(/^\/sandboxes\/([^/]+)\/stop$/);
   if (method === "POST" && stopMatch) {
     return stopSandbox(res, { driver, store }, stopMatch[1]);
@@ -387,6 +419,192 @@ async function restoreBackup(
   }
   await driver.restoreBackup(id, backups.tarPath(backupId));
   sendJson(res, 200, { id, restored: backupId });
+}
+
+// --- code interpreter ------------------------------------------------------
+
+/** Run a command, accumulating its streams; never throws on non-zero exit. */
+async function execCapture(
+  driver: Driver,
+  id: string,
+  command: string,
+): Promise<{ stdout: string; stderr: string; exitCode: number }> {
+  let stdout = "";
+  let stderr = "";
+  let exitCode = 0;
+  await driver.exec(id, command, {}, (e) => {
+    if (e.type === "stdout") stdout += e.data;
+    else if (e.type === "stderr") stderr += e.data;
+    else exitCode = e.exitCode;
+  });
+  return { stdout, stderr, exitCode };
+}
+
+function parseLanguage(value: unknown): KernelLanguage | undefined {
+  return value === "python" || value === "javascript" ? value : undefined;
+}
+
+/** Provision a kernel: make the context dir + fifos, write it, start it. */
+async function startKernel(
+  driver: Driver,
+  store: SandboxStore,
+  id: string,
+  language: KernelLanguage,
+): Promise<CodeContextInfo> {
+  const contextId = SandboxStore.newContextId();
+  const dir = `/workspace/.sbx/ctx-${contextId}`;
+  const setup = await execCapture(
+    driver,
+    id,
+    `mkdir -p ${dir} && mkfifo ${dir}/in.fifo ${dir}/out.fifo`,
+  );
+  if (setup.exitCode !== 0) {
+    throw new Error(`failed to set up code context: ${setup.stderr.trim()}`);
+  }
+  const kernel = kernelFor(language);
+  await driver.writeFile(id, { path: `${dir}/${kernel.filename}`, content: kernel.source });
+  const procId = SandboxStore.newProcId();
+  const { pid } = await driver.startProcess(id, procId, kernel.command(dir), {});
+  const ctx: CodeContextInfo = {
+    contextId,
+    language,
+    dir,
+    procId,
+    pid,
+    seq: 0,
+    createdAt: new Date().toISOString(),
+  };
+  store.addContext(id, ctx);
+  return ctx;
+}
+
+/** Kill a context's kernel and remove its directory. */
+async function teardownKernel(
+  driver: Driver,
+  id: string,
+  ctx: CodeContextInfo,
+): Promise<void> {
+  try {
+    await driver.killProcess(id, ctx.pid, "KILL");
+  } catch {
+    // Kernel may already be gone; the rm below still cleans up.
+  }
+  await execCapture(driver, id, `rm -rf ${ctx.dir}`);
+}
+
+async function createCodeContext(
+  res: ServerResponse,
+  { driver, store }: Pick<Deps, "driver" | "store">,
+  id: string,
+  body: Record<string, unknown>,
+): Promise<void> {
+  const record = store.get(id);
+  if (!record) return sendJson(res, 404, { error: "not found" });
+  if (record.status !== "running") {
+    return sendJson(res, 409, { error: "sandbox is stopped; start it first" });
+  }
+  const language = parseLanguage(body.language ?? "python");
+  if (!language) {
+    return sendJson(res, 400, { error: "language must be 'python' or 'javascript'" });
+  }
+  const ctx = await startKernel(driver, store, id, language);
+  sendJson(res, 201, publicContext(ctx));
+}
+
+async function deleteCodeContext(
+  res: ServerResponse,
+  { driver, store }: Pick<Deps, "driver" | "store">,
+  id: string,
+  contextId: string,
+): Promise<void> {
+  const ctx = store.getContext(id, contextId);
+  if (!ctx) return sendJson(res, 404, { error: "context not found" });
+  await teardownKernel(driver, id, ctx);
+  store.removeContext(id, contextId);
+  sendJson(res, 200, { contextId, destroyed: true });
+}
+
+async function runCode(
+  res: ServerResponse,
+  { driver, store }: Pick<Deps, "driver" | "store">,
+  id: string,
+  body: Record<string, unknown>,
+): Promise<void> {
+  const record = store.get(id);
+  if (!record) return sendJson(res, 404, { error: "not found" });
+  if (record.status !== "running") {
+    return sendJson(res, 409, { error: "sandbox is stopped; start it first" });
+  }
+  const code = body.code;
+  if (typeof code !== "string") {
+    return sendJson(res, 400, { error: "code is required" });
+  }
+  const timeoutMs = typeof body.timeoutMs === "number" ? body.timeoutMs : 30_000;
+
+  // Resolve the context: an explicit one (persistent), or a throwaway kernel
+  // for a one-off run.
+  let ctx: CodeContextInfo;
+  let ephemeral = false;
+  if (typeof body.contextId === "string") {
+    const found = store.getContext(id, body.contextId);
+    if (!found) return sendJson(res, 404, { error: "context not found" });
+    ctx = found;
+  } else {
+    const language = parseLanguage(body.language ?? "python");
+    if (!language) {
+      return sendJson(res, 400, { error: "language must be 'python' or 'javascript'" });
+    }
+    ctx = await startKernel(driver, store, id, language);
+    ephemeral = true;
+  }
+
+  try {
+    const result = await runCell(driver, id, ctx, code, timeoutMs);
+    sendJson(res, 200, result);
+  } finally {
+    if (ephemeral) {
+      await teardownKernel(driver, id, ctx);
+      store.removeContext(id, ctx.contextId);
+    }
+  }
+}
+
+/** Drive one cell through the kernel's fifo handshake and read its result. */
+async function runCell(
+  driver: Driver,
+  id: string,
+  ctx: CodeContextInfo,
+  code: string,
+  timeoutMs: number,
+): Promise<CodeResult> {
+  const seq = ++ctx.seq;
+  await driver.writeFile(id, { path: `${ctx.dir}/cell-${seq}.code`, content: code });
+  const seconds = Math.max(1, Math.ceil(timeoutMs / 1000));
+  // Push the seq to the kernel and block until it signals completion. If the
+  // kernel is wedged or the cell runs too long, `timeout` aborts the handshake.
+  const handshake = await execCapture(
+    driver,
+    id,
+    `timeout ${seconds} sh -c 'printf "%s" "${seq}" > ${ctx.dir}/in.fifo && read _ < ${ctx.dir}/out.fifo'`,
+  );
+  if (handshake.exitCode === 124 || handshake.exitCode === 137) {
+    return {
+      stdout: "",
+      stderr: "",
+      results: [],
+      error: `code execution timed out after ${seconds}s`,
+    };
+  }
+  const raw = await driver.readFile(id, { path: `${ctx.dir}/cell-${seq}.result.json` });
+  return JSON.parse(raw) as CodeResult;
+}
+
+function publicContext(ctx: CodeContextInfo) {
+  return {
+    contextId: ctx.contextId,
+    language: ctx.language,
+    createdAt: ctx.createdAt,
+  };
 }
 
 async function execInSandbox(

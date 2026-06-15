@@ -7,6 +7,7 @@ import type {
   ExposedPort,
   ProcessInfo,
   SandboxRecord,
+  SessionInfo,
 } from "../types.js";
 
 interface Deps {
@@ -35,6 +36,12 @@ interface Deps {
  *   POST   /sandboxes/:id/expose                 -> expose a port (preview URL)
  *   GET    /sandboxes/:id/expose                 -> list exposed ports
  *   DELETE /sandboxes/:id/expose/:port           -> unexpose a port
+ *   GET    /sandboxes/:id/env                     -> get sandbox env vars
+ *   POST   /sandboxes/:id/env                     -> merge sandbox env vars
+ *   POST   /sandboxes/:id/sessions               -> create a session
+ *   GET    /sandboxes/:id/sessions               -> list sessions
+ *   DELETE /sandboxes/:id/sessions/:sid          -> delete a session
+ *   POST   /sandboxes/:id/sessions/:sid/env      -> merge session env vars
  */
 export function createApiServer({ config, driver, store }: Deps) {
   return createServer((req, res) => {
@@ -150,6 +157,56 @@ async function handle(
     }
   }
 
+  const sessionEnvMatch = path.match(
+    /^\/sandboxes\/([^/]+)\/sessions\/([^/]+)\/env$/,
+  );
+  if (method === "POST" && sessionEnvMatch) {
+    const body = await readJson(req);
+    return setSessionEnv(
+      res,
+      { store },
+      sessionEnvMatch[1],
+      sessionEnvMatch[2],
+      body,
+    );
+  }
+
+  const sessionIdMatch = path.match(/^\/sandboxes\/([^/]+)\/sessions\/([^/]+)$/);
+  if (method === "DELETE" && sessionIdMatch) {
+    return deleteSession(res, { store }, sessionIdMatch[1], sessionIdMatch[2]);
+  }
+
+  const sessionsMatch = path.match(/^\/sandboxes\/([^/]+)\/sessions$/);
+  if (sessionsMatch) {
+    if (method === "POST") {
+      const body = await readJson(req);
+      return createSession(res, { store }, sessionsMatch[1], body);
+    }
+    if (method === "GET") {
+      if (!store.get(sessionsMatch[1])) {
+        return sendJson(res, 404, { error: "not found" });
+      }
+      return sendJson(res, 200, {
+        sessions: store.listSessions(sessionsMatch[1]),
+      });
+    }
+  }
+
+  const envMatch = path.match(/^\/sandboxes\/([^/]+)\/env$/);
+  if (envMatch) {
+    const record = store.get(envMatch[1]);
+    if (!record) return sendJson(res, 404, { error: "not found" });
+    if (method === "GET") {
+      return sendJson(res, 200, { env: record.env });
+    }
+    if (method === "POST") {
+      const body = await readJson(req);
+      const env = (body.env as Record<string, string>) ?? {};
+      record.env = { ...record.env, ...env };
+      return sendJson(res, 200, { env: record.env });
+    }
+  }
+
   const idMatch = path.match(/^\/sandboxes\/([^/]+)$/);
   if (idMatch) {
     const id = idMatch[1];
@@ -178,7 +235,7 @@ async function createSandbox(
 ): Promise<void> {
   const id = SandboxStore.newId();
   const image = typeof body.image === "string" ? body.image : config.defaultImage;
-  const env = (body.env as Record<string, string>) ?? undefined;
+  const env = (body.env as Record<string, string>) ?? {};
   const labels = (body.labels as Record<string, string>) ?? {};
 
   await driver.create({ id, image, env, labels });
@@ -189,6 +246,7 @@ async function createSandbox(
     status: "running",
     createdAt: new Date().toISOString(),
     labels,
+    env,
   };
   store.add(record);
   sendJson(res, 201, record);
@@ -207,10 +265,31 @@ async function execInSandbox(
   if (typeof command !== "string" || command.length === 0) {
     return sendJson(res, 400, { error: "command is required" });
   }
-  const opts = {
-    cwd: typeof body.cwd === "string" ? body.cwd : undefined,
-    env: (body.env as Record<string, string>) ?? undefined,
-  };
+
+  // Resolve an optional session: it contributes a working directory and an env
+  // overlay, and its cwd follows `cd` across commands. Env precedence (lowest
+  // to highest): sandbox -> session -> request.
+  const requestEnv = (body.env as Record<string, string>) ?? {};
+  const requestCwd = typeof body.cwd === "string" ? body.cwd : undefined;
+  let session: SessionInfo | undefined;
+  if (typeof body.sessionId === "string") {
+    session = store.getSession(id, body.sessionId);
+    if (!session) return sendJson(res, 404, { error: "session not found" });
+  }
+
+  const env = { ...record.env, ...(session?.env ?? {}), ...requestEnv };
+  const cwd = requestCwd ?? session?.cwd;
+
+  // For a session, capture the working directory the command leaves behind so a
+  // later `cd` persists. We append a `pwd` write that runs in the same shell as
+  // the user command (newline-delimited so a trailing comment can't swallow it).
+  let runCommand = command;
+  const cwdFile = session ? `/tmp/sbx-sess-${session.sessionId}.cwd` : null;
+  if (cwdFile) {
+    runCommand =
+      `{\n${command}\n}\n__sbx_rc=$?\n` +
+      `pwd > ${cwdFile} 2>/dev/null\nexit $__sbx_rc`;
+  }
 
   // Stream output as Server-Sent Events.
   res.writeHead(200, {
@@ -224,7 +303,15 @@ async function execInSandbox(
   };
 
   try {
-    await driver.exec(id, command, opts, write);
+    await driver.exec(id, runCommand, { cwd, env }, write);
+    if (session && cwdFile) {
+      try {
+        const next = (await driver.readFile(id, { path: cwdFile })).trim();
+        if (next) session.cwd = next;
+      } catch {
+        // Best-effort cwd capture; keep the previous cwd on failure.
+      }
+    }
   } catch (err) {
     write({ type: "stderr", data: String(err) });
     write({ type: "exit", exitCode: 1 });
@@ -284,7 +371,8 @@ async function startProcess(
   id: string,
   body: Record<string, unknown>,
 ): Promise<void> {
-  if (!store.get(id)) return sendJson(res, 404, { error: "not found" });
+  const record = store.get(id);
+  if (!record) return sendJson(res, 404, { error: "not found" });
 
   const command = body.command;
   if (typeof command !== "string" || command.length === 0) {
@@ -293,7 +381,7 @@ async function startProcess(
   const procId = SandboxStore.newProcId();
   const opts = {
     cwd: typeof body.cwd === "string" ? body.cwd : undefined,
-    env: (body.env as Record<string, string>) ?? undefined,
+    env: { ...record.env, ...((body.env as Record<string, string>) ?? {}) },
   };
 
   try {
@@ -452,6 +540,57 @@ function unexposePort(
   if (!store.get(id)) return sendJson(res, 404, { error: "not found" });
   const removed = store.removeExposed(id, port);
   if (!removed) return sendJson(res, 404, { error: "port not exposed" });
+  return sendJson(res, 200, { ok: true });
+}
+
+function createSession(
+  res: ServerResponse,
+  { store }: Pick<Deps, "store">,
+  id: string,
+  body: Record<string, unknown>,
+): void {
+  if (!store.get(id)) return sendJson(res, 404, { error: "not found" });
+  const sessionId =
+    typeof body.id === "string" && body.id.length > 0
+      ? body.id
+      : SandboxStore.newSessionId();
+  if (store.getSession(id, sessionId)) {
+    return sendJson(res, 409, { error: "session already exists" });
+  }
+  const session: SessionInfo = {
+    sessionId,
+    cwd: typeof body.cwd === "string" ? body.cwd : "/workspace",
+    env: (body.env as Record<string, string>) ?? {},
+    createdAt: new Date().toISOString(),
+  };
+  store.addSession(id, session);
+  return sendJson(res, 201, session);
+}
+
+function setSessionEnv(
+  res: ServerResponse,
+  { store }: Pick<Deps, "store">,
+  id: string,
+  sessionId: string,
+  body: Record<string, unknown>,
+): void {
+  if (!store.get(id)) return sendJson(res, 404, { error: "not found" });
+  const session = store.getSession(id, sessionId);
+  if (!session) return sendJson(res, 404, { error: "session not found" });
+  const env = (body.env as Record<string, string>) ?? {};
+  session.env = { ...session.env, ...env };
+  return sendJson(res, 200, session);
+}
+
+function deleteSession(
+  res: ServerResponse,
+  { store }: Pick<Deps, "store">,
+  id: string,
+  sessionId: string,
+): void {
+  if (!store.get(id)) return sendJson(res, 404, { error: "not found" });
+  const removed = store.removeSession(id, sessionId);
+  if (!removed) return sendJson(res, 404, { error: "session not found" });
   return sendJson(res, 200, { ok: true });
 }
 

@@ -134,6 +134,39 @@ async function main(): Promise<number> {
     }
     console.error("[smoke] preview proxy served the sandbox");
 
+    // Sandbox env vars apply to subsequent commands.
+    const setEnvRes = await fetch(`${endpoint}/sandboxes/${id}/env`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ env: { SMOKE_VAR: "from-env" } }),
+    });
+    if (!setEnvRes.ok) throw new Error(`setEnv failed: ${setEnvRes.status}`);
+    const envEcho = await execAndCapture(endpoint, id, "echo $SMOKE_VAR");
+    if (envEcho !== "from-env") {
+      throw new Error(`env var not applied: "${envEcho}"`);
+    }
+    console.error("[smoke] sandbox env var applied");
+
+    // Sessions: cwd follows `cd` and session env overlays the sandbox env.
+    const sessionRes = await fetch(`${endpoint}/sandboxes/${id}/sessions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ env: { SESS_VAR: "from-session" } }),
+    });
+    if (!sessionRes.ok) throw new Error(`createSession failed: ${sessionRes.status}`);
+    const { sessionId } = (await sessionRes.json()) as { sessionId: string };
+
+    await execAndCapture(endpoint, id, "cd /tmp", sessionId);
+    const sessPwd = await execAndCapture(endpoint, id, "pwd", sessionId);
+    if (sessPwd !== "/tmp") {
+      throw new Error(`session cwd did not persist: "${sessPwd}"`);
+    }
+    const sessEcho = await execAndCapture(endpoint, id, "echo $SESS_VAR", sessionId);
+    if (sessEcho !== "from-session") {
+      throw new Error(`session env var not applied: "${sessEcho}"`);
+    }
+    console.error("[smoke] session cwd + env persisted");
+
     // Destroy sandbox.
     const deleteRes = await fetch(`${endpoint}/sandboxes/${id}`, { method: "DELETE" });
     if (!deleteRes.ok) throw new Error(`destroy failed: ${deleteRes.status}`);
@@ -149,6 +182,26 @@ async function main(): Promise<number> {
     server.close();
     await setTimeout(100);
   }
+}
+
+/** Run a command (optionally in a session) and return trimmed stdout. */
+async function execAndCapture(
+  endpoint: string,
+  id: string,
+  command: string,
+  sessionId?: string,
+): Promise<string> {
+  const res = await fetch(`${endpoint}/sandboxes/${id}/exec`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ command, sessionId }),
+  });
+  if (!res.ok || !res.body) throw new Error(`exec failed: ${res.status}`);
+  let out = "";
+  for await (const event of parseSSE(res.body)) {
+    if (event.type === "stdout") out += event.data;
+  }
+  return out.trim();
 }
 
 type ExecEvent =

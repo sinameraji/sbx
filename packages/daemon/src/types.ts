@@ -8,6 +8,27 @@ export interface SandboxRecord {
   status: SandboxStatus;
   createdAt: string;
   labels: Record<string, string>;
+  /**
+   * Sandbox-level environment variables, merged into every `exec`/`startProcess`
+   * in this sandbox. Seeded from the create call's `env` and mutated by
+   * `setEnvVars`. Request- and session-level env take precedence over these.
+   */
+  env: Record<string, string>;
+}
+
+/**
+ * A persistent execution context inside a sandbox. Holds a working directory
+ * (which follows `cd` across commands) and its own environment overlay, so a
+ * sequence of `exec`s behaves like one shell session. Built on top of the
+ * driver's stateless `exec`/`readFile` — no driver support required.
+ */
+export interface SessionInfo {
+  sessionId: string;
+  /** Working directory for the next command; updated after each exec. */
+  cwd: string;
+  /** Session-level env, layered over the sandbox env. */
+  env: Record<string, string>;
+  createdAt: string;
 }
 
 export interface ExecOptions {

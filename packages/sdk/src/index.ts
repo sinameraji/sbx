@@ -31,14 +31,25 @@ export interface ExecResult {
   success: boolean;
 }
 
+export type SandboxStatus = "running" | "paused" | "stopped";
+
 export interface SandboxInfo {
   id: string;
   image: string;
-  status: "running" | "stopped";
+  /**
+   * Lifecycle state. `paused` is entered automatically after `sleepAfterMs` of
+   * inactivity (the next operation transparently resumes it); `stopped` is a
+   * manual stop that does not auto-resume.
+   */
+  status: SandboxStatus;
   createdAt: string;
   labels: Record<string, string>;
   /** Whether `/workspace` is backed by a volume that survives stop/start. */
   persist: boolean;
+  /** ISO timestamp of the last activity (drives idle auto-pause). */
+  lastActivityAt: string;
+  /** Idle timeout (ms) before auto-pause; 0 disables it. */
+  sleepAfterMs: number;
 }
 
 export interface FileInfo {
@@ -58,6 +69,13 @@ export interface CreateOptions {
    * container recreation. Defaults to true.
    */
   persist?: boolean;
+  /**
+   * Auto-pause the sandbox after this many milliseconds of inactivity (the idle
+   * reaper frees compute while the workspace volume persists; the next operation
+   * auto-resumes it). Omit or set 0 to disable. Defaults to the daemon's
+   * `SBX_SLEEP_AFTER_MS`.
+   */
+  sleepAfter?: number;
 }
 
 export interface WriteFileOptions {
@@ -227,8 +245,8 @@ export class Sandbox {
     return this.info.id;
   }
 
-  /** Current lifecycle status (`running` or `stopped`). */
-  get status(): "running" | "stopped" {
+  /** Current lifecycle status (`running`, `paused`, or `stopped`). */
+  get status(): SandboxStatus {
     return this.info.status;
   }
 

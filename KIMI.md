@@ -8,10 +8,10 @@
 
 **sbx** is a self-hostable sandbox infrastructure for AI coding agents. It lets you spin up many secure, persistent, observable sandboxes on your own hardware (Mac, Linux VM, bare metal) instead of using managed cloud sandboxes.
 
-- **Language / runtime:** TypeScript, Node.js ≥20, ES modules (`"type": "module"`)
+- **Language / runtime:** TypeScript, ES modules (`"type": "module"`). Node.js ≥20 for the SDK/CLI; the daemon needs **≥22** because the store uses the built-in `node:sqlite`.
 - **Package manager:** npm with workspaces
 - **License:** Apache-2.0
-- **Key frameworks / libraries:** `dockerode` (Docker Engine API), `tsx` (dev runner), native `node:http` + `fetch`
+- **Key frameworks / libraries:** `dockerode` (Docker Engine API), `tsx` (dev runner), native `node:http` + `fetch` + `node:sqlite` (embedded state store)
 
 Current status: **Phase 0 vertical slice**. The container driver works on Linux and macOS; microVM drivers (Firecracker / Apple VZ) are planned.
 
@@ -47,6 +47,9 @@ Environment variables (`packages/daemon/src/config.ts`):
 | `SBX_HOST` | `127.0.0.1` | Bind address |
 | `SBX_PORT` | `4750` | Bind port |
 | `SBX_IMAGE` | `python:3.11-slim-bookworm` | Default sandbox image |
+| `SBX_DB` | `~/.sbx/state.db` | Embedded SQLite path for durable control-plane state (`:memory:` for ephemeral) |
+| `SBX_SLEEP_AFTER_MS` | `0` | Default idle timeout before a sandbox auto-pauses (`0` = disabled; per-sandbox override via `sleepAfter`) |
+| `SBX_REAP_INTERVAL_MS` | `15000` | How often the idle reaper scans for sandboxes to auto-pause |
 | `SBX_ENDPOINT` | `http://127.0.0.1:4750` | SDK default endpoint |
 
 ---
@@ -69,7 +72,8 @@ Environment variables (`packages/daemon/src/config.ts`):
 | `src/index.ts` | Entry point: loads config, pings Docker, starts HTTP server. |
 | `src/api/server.ts` | Hand-rolled `node:http` REST server (Phase 0 endpoints). |
 | `src/driver/` | Runtime-driver interface (`types.ts`) and container implementation (`container.ts`). |
-| `src/store.ts` | In-memory sandbox registry (placeholder for SQLite in Phase 1). |
+| `src/store.ts` | Sandbox registry backed by embedded SQLite (`node:sqlite`); in-memory `Map`s are a write-through cache rehydrated from the DB on startup. |
+| `src/lifecycle.ts` | Lifecycle FSM transitions (`pauseSandbox`/`resumeSandbox`) + the idle reaper (`reapIdle`/`startReaper`). |
 | `src/config.ts` | Environment-driven configuration. |
 | `src/types.ts` | Shared daemon types. |
 
@@ -180,7 +184,8 @@ npm run build
 
 - **`Driver` interface** (`packages/daemon/src/driver/types.ts`): the runtime boundary. Future Firecracker / Apple VZ drivers implement this same surface so the API and SDK stay unchanged.
 - **`ContainerDriver`**: backs sandboxes with long-lived Docker containers. The container stays alive (`sleep infinity`) and the daemon `exec`s into it on demand.
-- **`SandboxStore`**: in-memory registry. It will be replaced with embedded SQLite + a lifecycle FSM in Phase 1.
+- **`SandboxStore`**: registry backed by embedded SQLite (`node:sqlite`), with in-memory `Map`s as a write-through cache rehydrated on startup, so records survive a daemon restart.
+- **Lifecycle FSM**: status is `running` | `paused` | `stopped`. The idle reaper (`src/lifecycle.ts`) auto-pauses `running` sandboxes idle past `sleepAfterMs` (skipping those with exposed ports / running processes); any container-work op auto-resumes a `paused` sandbox via the `ensureLive` choke point in `api/server.ts`. `store.touch` records activity (also on proxy traffic). Manual `stop` → `stopped` is never auto-resumed.
 - **`SbxClient` / `Sandbox`**: SDK classes that expose `getSandbox`, `exec`, `execStream`, `destroy`, matching the Cloudflare Sandbox shape.
 
 ### Data flow

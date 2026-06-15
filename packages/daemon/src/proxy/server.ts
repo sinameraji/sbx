@@ -75,8 +75,11 @@ async function bridgeAndSplice(
   socket: Socket,
   initial: Buffer,
   target: RouteTarget,
-  { driver }: Deps,
+  { driver, store }: Deps,
 ): Promise<void> {
+  // Proxied traffic counts as activity so the idle reaper won't pause a sandbox
+  // that's actively serving requests.
+  store.touch(target.sandboxId);
   let bridge;
   try {
     bridge = await driver.openTcpBridge(target.sandboxId, target.port, "127.0.0.1");

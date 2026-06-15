@@ -9,13 +9,19 @@ export async function runCommand(
 ): Promise<number> {
   const command = positional[0];
   if (!command) {
-    console.error('Usage: sb run "<command>" [--image <image>] [--keep] [--env KEY=VAL,...]');
+    console.error(
+      'Usage: sb run "<command>" [--image <image>] [--keep] [--env KEY=VAL,...] [--sleep-after <ms>]',
+    );
     return 1;
   }
 
   const client = new SbxClient({ endpoint: globals.endpoint });
   const image = typeof flags.image === "string" ? flags.image : undefined;
   const keep = flags.keep === true;
+  const sleepAfter =
+    typeof flags["sleep-after"] === "string"
+      ? Number(flags["sleep-after"])
+      : undefined;
   let env: Record<string, string> | undefined;
   if (typeof flags.env === "string") {
     try {
@@ -28,10 +34,11 @@ export async function runCommand(
 
   let sandbox;
   try {
-    sandbox = await client.getSandbox(
-      undefined,
-      image || env ? { image, env } : undefined,
-    );
+    const opts =
+      image || env || sleepAfter !== undefined
+        ? { image, env, sleepAfter }
+        : undefined;
+    sandbox = await client.getSandbox(undefined, opts);
   } catch (err) {
     console.error(`Failed to create sandbox: ${formatError(err)}`);
     return 1;

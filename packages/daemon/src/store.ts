@@ -1,4 +1,7 @@
 import { randomBytes } from "node:crypto";
+import { mkdirSync } from "node:fs";
+import { dirname } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import type {
   CodeContextInfo,
   ExposedPort,
@@ -15,11 +18,21 @@ export interface RouteTarget {
 }
 
 /**
- * In-memory sandbox registry for Phase 0/1. Alongside the sandbox records it
- * tracks background processes and exposed preview ports. This is swapped for
- * embedded SQLite (with the lifecycle FSM) later so state survives restarts.
+ * Durable sandbox registry backed by embedded SQLite (`node:sqlite`, built into
+ * Node ≥22 — no external dependency). Alongside the sandbox records it tracks
+ * background processes, exposed preview ports, sessions, and code-interpreter
+ * contexts so the full control-plane state survives a daemon restart (the
+ * lead-in to the lifecycle FSM).
+ *
+ * The in-memory `Map`s are a hot cache that is the working copy during the
+ * daemon's lifetime — they preserve mutate-by-reference semantics for callers
+ * that tweak a returned record in place. Every mutating method is write-through
+ * to SQLite; on construction the cache is hydrated from the database. Pass
+ * `:memory:` (the default) for an ephemeral, in-process store (tests, smoke).
  */
 export class SandboxStore {
+  private db: DatabaseSync;
+
   private byId = new Map<string, SandboxRecord>();
   // sandboxId -> procId -> process
   private procs = new Map<string, Map<string, ProcessInfo>>();
@@ -31,6 +44,111 @@ export class SandboxStore {
   private sessions = new Map<string, Map<string, SessionInfo>>();
   // sandboxId -> contextId -> code context
   private contexts = new Map<string, Map<string, CodeContextInfo>>();
+
+  constructor(dbPath = ":memory:") {
+    if (dbPath !== ":memory:") mkdirSync(dirname(dbPath), { recursive: true });
+    this.db = new DatabaseSync(dbPath);
+    if (dbPath !== ":memory:") this.db.exec("PRAGMA journal_mode = WAL;");
+    this.migrate();
+    this.hydrate();
+  }
+
+  /** Close the underlying database handle (call on daemon shutdown). */
+  close(): void {
+    this.db.close();
+  }
+
+  private migrate(): void {
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS sandboxes (
+        id             TEXT PRIMARY KEY,
+        image          TEXT NOT NULL,
+        status         TEXT NOT NULL,
+        createdAt      TEXT NOT NULL,
+        labels         TEXT NOT NULL,
+        env            TEXT NOT NULL,
+        persist        INTEGER NOT NULL,
+        lastActivityAt TEXT NOT NULL DEFAULT '',
+        sleepAfterMs   INTEGER NOT NULL DEFAULT 0
+      );
+      CREATE TABLE IF NOT EXISTS processes (
+        sandboxId TEXT NOT NULL,
+        procId    TEXT NOT NULL,
+        pid       INTEGER NOT NULL,
+        command   TEXT NOT NULL,
+        status    TEXT NOT NULL,
+        exitCode  INTEGER,
+        startedAt TEXT NOT NULL,
+        logPath   TEXT NOT NULL,
+        PRIMARY KEY (sandboxId, procId)
+      );
+      CREATE TABLE IF NOT EXISTS exposed_ports (
+        sandboxId TEXT NOT NULL,
+        port      INTEGER NOT NULL,
+        exposeId  TEXT NOT NULL,
+        token     TEXT,
+        createdAt TEXT NOT NULL,
+        url       TEXT NOT NULL,
+        PRIMARY KEY (sandboxId, port)
+      );
+      CREATE TABLE IF NOT EXISTS sessions (
+        sandboxId TEXT NOT NULL,
+        sessionId TEXT NOT NULL,
+        cwd       TEXT NOT NULL,
+        env       TEXT NOT NULL,
+        createdAt TEXT NOT NULL,
+        PRIMARY KEY (sandboxId, sessionId)
+      );
+      CREATE TABLE IF NOT EXISTS code_contexts (
+        sandboxId TEXT NOT NULL,
+        contextId TEXT NOT NULL,
+        language  TEXT NOT NULL,
+        dir       TEXT NOT NULL,
+        procId    TEXT NOT NULL,
+        pid       INTEGER NOT NULL,
+        seq       INTEGER NOT NULL,
+        createdAt TEXT NOT NULL,
+        PRIMARY KEY (sandboxId, contextId)
+      );
+    `);
+    // Backfill columns added after the first release on databases created by an
+    // older daemon (CREATE TABLE IF NOT EXISTS leaves existing tables untouched).
+    this.ensureColumn("sandboxes", "lastActivityAt", "TEXT NOT NULL DEFAULT ''");
+    this.ensureColumn("sandboxes", "sleepAfterMs", "INTEGER NOT NULL DEFAULT 0");
+  }
+
+  /** Add a column to a table if it isn't already present (idempotent migration). */
+  private ensureColumn(table: string, column: string, decl: string): void {
+    const cols = this.db.prepare(`PRAGMA table_info(${table})`).all() as any[];
+    if (!cols.some((c) => c.name === column)) {
+      this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${decl}`);
+    }
+  }
+
+  /** Load all persisted rows into the in-memory cache on startup. */
+  private hydrate(): void {
+    for (const row of this.db.prepare("SELECT * FROM sandboxes").all() as any[]) {
+      this.byId.set(row.id, rowToSandbox(row));
+    }
+    for (const row of this.db.prepare("SELECT * FROM processes").all() as any[]) {
+      mapIn(this.procs, row.sandboxId).set(row.procId, rowToProcess(row));
+    }
+    for (const row of this.db.prepare("SELECT * FROM exposed_ports").all() as any[]) {
+      const exposed = rowToExposed(row);
+      mapIn(this.exposed, row.sandboxId).set(exposed.port, exposed);
+      this.routes.set(exposed.exposeId, {
+        sandboxId: row.sandboxId,
+        port: exposed.port,
+        token: exposed.token,
+      });
+    }
+    for (const row of this.db.prepare("SELECT * FROM sessions").all() as any[]) {
+      mapIn(this.sessions, row.sandboxId).set(row.sessionId, rowToSession(row));
+    }
+    for (const row of this.db.prepare("SELECT * FROM code_contexts").all() as any[]) {
+      mapIn(this.contexts, row.sandboxId).set(row.contextId, rowToContext(row));
+    }
+  }
 
   static newId(): string {
     return randomBytes(6).toString("hex");
@@ -52,8 +170,48 @@ export class SandboxStore {
     return randomBytes(6).toString("hex");
   }
 
+  // --- sandboxes -----------------------------------------------------------
+
+  /** Insert or update a sandbox record (write-through; also use to persist
+   * in-place edits to a record returned by `get`). */
   add(record: SandboxRecord): void {
     this.byId.set(record.id, record);
+    this.db
+      .prepare(
+        `INSERT INTO sandboxes
+           (id, image, status, createdAt, labels, env, persist, lastActivityAt, sleepAfterMs)
+         VALUES
+           ($id, $image, $status, $createdAt, $labels, $env, $persist, $lastActivityAt, $sleepAfterMs)
+         ON CONFLICT(id) DO UPDATE SET
+           image=$image, status=$status, createdAt=$createdAt,
+           labels=$labels, env=$env, persist=$persist,
+           lastActivityAt=$lastActivityAt, sleepAfterMs=$sleepAfterMs`,
+      )
+      .run({
+        id: record.id,
+        image: record.image,
+        status: record.status,
+        createdAt: record.createdAt,
+        labels: JSON.stringify(record.labels),
+        env: JSON.stringify(record.env),
+        persist: record.persist ? 1 : 0,
+        lastActivityAt: record.lastActivityAt,
+        sleepAfterMs: record.sleepAfterMs,
+      });
+  }
+
+  /**
+   * Mark a sandbox as just-active (refresh `lastActivityAt`). Cheap single-column
+   * write-through used on every operation that runs work in the sandbox, so the
+   * idle reaper sees recent use. No-op for an unknown id.
+   */
+  touch(id: string): void {
+    const rec = this.byId.get(id);
+    if (!rec) return;
+    rec.lastActivityAt = new Date().toISOString();
+    this.db
+      .prepare("UPDATE sandboxes SET lastActivityAt = ? WHERE id = ?")
+      .run(rec.lastActivityAt, id);
   }
 
   get(id: string): SandboxRecord | undefined {
@@ -61,6 +219,7 @@ export class SandboxStore {
   }
 
   remove(id: string): boolean {
+    this.db.prepare("DELETE FROM sandboxes WHERE id = ?").run(id);
     return this.byId.delete(id);
   }
 
@@ -72,13 +231,27 @@ export class SandboxStore {
 
   // --- processes -----------------------------------------------------------
 
+  /** Insert or update a background-process record (write-through). */
   addProcess(sandboxId: string, proc: ProcessInfo): void {
-    let map = this.procs.get(sandboxId);
-    if (!map) {
-      map = new Map();
-      this.procs.set(sandboxId, map);
-    }
-    map.set(proc.procId, proc);
+    mapIn(this.procs, sandboxId).set(proc.procId, proc);
+    this.db
+      .prepare(
+        `INSERT INTO processes (sandboxId, procId, pid, command, status, exitCode, startedAt, logPath)
+         VALUES ($sandboxId, $procId, $pid, $command, $status, $exitCode, $startedAt, $logPath)
+         ON CONFLICT(sandboxId, procId) DO UPDATE SET
+           pid=$pid, command=$command, status=$status, exitCode=$exitCode,
+           startedAt=$startedAt, logPath=$logPath`,
+      )
+      .run({
+        sandboxId,
+        procId: proc.procId,
+        pid: proc.pid,
+        command: proc.command,
+        status: proc.status,
+        exitCode: proc.exitCode,
+        startedAt: proc.startedAt,
+        logPath: proc.logPath,
+      });
   }
 
   getProcess(sandboxId: string, procId: string): ProcessInfo | undefined {
@@ -94,17 +267,27 @@ export class SandboxStore {
   // --- exposed ports -------------------------------------------------------
 
   addExposed(sandboxId: string, exposed: ExposedPort): void {
-    let map = this.exposed.get(sandboxId);
-    if (!map) {
-      map = new Map();
-      this.exposed.set(sandboxId, map);
-    }
-    map.set(exposed.port, exposed);
+    mapIn(this.exposed, sandboxId).set(exposed.port, exposed);
     this.routes.set(exposed.exposeId, {
       sandboxId,
       port: exposed.port,
       token: exposed.token,
     });
+    this.db
+      .prepare(
+        `INSERT INTO exposed_ports (sandboxId, port, exposeId, token, createdAt, url)
+         VALUES ($sandboxId, $port, $exposeId, $token, $createdAt, $url)
+         ON CONFLICT(sandboxId, port) DO UPDATE SET
+           exposeId=$exposeId, token=$token, createdAt=$createdAt, url=$url`,
+      )
+      .run({
+        sandboxId,
+        port: exposed.port,
+        exposeId: exposed.exposeId,
+        token: exposed.token,
+        createdAt: exposed.createdAt,
+        url: exposed.url,
+      });
   }
 
   removeExposed(sandboxId: string, port: number): boolean {
@@ -113,6 +296,9 @@ export class SandboxStore {
     if (!map || !exposed) return false;
     map.delete(port);
     this.routes.delete(exposed.exposeId);
+    this.db
+      .prepare("DELETE FROM exposed_ports WHERE sandboxId = ? AND port = ?")
+      .run(sandboxId, port);
     return true;
   }
 
@@ -129,13 +315,24 @@ export class SandboxStore {
 
   // --- sessions ------------------------------------------------------------
 
+  /** Insert or update a session record (write-through; also use to persist
+   * in-place edits to cwd/env on a session returned by `getSession`). */
   addSession(sandboxId: string, session: SessionInfo): void {
-    let map = this.sessions.get(sandboxId);
-    if (!map) {
-      map = new Map();
-      this.sessions.set(sandboxId, map);
-    }
-    map.set(session.sessionId, session);
+    mapIn(this.sessions, sandboxId).set(session.sessionId, session);
+    this.db
+      .prepare(
+        `INSERT INTO sessions (sandboxId, sessionId, cwd, env, createdAt)
+         VALUES ($sandboxId, $sessionId, $cwd, $env, $createdAt)
+         ON CONFLICT(sandboxId, sessionId) DO UPDATE SET
+           cwd=$cwd, env=$env, createdAt=$createdAt`,
+      )
+      .run({
+        sandboxId,
+        sessionId: session.sessionId,
+        cwd: session.cwd,
+        env: JSON.stringify(session.env),
+        createdAt: session.createdAt,
+      });
   }
 
   getSession(sandboxId: string, sessionId: string): SessionInfo | undefined {
@@ -149,18 +346,36 @@ export class SandboxStore {
   }
 
   removeSession(sandboxId: string, sessionId: string): boolean {
+    this.db
+      .prepare("DELETE FROM sessions WHERE sandboxId = ? AND sessionId = ?")
+      .run(sandboxId, sessionId);
     return this.sessions.get(sandboxId)?.delete(sessionId) ?? false;
   }
 
   // --- code contexts -------------------------------------------------------
 
+  /** Insert or update a code-interpreter context record (write-through; also
+   * use to persist the bumped `seq` after running a cell). */
   addContext(sandboxId: string, ctx: CodeContextInfo): void {
-    let map = this.contexts.get(sandboxId);
-    if (!map) {
-      map = new Map();
-      this.contexts.set(sandboxId, map);
-    }
-    map.set(ctx.contextId, ctx);
+    mapIn(this.contexts, sandboxId).set(ctx.contextId, ctx);
+    this.db
+      .prepare(
+        `INSERT INTO code_contexts (sandboxId, contextId, language, dir, procId, pid, seq, createdAt)
+         VALUES ($sandboxId, $contextId, $language, $dir, $procId, $pid, $seq, $createdAt)
+         ON CONFLICT(sandboxId, contextId) DO UPDATE SET
+           language=$language, dir=$dir, procId=$procId, pid=$pid,
+           seq=$seq, createdAt=$createdAt`,
+      )
+      .run({
+        sandboxId,
+        contextId: ctx.contextId,
+        language: ctx.language,
+        dir: ctx.dir,
+        procId: ctx.procId,
+        pid: ctx.pid,
+        seq: ctx.seq,
+        createdAt: ctx.createdAt,
+      });
   }
 
   getContext(sandboxId: string, contextId: string): CodeContextInfo | undefined {
@@ -174,6 +389,9 @@ export class SandboxStore {
   }
 
   removeContext(sandboxId: string, contextId: string): boolean {
+    this.db
+      .prepare("DELETE FROM code_contexts WHERE sandboxId = ? AND contextId = ?")
+      .run(sandboxId, contextId);
     return this.contexts.get(sandboxId)?.delete(contextId) ?? false;
   }
 
@@ -181,6 +399,7 @@ export class SandboxStore {
   clearSandbox(sandboxId: string): void {
     this.clearRuntimeState(sandboxId);
     this.sessions.delete(sandboxId);
+    this.db.prepare("DELETE FROM sessions WHERE sandboxId = ?").run(sandboxId);
   }
 
   /**
@@ -197,5 +416,75 @@ export class SandboxStore {
       for (const exposed of ports.values()) this.routes.delete(exposed.exposeId);
       this.exposed.delete(sandboxId);
     }
+    this.db.prepare("DELETE FROM processes WHERE sandboxId = ?").run(sandboxId);
+    this.db.prepare("DELETE FROM code_contexts WHERE sandboxId = ?").run(sandboxId);
+    this.db.prepare("DELETE FROM exposed_ports WHERE sandboxId = ?").run(sandboxId);
   }
+}
+
+/** Get-or-create the inner per-sandbox map for a two-level cache. */
+function mapIn<V>(outer: Map<string, Map<any, V>>, key: string): Map<any, V> {
+  let inner = outer.get(key);
+  if (!inner) {
+    inner = new Map();
+    outer.set(key, inner);
+  }
+  return inner;
+}
+
+function rowToSandbox(row: any): SandboxRecord {
+  return {
+    id: row.id,
+    image: row.image,
+    status: row.status,
+    createdAt: row.createdAt,
+    labels: JSON.parse(row.labels),
+    env: JSON.parse(row.env),
+    persist: row.persist === 1,
+    lastActivityAt: row.lastActivityAt || row.createdAt,
+    sleepAfterMs: row.sleepAfterMs ?? 0,
+  };
+}
+
+function rowToProcess(row: any): ProcessInfo {
+  return {
+    procId: row.procId,
+    pid: row.pid,
+    command: row.command,
+    status: row.status,
+    exitCode: row.exitCode,
+    startedAt: row.startedAt,
+    logPath: row.logPath,
+  };
+}
+
+function rowToExposed(row: any): ExposedPort {
+  return {
+    port: row.port,
+    exposeId: row.exposeId,
+    token: row.token,
+    createdAt: row.createdAt,
+    url: row.url,
+  };
+}
+
+function rowToSession(row: any): SessionInfo {
+  return {
+    sessionId: row.sessionId,
+    cwd: row.cwd,
+    env: JSON.parse(row.env),
+    createdAt: row.createdAt,
+  };
+}
+
+function rowToContext(row: any): CodeContextInfo {
+  return {
+    contextId: row.contextId,
+    language: row.language,
+    dir: row.dir,
+    procId: row.procId,
+    pid: row.pid,
+    seq: row.seq,
+    createdAt: row.createdAt,
+  };
 }

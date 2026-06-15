@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { BackupRegistry } from "./backups.js";
 import { loadConfig } from "./config.js";
 import { ContainerDriver } from "./driver/container.js";
 import { SandboxStore } from "./store.js";
@@ -9,6 +10,7 @@ async function main(): Promise<void> {
   const config = loadConfig();
   const driver = new ContainerDriver();
   const store = new SandboxStore();
+  const backups = new BackupRegistry(config.backupDir);
 
   // Fail fast with a friendly message if the runtime backend is unreachable.
   try {
@@ -21,7 +23,7 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  const server = createApiServer({ config, driver, store });
+  const server = createApiServer({ config, driver, store, backups });
   server.listen(config.port, config.host, () => {
     console.log(
       `[sbd] sbx daemon listening on http://${config.host}:${config.port} ` +

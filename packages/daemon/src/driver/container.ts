@@ -1,5 +1,9 @@
 import Docker from "dockerode";
+import { createReadStream, createWriteStream } from "node:fs";
+import { mkdir } from "node:fs/promises";
+import { dirname } from "node:path";
 import { Duplex, PassThrough } from "node:stream";
+import { pipeline } from "node:stream/promises";
 import type {
   ExecEvent,
   ExecOptions,
@@ -452,6 +456,33 @@ export class ContainerDriver implements Driver {
         outbound.destroy();
       },
     };
+  }
+
+  async createBackup(id: string, tarPath: string): Promise<{ bytes: number }> {
+    const container = this.docker.getContainer(this.containerName(id));
+    // getArchive streams a tar of the path's contents (entries rooted at
+    // `workspace/...`) straight from the container fs over the Docker socket.
+    const stream = (await container.getArchive({
+      path: "/workspace",
+    })) as NodeJS.ReadableStream;
+    await mkdir(dirname(tarPath), { recursive: true });
+    let bytes = 0;
+    stream.on("data", (chunk: Buffer) => {
+      bytes += chunk.length;
+    });
+    await pipeline(stream, createWriteStream(tarPath));
+    return { bytes };
+  }
+
+  async restoreBackup(id: string, tarPath: string): Promise<void> {
+    // Clear the existing workspace so the restore is a replacement, not a merge.
+    await this.execCapture(
+      id,
+      "find /workspace -mindepth 1 -maxdepth 1 -exec rm -rf {} +",
+    );
+    const container = this.docker.getContainer(this.containerName(id));
+    // The tar entries are rooted at `workspace/`, so extract at `/`.
+    await container.putArchive(createReadStream(tarPath), { path: "/" });
   }
 
   async destroy(id: string): Promise<void> {

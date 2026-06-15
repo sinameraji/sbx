@@ -41,6 +41,10 @@ export class SandboxStore {
     return randomBytes(4).toString("hex");
   }
 
+  static newBackupId(): string {
+    return randomBytes(6).toString("hex");
+  }
+
   add(record: SandboxRecord): void {
     this.byId.set(record.id, record);
   }

@@ -1,3 +1,6 @@
+import { homedir } from "node:os";
+import { join } from "node:path";
+
 // Daemon configuration, all overridable via environment variables.
 export interface Config {
   host: string;
@@ -13,6 +16,8 @@ export interface Config {
   proxyHost: string;
   /** Port for the preview-URL reverse proxy (separate from the REST API). */
   proxyPort: number;
+  /** Host directory where sandbox backup tarballs + metadata are stored. */
+  backupDir: string;
 }
 
 export function loadConfig(): Config {
@@ -22,6 +27,7 @@ export function loadConfig(): Config {
     defaultImage: process.env.SBX_IMAGE ?? "python:3.11-slim-bookworm",
     proxyHost: process.env.SBX_PROXY_HOST ?? "127.0.0.1",
     proxyPort: Number(process.env.SBX_PROXY_PORT ?? 4751),
+    backupDir: process.env.SBX_BACKUP_DIR ?? join(homedir(), ".sbx", "backups"),
   };
 }
 

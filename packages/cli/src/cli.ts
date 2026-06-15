@@ -4,6 +4,7 @@ import { removeCommand } from "./remove.js";
 import { filesCommand } from "./files.js";
 import { startCommand, psCommand, killCommand } from "./proc.js";
 import { stopCommand, startSandboxCommand } from "./lifecycle.js";
+import { backupCommand, restoreCommand, backupsCommand } from "./backup.js";
 import { logsCommand } from "./logs.js";
 import { waitPortCommand, exposeCommand } from "./ports.js";
 import { execCommand } from "./exec.js";
@@ -51,6 +52,12 @@ export async function cli(args: string[]): Promise<number> {
         : startSandboxCommand(positional, globals);
     case "stop":
       return stopCommand(positional, globals);
+    case "backup":
+      return backupCommand(positional, globals);
+    case "restore":
+      return restoreCommand(positional, globals);
+    case "backups":
+      return backupsCommand(positional, globals);
     case "ps":
       return psCommand(positional, globals);
     case "kill":
@@ -96,6 +103,15 @@ Commands:
 
   sb start <id>
     Resume a stopped sandbox (workspace intact).
+
+  sb backup <id>
+    Snapshot a sandbox's /workspace to a durable backup.
+
+  sb restore <id> <backupId>
+    Replace a sandbox's /workspace with a backup (taken from any sandbox).
+
+  sb backups [<id>]
+    List all backups, or just those from one sandbox.
 
   sb rm <id> [--endpoint <url>]
     Destroy a sandbox, including its persistent workspace volume.

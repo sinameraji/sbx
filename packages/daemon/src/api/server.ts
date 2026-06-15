@@ -1,4 +1,5 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { type BackupInfo, BackupRegistry } from "../backups.js";
 import { previewUrl, type Config } from "../config.js";
 import type { Driver } from "../driver/types.js";
 import { SandboxStore } from "../store.js";
@@ -14,6 +15,7 @@ interface Deps {
   config: Config;
   driver: Driver;
   store: SandboxStore;
+  backups: BackupRegistry;
 }
 
 /**
@@ -25,6 +27,11 @@ interface Deps {
  *   DELETE /sandboxes/:id                  -> destroy (removes volume too)
  *   POST   /sandboxes/:id/stop             -> stop (remove container, keep volume)
  *   POST   /sandboxes/:id/start            -> start (recreate container, reattach volume)
+ *   POST   /sandboxes/:id/backups          -> back up /workspace, returns BackupInfo
+ *   GET    /sandboxes/:id/backups          -> list this sandbox's backups
+ *   POST   /sandboxes/:id/restore          -> restore /workspace from {backupId}
+ *   GET    /backups                        -> list all backups
+ *   DELETE /backups/:backupId              -> delete a backup
  *   POST   /sandboxes/:id/exec             -> run command, stream output as SSE
  *   POST   /sandboxes/:id/files/write      -> write file
  *   POST   /sandboxes/:id/files/read       -> read file
@@ -45,9 +52,9 @@ interface Deps {
  *   DELETE /sandboxes/:id/sessions/:sid          -> delete a session
  *   POST   /sandboxes/:id/sessions/:sid/env      -> merge session env vars
  */
-export function createApiServer({ config, driver, store }: Deps) {
+export function createApiServer(deps: Deps) {
   return createServer((req, res) => {
-    handle(req, res, { config, driver, store }).catch((err) => {
+    handle(req, res, deps).catch((err) => {
       sendJson(res, 500, { error: String(err?.message ?? err) });
     });
   });
@@ -56,8 +63,9 @@ export function createApiServer({ config, driver, store }: Deps) {
 async function handle(
   req: IncomingMessage,
   res: ServerResponse,
-  { config, driver, store }: Deps,
+  deps: Deps,
 ): Promise<void> {
+  const { config, driver, store, backups } = deps;
   const url = new URL(req.url ?? "/", `http://${req.headers.host}`);
   const path = url.pathname;
   const method = req.method ?? "GET";
@@ -209,6 +217,39 @@ async function handle(
     }
   }
 
+  if (method === "GET" && path === "/backups") {
+    return sendJson(res, 200, { backups: await backups.list() });
+  }
+
+  const backupIdMatch = path.match(/^\/backups\/([^/]+)$/);
+  if (method === "DELETE" && backupIdMatch) {
+    const removed = await backups.remove(backupIdMatch[1]);
+    if (!removed) return sendJson(res, 404, { error: "backup not found" });
+    return sendJson(res, 200, { backupId: backupIdMatch[1], deleted: true });
+  }
+
+  const backupsMatch = path.match(/^\/sandboxes\/([^/]+)\/backups$/);
+  if (backupsMatch) {
+    if (method === "POST") {
+      return createBackup(res, deps, backupsMatch[1]);
+    }
+    if (method === "GET") {
+      if (!store.get(backupsMatch[1])) {
+        return sendJson(res, 404, { error: "not found" });
+      }
+      const all = await backups.list();
+      return sendJson(res, 200, {
+        backups: all.filter((b) => b.sandboxId === backupsMatch[1]),
+      });
+    }
+  }
+
+  const restoreMatch = path.match(/^\/sandboxes\/([^/]+)\/restore$/);
+  if (method === "POST" && restoreMatch) {
+    const body = await readJson(req);
+    return restoreBackup(res, deps, restoreMatch[1], body);
+  }
+
   const stopMatch = path.match(/^\/sandboxes\/([^/]+)\/stop$/);
   if (method === "POST" && stopMatch) {
     return stopSandbox(res, { driver, store }, stopMatch[1]);
@@ -242,7 +283,7 @@ async function handle(
 
 async function createSandbox(
   res: ServerResponse,
-  { config, driver, store }: Deps,
+  { config, driver, store }: Pick<Deps, "config" | "driver" | "store">,
   body: Record<string, unknown>,
 ): Promise<void> {
   const id = SandboxStore.newId();
@@ -298,6 +339,54 @@ async function startSandbox(
   });
   record.status = "running";
   sendJson(res, 200, record);
+}
+
+async function createBackup(
+  res: ServerResponse,
+  { driver, store, backups }: Deps,
+  id: string,
+): Promise<void> {
+  const record = store.get(id);
+  if (!record) return sendJson(res, 404, { error: "not found" });
+  if (record.status !== "running") {
+    return sendJson(res, 409, {
+      error: "sandbox is stopped; start it before creating a backup",
+    });
+  }
+  const backupId = SandboxStore.newBackupId();
+  await backups.ensureDir();
+  const { bytes } = await driver.createBackup(id, backups.tarPath(backupId));
+  const info: BackupInfo = {
+    backupId,
+    sandboxId: id,
+    createdAt: new Date().toISOString(),
+    bytes,
+  };
+  await backups.save(info);
+  sendJson(res, 201, info);
+}
+
+async function restoreBackup(
+  res: ServerResponse,
+  { driver, store, backups }: Deps,
+  id: string,
+  body: Record<string, unknown>,
+): Promise<void> {
+  const record = store.get(id);
+  if (!record) return sendJson(res, 404, { error: "not found" });
+  const backupId = body.backupId;
+  if (typeof backupId !== "string") {
+    return sendJson(res, 400, { error: "backupId is required" });
+  }
+  const info = await backups.get(backupId);
+  if (!info) return sendJson(res, 404, { error: "backup not found" });
+  if (record.status !== "running") {
+    return sendJson(res, 409, {
+      error: "sandbox is stopped; start it before restoring a backup",
+    });
+  }
+  await driver.restoreBackup(id, backups.tarPath(backupId));
+  sendJson(res, 200, { id, restored: backupId });
 }
 
 async function execInSandbox(

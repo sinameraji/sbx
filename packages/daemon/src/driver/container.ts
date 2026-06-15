@@ -7,12 +7,14 @@ import { pipeline } from "node:stream/promises";
 import type {
   ExecEvent,
   ExecOptions,
+  FileChangeEvent,
   FileInfo,
   ListFilesOptions,
   MkdirOptions,
   ReadFileOptions,
   StartProcessOptions,
   WaitForPortOptions,
+  WatchOptions,
   WriteFileOptions,
 } from "../types.js";
 import type {
@@ -307,6 +309,64 @@ export class ContainerDriver implements Driver {
     });
   }
 
+  async watchFiles(
+    id: string,
+    path: string,
+    opts: WatchOptions & { signal: AbortSignal },
+    onEvent: (e: FileChangeEvent) => void,
+  ): Promise<void> {
+    const intervalSec = ((opts.intervalMs ?? 1000) / 1000).toFixed(3);
+    const container = this.docker.getContainer(this.containerName(id));
+    // A portable poll-based watcher in python3 (guaranteed in the base image);
+    // avoids depending on inotify-tools. Emits `<type>\t<path>` lines.
+    const cmd = `python3 -u -c ${shellEscape(WATCHER_PY)} ${shellEscape(path)} ${intervalSec}`;
+    const exec = await container.exec({
+      Cmd: ["/bin/sh", "-c", cmd],
+      AttachStdout: true,
+      AttachStderr: true,
+      Tty: false,
+    });
+
+    const stream = await exec.start({ hijack: true, stdin: false });
+    const stdout = new PassThrough();
+    const stderr = new PassThrough();
+    stderr.resume();
+    let buffer = "";
+    stdout.on("data", (chunk: Buffer) => {
+      buffer += chunk.toString("utf8");
+      let idx: number;
+      while ((idx = buffer.indexOf("\n")) !== -1) {
+        const line = buffer.slice(0, idx);
+        buffer = buffer.slice(idx + 1);
+        const tab = line.indexOf("\t");
+        if (tab === -1) continue;
+        const type = line.slice(0, tab);
+        if (type === "created" || type === "modified" || type === "deleted") {
+          onEvent({ type, path: line.slice(tab + 1) });
+        }
+      }
+    });
+    this.docker.modem.demuxStream(stream, stdout, stderr);
+
+    const onAbort = () => {
+      (stream as unknown as { destroy?: () => void }).destroy?.();
+    };
+    if (opts.signal.aborted) onAbort();
+    else opts.signal.addEventListener("abort", onAbort, { once: true });
+
+    try {
+      await new Promise<void>((resolve) => {
+        stream.on("end", resolve);
+        stream.on("close", resolve);
+        stream.on("error", () => resolve());
+      });
+    } finally {
+      opts.signal.removeEventListener("abort", onAbort);
+      stdout.end();
+      stderr.end();
+    }
+  }
+
   async startProcess(
     id: string,
     procId: string,
@@ -520,3 +580,32 @@ function shellEscape(value: string): string {
   // Use single quotes and escape any embedded single quotes.
   return `'${value.replace(/'/g, "'\"'\"'")}'`;
 }
+
+/**
+ * Poll-based recursive file watcher (python3, no inotify dependency). Snapshots
+ * mtimes under argv[1] every argv[2] seconds and prints `<type>\t<path>` lines
+ * for created/modified/deleted files. Contains no single quotes so it survives
+ * single-quote shell escaping.
+ */
+const WATCHER_PY = [
+  "import os,sys,time",
+  "path=sys.argv[1]; interval=float(sys.argv[2])",
+  "def snap():",
+  "    s={}",
+  "    for root,_,files in os.walk(path):",
+  "        for n in files:",
+  "            p=os.path.join(root,n)",
+  "            try: s[p]=os.path.getmtime(p)",
+  "            except OSError: pass",
+  "    return s",
+  "prev=snap()",
+  "while True:",
+  "    time.sleep(interval)",
+  "    cur=snap()",
+  '    for p in cur:',
+  '        if p not in prev: print("created\\t"+p,flush=True)',
+  '        elif cur[p]!=prev[p]: print("modified\\t"+p,flush=True)',
+  '    for p in prev:',
+  '        if p not in cur: print("deleted\\t"+p,flush=True)',
+  "    prev=cur",
+].join("\n");

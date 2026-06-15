@@ -114,6 +114,12 @@ export interface CreateSessionOptions {
   env?: Record<string, string>;
 }
 
+/** A filesystem change observed by `watch`. */
+export interface FileChangeEvent {
+  type: "created" | "modified" | "deleted";
+  path: string;
+}
+
 export type CodeLanguage = "python" | "javascript";
 
 /** Public view of a code-interpreter context. */
@@ -407,6 +413,28 @@ export class Sandbox {
       { path },
     );
     return entries;
+  }
+
+  /**
+   * Watch a path (recursively) for file changes, yielding events until the
+   * returned generator is closed (e.g. `break` out of the loop).
+   */
+  async *watch(
+    path = "/workspace",
+    options: { intervalMs?: number } = {},
+  ): AsyncGenerator<FileChangeEvent> {
+    const params = new URLSearchParams({ path });
+    if (options.intervalMs) params.set("interval", String(options.intervalMs));
+    const res = await fetch(
+      `${this.client.endpoint}/sandboxes/${this.info.id}/watch?${params}`,
+    );
+    if (!res.ok || !res.body) {
+      const text = await res.text().catch(() => "");
+      throw new Error(`sbx watch -> ${res.status}: ${text}`);
+    }
+    for await (const event of parseSSE<FileChangeEvent>(res.body)) {
+      yield event;
+    }
   }
 
   /** Launch a long-running background process; returns immediately. */

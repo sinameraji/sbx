@@ -1,12 +1,14 @@
 import type {
   ExecEvent,
   ExecOptions,
+  FileChangeEvent,
   FileInfo,
   ListFilesOptions,
   MkdirOptions,
   ReadFileOptions,
   StartProcessOptions,
   WaitForPortOptions,
+  WatchOptions,
   WriteFileOptions,
 } from "../types.js";
 
@@ -96,6 +98,17 @@ export interface Driver {
 
   /** List files and directories at the given path. */
   listFiles(id: string, opts: ListFilesOptions): Promise<FileInfo[]>;
+
+  /**
+   * Watch a path (recursively) for file changes, invoking `onEvent` per change
+   * until `opts.signal` aborts. Resolves when watching stops.
+   */
+  watchFiles(
+    id: string,
+    path: string,
+    opts: WatchOptions & { signal: AbortSignal },
+    onEvent: (e: FileChangeEvent) => void,
+  ): Promise<void>;
 
   /**
    * Launch a detached background process. `procId` is daemon-supplied so the

@@ -134,6 +134,18 @@ export interface CodeResult {
   error: string | null;
 }
 
+/** A filesystem change observed by `watch`. */
+export interface FileChangeEvent {
+  type: "created" | "modified" | "deleted";
+  path: string;
+}
+
+/** Options for watching a path for changes. */
+export interface WatchOptions {
+  /** Poll interval in milliseconds (default 1000). */
+  intervalMs?: number;
+}
+
 /** Options for waiting until a TCP port is listening inside a sandbox. */
 export interface WaitForPortOptions {
   timeoutMs?: number;

@@ -44,6 +44,7 @@ interface Deps {
  *   POST   /sandboxes/:id/files/read       -> read file
  *   POST   /sandboxes/:id/files/mkdir      -> create directory
  *   POST   /sandboxes/:id/files/list       -> list directory
+ *   GET    /sandboxes/:id/watch            -> stream file-change events (SSE)
  *   POST   /sandboxes/:id/processes              -> start background process
  *   GET    /sandboxes/:id/processes              -> list processes
  *   DELETE /sandboxes/:id/processes/:procId      -> signal/kill process
@@ -111,6 +112,13 @@ async function handle(
       fileActionMatch[2] as "write" | "read" | "mkdir" | "list",
       body,
     );
+  }
+
+  const watchMatch = path.match(/^\/sandboxes\/([^/]+)\/watch$/);
+  if (method === "GET" && watchMatch) {
+    const watchPath = url.searchParams.get("path") ?? "/workspace";
+    const intervalMs = Number(url.searchParams.get("interval") ?? "") || undefined;
+    return watchFiles(req, res, { driver, store }, watchMatch[1], watchPath, intervalMs);
   }
 
   const procLogsMatch = path.match(
@@ -670,6 +678,44 @@ async function execInSandbox(
   } catch (err) {
     write({ type: "stderr", data: String(err) });
     write({ type: "exit", exitCode: 1 });
+  } finally {
+    res.end();
+  }
+}
+
+async function watchFiles(
+  req: IncomingMessage,
+  res: ServerResponse,
+  { driver, store }: Pick<Deps, "driver" | "store">,
+  id: string,
+  watchPath: string,
+  intervalMs: number | undefined,
+): Promise<void> {
+  const record = store.get(id);
+  if (!record) return sendJson(res, 404, { error: "not found" });
+
+  res.writeHead(200, {
+    "Content-Type": "text/event-stream",
+    "Cache-Control": "no-cache",
+    Connection: "keep-alive",
+  });
+  // Flush headers immediately with an SSE comment so clients (e.g. fetch) get
+  // the response before the first change event — which may be far in the future.
+  res.write(": watching\n\n");
+
+  // Stop the watcher when the client disconnects.
+  const controller = new AbortController();
+  req.on("close", () => controller.abort());
+
+  try {
+    await driver.watchFiles(
+      id,
+      watchPath,
+      { intervalMs, signal: controller.signal },
+      (event) => res.write(`data: ${JSON.stringify(event)}\n\n`),
+    );
+  } catch (err) {
+    res.write(`data: ${JSON.stringify({ type: "error", error: String(err) })}\n\n`);
   } finally {
     res.end();
   }

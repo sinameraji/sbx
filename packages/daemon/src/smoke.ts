@@ -174,6 +174,46 @@ async function main(): Promise<number> {
     }
     console.error("[smoke] session cwd + env persisted");
 
+    // Code interpreter: a stateful Python context (variables persist) plus a
+    // one-off run.
+    const ctxRes = await fetch(`${endpoint}/sandboxes/${id}/code-contexts`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ language: "python" }),
+    });
+    if (!ctxRes.ok) throw new Error(`createCodeContext failed: ${ctxRes.status}`);
+    const { contextId } = (await ctxRes.json()) as { contextId: string };
+    console.error(`[smoke] created code context ${contextId}`);
+
+    await runCode(endpoint, id, "x = 41", contextId);
+    const exprResult = await runCode(endpoint, id, "x + 1", contextId);
+    if (exprResult.results[0]?.text !== "42") {
+      throw new Error(`stateful runCode wrong result: ${JSON.stringify(exprResult.results)}`);
+    }
+    const printResult = await runCode(endpoint, id, "print('hi from kernel')", contextId);
+    if (printResult.stdout.trim() !== "hi from kernel") {
+      throw new Error(`runCode stdout wrong: "${printResult.stdout}"`);
+    }
+    const errResult = await runCode(endpoint, id, "1/0", contextId);
+    if (!errResult.error || !errResult.error.includes("ZeroDivisionError")) {
+      throw new Error(`runCode did not capture error: ${JSON.stringify(errResult)}`);
+    }
+    console.error("[smoke] stateful python context works (vars persist, stdout, errors)");
+
+    // One-off run with no explicit context.
+    const oneOff = await runCode(endpoint, id, "print(6 * 7)");
+    if (oneOff.stdout.trim() !== "42") {
+      throw new Error(`one-off runCode wrong: "${oneOff.stdout}"`);
+    }
+    console.error("[smoke] one-off runCode works");
+
+    const delCtxRes = await fetch(
+      `${endpoint}/sandboxes/${id}/code-contexts/${contextId}`,
+      { method: "DELETE" },
+    );
+    if (!delCtxRes.ok) throw new Error(`delete context failed: ${delCtxRes.status}`);
+    console.error("[smoke] destroyed code context");
+
     // Persistence: a file in /workspace survives a stop/start (container is
     // recreated, the named volume is reattached).
     await fetch(`${endpoint}/sandboxes/${id}/files/write`, {
@@ -285,6 +325,29 @@ async function execAndCapture(
     if (event.type === "stdout") out += event.data;
   }
   return out.trim();
+}
+
+interface CodeResult {
+  stdout: string;
+  stderr: string;
+  results: { type: string; text: string }[];
+  error: string | null;
+}
+
+/** Run a code cell via the run-code endpoint, optionally in a context. */
+async function runCode(
+  endpoint: string,
+  id: string,
+  code: string,
+  contextId?: string,
+): Promise<CodeResult> {
+  const res = await fetch(`${endpoint}/sandboxes/${id}/run-code`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ code, contextId }),
+  });
+  if (!res.ok) throw new Error(`run-code failed: ${res.status}`);
+  return (await res.json()) as CodeResult;
 }
 
 type ExecEvent =

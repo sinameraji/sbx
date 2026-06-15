@@ -103,7 +103,7 @@ One self-contained control-plane daemon per host, a tiny in-sandbox agent, and t
 - [x] REST: `POST /sandboxes`, `POST /sandboxes/{id}/exec` (SSE stream), `DELETE /sandboxes/{id}`.
 - [x] TS SDK: `getSandbox()`, `exec()`, `execStream()`.
 - [x] `sb run` CLI. Also added `sb ls` and `sb rm` for basic ops.
-- [x] Acceptance: `npm run smoke` exercises create → exec → write/read/list/mkdir → destroy locally. Multi-OS/harness validation is still pending.
+- [x] Acceptance: `npm run smoke` now exercises the full Phase 0/1 surface end-to-end against live Docker — create → exec → files (write/read/mkdir/list) → background process + wait-port + preview-proxy fetch → env + session cwd/env → code interpreter (stateful Python, stdout/error, one-off) → watch → stop/start persistence → backup/restore rollback → destroy. Multi-OS/harness validation is still pending.
 
 ### Phase 1 — Core sandbox API
 

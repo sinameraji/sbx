@@ -5,7 +5,11 @@
  * destroys the sandbox, and exits with the command's status.
  */
 
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { setTimeout } from "node:timers/promises";
+import { BackupRegistry } from "./backups.js";
 import { loadConfig } from "./config.js";
 import { ContainerDriver } from "./driver/container.js";
 import { createApiServer } from "./api/server.js";
@@ -14,10 +18,13 @@ import { SandboxStore } from "./store.js";
 
 async function main(): Promise<number> {
   const config = loadConfig();
+  // Use a throwaway backup dir so the smoke run leaves nothing behind.
+  config.backupDir = await mkdtemp(join(tmpdir(), "sbx-smoke-backups-"));
   const driver = new ContainerDriver();
   const store = new SandboxStore();
+  const backups = new BackupRegistry(config.backupDir);
 
-  const server = createApiServer({ config, driver, store });
+  const server = createApiServer({ config, driver, store, backups });
   await new Promise<void>((resolve) => server.listen(config.port, config.host, resolve));
   const endpoint = `http://${config.host}:${config.port}`;
   const proxy = createProxyServer({ config, driver, store });
@@ -196,6 +203,52 @@ async function main(): Promise<number> {
     }
     console.error("[smoke] workspace persisted across stop/start");
 
+    // Backup + restore: snapshot /workspace, mutate it, restore, confirm rollback.
+    await fetch(`${endpoint}/sandboxes/${id}/files/write`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ path: "/workspace/backup.txt", content: "v1" }),
+    });
+    const backupRes = await fetch(`${endpoint}/sandboxes/${id}/backups`, { method: "POST" });
+    if (!backupRes.ok) throw new Error(`backup failed: ${backupRes.status}`);
+    const { backupId } = (await backupRes.json()) as { backupId: string };
+    console.error(`[smoke] created backup ${backupId}`);
+
+    // Mutate after the backup: change a file and add a new one.
+    await fetch(`${endpoint}/sandboxes/${id}/files/write`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ path: "/workspace/backup.txt", content: "v2" }),
+    });
+    await fetch(`${endpoint}/sandboxes/${id}/files/write`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ path: "/workspace/after-backup.txt", content: "transient" }),
+    });
+
+    const restoreRes = await fetch(`${endpoint}/sandboxes/${id}/restore`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ backupId }),
+    });
+    if (!restoreRes.ok) throw new Error(`restore failed: ${restoreRes.status}`);
+    console.error("[smoke] restored backup");
+
+    const rolledBack = await execAndCapture(endpoint, id, "cat /workspace/backup.txt");
+    if (rolledBack !== "v1") {
+      throw new Error(`restore did not roll back the file: "${rolledBack}"`);
+    }
+    // The file added after the backup must be gone (restore is a replacement).
+    const gone = await execAndCapture(
+      endpoint,
+      id,
+      "test -e /workspace/after-backup.txt && echo present || echo gone",
+    );
+    if (gone !== "gone") {
+      throw new Error(`restore did not clear post-backup files: "${gone}"`);
+    }
+    console.error("[smoke] backup/restore rolled the workspace back");
+
     // Destroy sandbox.
     const deleteRes = await fetch(`${endpoint}/sandboxes/${id}`, { method: "DELETE" });
     if (!deleteRes.ok) throw new Error(`destroy failed: ${deleteRes.status}`);
@@ -209,6 +262,7 @@ async function main(): Promise<number> {
   } finally {
     proxy.close();
     server.close();
+    await rm(config.backupDir, { recursive: true, force: true });
     await setTimeout(100);
   }
 }

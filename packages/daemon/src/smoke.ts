@@ -13,15 +13,18 @@ import { BackupRegistry } from "./backups.js";
 import { loadConfig } from "./config.js";
 import { ContainerDriver } from "./driver/container.js";
 import { createApiServer } from "./api/server.js";
+import { reapIdle } from "./lifecycle.js";
 import { createProxyServer } from "./proxy/server.js";
 import { SandboxStore } from "./store.js";
 
 async function main(): Promise<number> {
   const config = loadConfig();
-  // Use a throwaway backup dir so the smoke run leaves nothing behind.
+  // Use a throwaway backup dir + SQLite file so the smoke run leaves nothing behind.
   config.backupDir = await mkdtemp(join(tmpdir(), "sbx-smoke-backups-"));
+  const dbDir = await mkdtemp(join(tmpdir(), "sbx-smoke-db-"));
+  config.dbPath = join(dbDir, "state.db");
   const driver = new ContainerDriver();
-  const store = new SandboxStore();
+  const store = new SandboxStore(config.dbPath);
   const backups = new BackupRegistry(config.backupDir);
 
   const server = createApiServer({ config, driver, store, backups });
@@ -321,6 +324,63 @@ async function main(): Promise<number> {
     }
     console.error("[smoke] backup/restore rolled the workspace back");
 
+    // Durable state: a fresh store opened on the same SQLite file (as a daemon
+    // restart would) must rehydrate the sandbox record and its sessions.
+    const reopened = new SandboxStore(config.dbPath);
+    try {
+      const restored = reopened.get(id);
+      if (!restored) throw new Error("sandbox record did not survive restart");
+      if (restored.status !== "running") {
+        throw new Error(`restored status was "${restored.status}", expected "running"`);
+      }
+      if (reopened.listSessions(id).length === 0) {
+        throw new Error("sessions did not survive restart");
+      }
+    } finally {
+      reopened.close();
+    }
+    console.error("[smoke] control-plane state survived a simulated restart");
+
+    // Lifecycle FSM: an idle sandbox auto-pauses, and the next operation
+    // transparently auto-resumes it (workspace intact). Use a dedicated sandbox
+    // with no exposed ports/processes so the reaper is allowed to pause it.
+    const fsmCreate = await fetch(`${endpoint}/sandboxes`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ sleepAfter: 60_000 }),
+    });
+    if (!fsmCreate.ok) throw new Error(`fsm create failed: ${fsmCreate.status}`);
+    const { id: fsmId } = (await fsmCreate.json()) as { id: string };
+    await fetch(`${endpoint}/sandboxes/${fsmId}/files/write`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ path: "/workspace/fsm.txt", content: "survives pause" }),
+    });
+    // Advance the reaper's clock past sleepAfter to force the idle transition.
+    const reaped = await reapIdle(driver, store, Date.now() + 600_000);
+    if (!reaped.includes(fsmId)) {
+      throw new Error(`reaper did not auto-pause idle sandbox (paused: ${reaped})`);
+    }
+    const pausedInfo = (await (
+      await fetch(`${endpoint}/sandboxes/${fsmId}`)
+    ).json()) as { status: string };
+    if (pausedInfo.status !== "paused") {
+      throw new Error(`expected paused, got "${pausedInfo.status}"`);
+    }
+    // Next op auto-resumes and the workspace volume is intact.
+    const resumed = await execAndCapture(endpoint, fsmId, "cat /workspace/fsm.txt");
+    if (resumed !== "survives pause") {
+      throw new Error(`auto-resume lost the workspace: "${resumed}"`);
+    }
+    const runningInfo = (await (
+      await fetch(`${endpoint}/sandboxes/${fsmId}`)
+    ).json()) as { status: string };
+    if (runningInfo.status !== "running") {
+      throw new Error(`expected running after resume, got "${runningInfo.status}"`);
+    }
+    await fetch(`${endpoint}/sandboxes/${fsmId}`, { method: "DELETE" });
+    console.error("[smoke] idle sandbox auto-paused and auto-resumed");
+
     // Destroy sandbox.
     const deleteRes = await fetch(`${endpoint}/sandboxes/${id}`, { method: "DELETE" });
     if (!deleteRes.ok) throw new Error(`destroy failed: ${deleteRes.status}`);
@@ -334,7 +394,9 @@ async function main(): Promise<number> {
   } finally {
     proxy.close();
     server.close();
+    store.close();
     await rm(config.backupDir, { recursive: true, force: true });
+    await rm(dbDir, { recursive: true, force: true });
     await setTimeout(100);
   }
 }

@@ -2,6 +2,7 @@
 import { BackupRegistry } from "./backups.js";
 import { loadConfig } from "./config.js";
 import { ContainerDriver } from "./driver/container.js";
+import { startReaper } from "./lifecycle.js";
 import { SandboxStore } from "./store.js";
 import { createApiServer } from "./api/server.js";
 import { createProxyServer } from "./proxy/server.js";
@@ -9,7 +10,7 @@ import { createProxyServer } from "./proxy/server.js";
 async function main(): Promise<void> {
   const config = loadConfig();
   const driver = new ContainerDriver();
-  const store = new SandboxStore();
+  const store = new SandboxStore(config.dbPath);
   const backups = new BackupRegistry(config.backupDir);
 
   // Fail fast with a friendly message if the runtime backend is unreachable.
@@ -39,10 +40,20 @@ async function main(): Promise<void> {
     );
   });
 
+  // Idle reaper: auto-pause sandboxes left idle past their sleepAfterMs.
+  const reaper =
+    config.reapIntervalMs > 0
+      ? startReaper({ driver, store, intervalMs: config.reapIntervalMs })
+      : undefined;
+
   const shutdown = () => {
     console.log("[sbd] shutting down");
+    if (reaper) clearInterval(reaper);
     proxy.close();
-    server.close(() => process.exit(0));
+    server.close(() => {
+      store.close();
+      process.exit(0);
+    });
   };
   process.on("SIGINT", shutdown);
   process.on("SIGTERM", shutdown);

@@ -18,6 +18,20 @@ export interface Config {
   proxyPort: number;
   /** Host directory where sandbox backup tarballs + metadata are stored. */
   backupDir: string;
+  /**
+   * Path to the embedded SQLite database holding durable control-plane state
+   * (sandbox/process/session/context/exposed-port records). Survives daemon
+   * restarts. Set to `:memory:` for an ephemeral, in-process store.
+   */
+  dbPath: string;
+  /**
+   * Default idle timeout (ms) applied to new sandboxes that don't specify their
+   * own `sleepAfter`. The reaper auto-pauses a sandbox after this long without
+   * activity. `0` (the default) disables auto-pause.
+   */
+  defaultSleepAfterMs: number;
+  /** How often (ms) the idle reaper scans for sandboxes to auto-pause. */
+  reapIntervalMs: number;
 }
 
 export function loadConfig(): Config {
@@ -28,6 +42,9 @@ export function loadConfig(): Config {
     proxyHost: process.env.SBX_PROXY_HOST ?? "127.0.0.1",
     proxyPort: Number(process.env.SBX_PROXY_PORT ?? 4751),
     backupDir: process.env.SBX_BACKUP_DIR ?? join(homedir(), ".sbx", "backups"),
+    dbPath: process.env.SBX_DB ?? join(homedir(), ".sbx", "state.db"),
+    defaultSleepAfterMs: Number(process.env.SBX_SLEEP_AFTER_MS ?? 0),
+    reapIntervalMs: Number(process.env.SBX_REAP_INTERVAL_MS ?? 15000),
   };
 }
 

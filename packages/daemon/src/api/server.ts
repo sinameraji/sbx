@@ -3,6 +3,7 @@ import { type BackupInfo, BackupRegistry } from "../backups.js";
 import { previewUrl, type Config } from "../config.js";
 import type { Driver } from "../driver/types.js";
 import { kernelFor, type KernelLanguage } from "../kernels.js";
+import { resumeSandbox } from "../lifecycle.js";
 import { SandboxStore } from "../store.js";
 import type {
   CodeContextInfo,
@@ -173,7 +174,7 @@ async function handle(
   if (exposeMatch) {
     if (method === "POST") {
       const body = await readJson(req);
-      return exposePort(res, { config, store }, exposeMatch[1], body);
+      return exposePort(res, { config, driver, store }, exposeMatch[1], body);
     }
     if (method === "GET") {
       const record = store.get(exposeMatch[1]);
@@ -228,6 +229,7 @@ async function handle(
       const body = await readJson(req);
       const env = (body.env as Record<string, string>) ?? {};
       record.env = { ...record.env, ...env };
+      store.add(record); // write-through the env change
       return sendJson(res, 200, { env: record.env });
     }
   }
@@ -331,17 +333,22 @@ async function createSandbox(
   const env = (body.env as Record<string, string>) ?? {};
   const labels = (body.labels as Record<string, string>) ?? {};
   const persist = body.persist !== false;
+  const sleepAfterMs =
+    typeof body.sleepAfter === "number" ? body.sleepAfter : config.defaultSleepAfterMs;
 
   await driver.create({ id, image, env, labels, persist });
 
+  const now = new Date().toISOString();
   const record: SandboxRecord = {
     id,
     image,
     status: "running",
-    createdAt: new Date().toISOString(),
+    createdAt: now,
     labels,
     env,
     persist,
+    lastActivityAt: now,
+    sleepAfterMs,
   };
   store.add(record);
   sendJson(res, 201, record);
@@ -359,6 +366,7 @@ async function stopSandbox(
   // Processes and exposed ports die with the container; sessions persist.
   store.clearRuntimeState(id);
   record.status = "stopped";
+  store.add(record); // write-through the status change
   sendJson(res, 200, record);
 }
 
@@ -370,15 +378,37 @@ async function startSandbox(
   const record = store.get(id);
   if (!record) return sendJson(res, 404, { error: "not found" });
   if (record.status === "running") return sendJson(res, 200, record);
-  await driver.start({
-    id,
-    image: record.image,
-    env: record.env,
-    labels: record.labels,
-    persist: record.persist,
-  });
-  record.status = "running";
+  await resumeSandbox(driver, store, record);
   sendJson(res, 200, record);
+}
+
+/**
+ * Resolve a sandbox that must be live to do work. Records the activity (so the
+ * idle reaper sees recent use), transparently resumes a `paused` sandbox, and
+ * rejects a manually `stopped` one (409 — the user must `start` it). Sends the
+ * error response itself and returns null on failure.
+ */
+async function ensureLive(
+  res: ServerResponse,
+  driver: Driver,
+  store: SandboxStore,
+  id: string,
+): Promise<SandboxRecord | null> {
+  const record = store.get(id);
+  if (!record) {
+    sendJson(res, 404, { error: "not found" });
+    return null;
+  }
+  if (record.status === "stopped") {
+    sendJson(res, 409, { error: "sandbox is stopped; start it first" });
+    return null;
+  }
+  if (record.status === "paused") {
+    await resumeSandbox(driver, store, record);
+  } else {
+    store.touch(id);
+  }
+  return record;
 }
 
 async function createBackup(
@@ -386,13 +416,8 @@ async function createBackup(
   { driver, store, backups }: Deps,
   id: string,
 ): Promise<void> {
-  const record = store.get(id);
-  if (!record) return sendJson(res, 404, { error: "not found" });
-  if (record.status !== "running") {
-    return sendJson(res, 409, {
-      error: "sandbox is stopped; start it before creating a backup",
-    });
-  }
+  const record = await ensureLive(res, driver, store, id);
+  if (!record) return;
   const backupId = SandboxStore.newBackupId();
   await backups.ensureDir();
   const { bytes } = await driver.createBackup(id, backups.tarPath(backupId));
@@ -412,19 +437,14 @@ async function restoreBackup(
   id: string,
   body: Record<string, unknown>,
 ): Promise<void> {
-  const record = store.get(id);
-  if (!record) return sendJson(res, 404, { error: "not found" });
+  if (!store.get(id)) return sendJson(res, 404, { error: "not found" });
   const backupId = body.backupId;
   if (typeof backupId !== "string") {
     return sendJson(res, 400, { error: "backupId is required" });
   }
   const info = await backups.get(backupId);
   if (!info) return sendJson(res, 404, { error: "backup not found" });
-  if (record.status !== "running") {
-    return sendJson(res, 409, {
-      error: "sandbox is stopped; start it before restoring a backup",
-    });
-  }
+  if (!(await ensureLive(res, driver, store, id))) return;
   await driver.restoreBackup(id, backups.tarPath(backupId));
   sendJson(res, 200, { id, restored: backupId });
 }
@@ -506,11 +526,7 @@ async function createCodeContext(
   id: string,
   body: Record<string, unknown>,
 ): Promise<void> {
-  const record = store.get(id);
-  if (!record) return sendJson(res, 404, { error: "not found" });
-  if (record.status !== "running") {
-    return sendJson(res, 409, { error: "sandbox is stopped; start it first" });
-  }
+  if (!(await ensureLive(res, driver, store, id))) return;
   const language = parseLanguage(body.language ?? "python");
   if (!language) {
     return sendJson(res, 400, { error: "language must be 'python' or 'javascript'" });
@@ -538,11 +554,7 @@ async function runCode(
   id: string,
   body: Record<string, unknown>,
 ): Promise<void> {
-  const record = store.get(id);
-  if (!record) return sendJson(res, 404, { error: "not found" });
-  if (record.status !== "running") {
-    return sendJson(res, 409, { error: "sandbox is stopped; start it first" });
-  }
+  if (!(await ensureLive(res, driver, store, id))) return;
   const code = body.code;
   if (typeof code !== "string") {
     return sendJson(res, 400, { error: "code is required" });
@@ -568,6 +580,7 @@ async function runCode(
 
   try {
     const result = await runCell(driver, id, ctx, code, timeoutMs);
+    if (!ephemeral) store.addContext(id, ctx); // write-through the bumped seq
     sendJson(res, 200, result);
   } finally {
     if (ephemeral) {
@@ -621,8 +634,8 @@ async function execInSandbox(
   id: string,
   body: Record<string, unknown>,
 ): Promise<void> {
-  const record = store.get(id);
-  if (!record) return sendJson(res, 404, { error: "not found" });
+  const record = await ensureLive(res, driver, store, id);
+  if (!record) return;
 
   const command = body.command;
   if (typeof command !== "string" || command.length === 0) {
@@ -670,7 +683,10 @@ async function execInSandbox(
     if (session && cwdFile) {
       try {
         const next = (await driver.readFile(id, { path: cwdFile })).trim();
-        if (next) session.cwd = next;
+        if (next && next !== session.cwd) {
+          session.cwd = next;
+          store.addSession(id, session); // write-through the cwd change
+        }
       } catch {
         // Best-effort cwd capture; keep the previous cwd on failure.
       }
@@ -691,8 +707,7 @@ async function watchFiles(
   watchPath: string,
   intervalMs: number | undefined,
 ): Promise<void> {
-  const record = store.get(id);
-  if (!record) return sendJson(res, 404, { error: "not found" });
+  if (!(await ensureLive(res, driver, store, id))) return;
 
   res.writeHead(200, {
     "Content-Type": "text/event-stream",
@@ -728,8 +743,7 @@ async function handleFileAction(
   action: "write" | "read" | "mkdir" | "list",
   body: Record<string, unknown>,
 ): Promise<void> {
-  const record = store.get(id);
-  if (!record) return sendJson(res, 404, { error: "not found" });
+  if (!(await ensureLive(res, driver, store, id))) return;
 
   const path = typeof body.path === "string" ? body.path : "";
   if (!path) return sendJson(res, 400, { error: "path is required" });
@@ -772,8 +786,8 @@ async function startProcess(
   id: string,
   body: Record<string, unknown>,
 ): Promise<void> {
-  const record = store.get(id);
-  if (!record) return sendJson(res, 404, { error: "not found" });
+  const record = await ensureLive(res, driver, store, id);
+  if (!record) return;
 
   const command = body.command;
   if (typeof command !== "string" || command.length === 0) {
@@ -821,6 +835,7 @@ async function listProcesses(
       for (const p of procs) {
         if (p.status === "running" && running.get(p.procId) === false) {
           p.status = "exited";
+          store.addProcess(id, p); // write-through the exited status
         }
       }
     } catch {
@@ -845,6 +860,7 @@ async function killProcess(
   try {
     await driver.killProcess(id, proc.pid, signal);
     proc.status = "exited";
+    store.addProcess(id, proc); // write-through the exited status
     return sendJson(res, 200, { ok: true });
   } catch (err) {
     return sendJson(res, 500, { error: errMessage(err) });
@@ -893,7 +909,7 @@ async function waitForPort(
   id: string,
   body: Record<string, unknown>,
 ): Promise<void> {
-  if (!store.get(id)) return sendJson(res, 404, { error: "not found" });
+  if (!(await ensureLive(res, driver, store, id))) return;
   const port = Number(body.port);
   if (!Number.isInteger(port) || port <= 0) {
     return sendJson(res, 400, { error: "port is required" });
@@ -910,13 +926,13 @@ async function waitForPort(
   }
 }
 
-function exposePort(
+async function exposePort(
   res: ServerResponse,
-  { config, store }: Pick<Deps, "config" | "store">,
+  { config, driver, store }: Pick<Deps, "config" | "driver" | "store">,
   id: string,
   body: Record<string, unknown>,
-): void {
-  if (!store.get(id)) return sendJson(res, 404, { error: "not found" });
+): Promise<void> {
+  if (!(await ensureLive(res, driver, store, id))) return;
   const port = Number(body.port);
   if (!Number.isInteger(port) || port <= 0) {
     return sendJson(res, 400, { error: "port is required" });
@@ -980,6 +996,7 @@ function setSessionEnv(
   if (!session) return sendJson(res, 404, { error: "session not found" });
   const env = (body.env as Record<string, string>) ?? {};
   session.env = { ...session.env, ...env };
+  store.addSession(id, session); // write-through the env change
   return sendJson(res, 200, session);
 }
 

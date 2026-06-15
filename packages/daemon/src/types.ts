@@ -1,6 +1,12 @@
 // Shared daemon types.
 
-export type SandboxStatus = "running" | "stopped";
+/**
+ * Lifecycle states. `running` and `stopped` are explicit (user-driven via
+ * start/stop); `paused` is auto-entered by the idle reaper after `sleepAfterMs`
+ * of inactivity and auto-resumes on the next operation. A `stopped` sandbox is
+ * left alone by the reaper and does *not* auto-resume — the user must `start` it.
+ */
+export type SandboxStatus = "running" | "paused" | "stopped";
 
 export interface SandboxRecord {
   id: string;
@@ -19,6 +25,18 @@ export interface SandboxRecord {
    * and container recreation. Set at create time; defaults to true.
    */
   persist: boolean;
+  /**
+   * ISO timestamp of the last operation that ran work in the sandbox (exec, file
+   * op, run-code, proxy traffic, …). Drives idle detection. Refreshed by the
+   * store's `touch`.
+   */
+  lastActivityAt: string;
+  /**
+   * Auto-pause the sandbox after this many milliseconds of inactivity (the idle
+   * reaper transitions `running → paused`, freeing compute while the workspace
+   * volume persists). `0` disables auto-pause. Set at create time.
+   */
+  sleepAfterMs: number;
 }
 
 /**

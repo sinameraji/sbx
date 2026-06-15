@@ -1,0 +1,23 @@
+{
+  "name": "@sbx/cli",
+  "version": "0.0.1",
+  "description": "sb CLI for sbx — self-hostable agent sandboxes",
+  "license": "Apache-2.0",
+  "type": "module",
+  "bin": {
+    "sb": "dist/index.js"
+  },
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@sbx/sdk": "^0.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "typescript": "^5.5.0"
+  }
+}

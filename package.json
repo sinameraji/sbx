@@ -10,6 +10,7 @@
   "scripts": {
     "build": "npm run build --workspaces --if-present",
     "dev:daemon": "npm run dev --workspace @sbx/daemon",
+    "dev:cli": "npm run dev --workspace @sbx/cli",
     "smoke": "npm run build && node packages/daemon/dist/smoke.js"
   },
   "engines": {

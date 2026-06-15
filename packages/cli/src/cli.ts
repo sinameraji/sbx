@@ -6,6 +6,7 @@ import { startCommand, psCommand, killCommand } from "./proc.js";
 import { stopCommand, startSandboxCommand } from "./lifecycle.js";
 import { backupCommand, restoreCommand, backupsCommand } from "./backup.js";
 import { runCodeCommand } from "./code.js";
+import { watchCommand } from "./watch.js";
 import { logsCommand } from "./logs.js";
 import { waitPortCommand, exposeCommand } from "./ports.js";
 import { execCommand } from "./exec.js";
@@ -61,6 +62,8 @@ export async function cli(args: string[]): Promise<number> {
       return backupsCommand(positional, globals);
     case "run-code":
       return runCodeCommand(positional, globals, flags);
+    case "watch":
+      return watchCommand(positional, globals, flags);
     case "ps":
       return psCommand(positional, globals);
     case "kill":
@@ -124,6 +127,9 @@ Commands:
 
   sb files <subcommand> [args] [--endpoint <url>]
     Manage files inside a sandbox. Run \`sb files\` for subcommand help.
+
+  sb watch <id> [path] [--interval <ms>]
+    Stream file-change events (created/modified/deleted) until Ctrl-C.
 
   sb start <id> "<command>" [--cwd <dir>]
     Launch a long-running background process inside a sandbox.

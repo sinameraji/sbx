@@ -27,7 +27,9 @@ All commands run from the repository root unless noted.
 | `npm run build` | Compile all workspaces (`tsc`) | Writes to `packages/*/dist/` |
 | `npm run dev:daemon` | Run daemon in watch mode with `tsx` | Fast feedback; does not rebuild `dist/` |
 | `node packages/daemon/dist/index.js` | Start compiled daemon | Or `sbd` via `node_modules/.bin` |
-| `npm run smoke` | Build + run `packages/daemon/dist/smoke.js` | **Currently broken** — `smoke.js` does not exist |
+| `npm run smoke` | Build + run `packages/daemon/dist/smoke.js` | End-to-end create → exec → destroy |
+| `npm run dev:cli` | Run CLI in watch mode with `tsx` | Fast feedback; does not rebuild `dist/` |
+| `sb run "<cmd>"` | Create a sandbox, run a command, destroy it | Via `node_modules/.bin/sb` after build |
 
 There are **no test, lint, or format scripts** yet. Type-checking is performed by `tsc` during `npm run build`.
 
@@ -55,7 +57,7 @@ Environment variables (`packages/daemon/src/config.ts`):
 |---|---|
 | `packages/daemon/` | Control-plane daemon (`sbd`). Owns the REST API, sandbox store, and runtime-driver abstraction. |
 | `packages/sdk/` | TypeScript client SDK (`@sbx/sdk`). Thin HTTP client that mirrors the Cloudflare Sandbox surface. |
-| `packages/cli/` | **Not yet implemented.** README references `sb` CLI; this workspace does not exist. |
+| `packages/cli/` | `sb` CLI. Commands: `run`, `ls`, `rm`. Uses `@sbx/sdk` to talk to the daemon. |
 | `images/base/` | OCI image definition for the richer sandbox workspace (Python 3.11 + Node 20 + git/bash). |
 | `docs/plan.md` | Long-form product/architecture spec and phased build plan. |
 | `tsconfig.base.json` | Shared strict TypeScript config extended by every workspace. |
@@ -138,7 +140,7 @@ npm install <pkg> --save-dev
 2. **Do not use CommonJS.** All packages are ES modules.
 3. **Do not drop the `.js` extension** from relative TypeScript imports — `NodeNext` resolution requires it.
 4. **Do not add a heavy web framework** to the daemon without discussion; the Phase 0 server is intentionally hand-rolled.
-5. **Do not assume the CLI exists.** `packages/cli` is referenced in the README but has not been created.
+5. **CLI exists.** `packages/cli` implements `sb run`, `sb ls`, and `sb rm`.
 6. **Do not run the smoke script as a correctness check** until `packages/daemon/dist/smoke.js` (or `src/smoke.ts`) is added.
 7. **Do keep the SDK dependency-free** unless there is a strong reason to add a runtime dependency.
 8. **Do update `docs/plan.md`** when architectural decisions change; it is the source of truth for the phased roadmap.

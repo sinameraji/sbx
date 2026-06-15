@@ -2,11 +2,11 @@
 
 **Self-hostable sandbox infrastructure for AI agents.** Spin up many secure, persistent, observable sandboxes for coding agents (Claude Code, Codex, OpenCode, …) on *your own* hardware — a Mac, an EC2/GCE VM, or bare-metal Linux. No vendor lock-in. CLI-first, with a web dashboard.
 
-> Status: **early MVP (Phase 0 — vertical slice).** Container driver (Docker) works on Linux + macOS. Firecracker / Apple Virtualization microVM drivers are planned.
+> Status: **MVP — Phases 0 & 1 complete, Phase 2 (observability) in progress.** Container driver (Docker) works on Linux + macOS, with durable state, idle auto-pause/resume, per-sandbox metrics + cost meter, and a web dashboard. Firecracker / Apple Virtualization microVM drivers are planned.
 
 ## Why
 
-The managed sandbox players (E2B, Modal, Vercel Sandbox, Cloudflare) are cloud-only with unpredictable bills at scale. The self-hostable options either use weak isolation, ship restrictive licenses, or lack observability and a real ops story. `sbx` is the missing combination: **self-hosted + permissive (Apache-2.0) + isolation-optional + built-in observability & cost visibility + dev-first UX.**
+`sbx` brings together what agent workloads need on your own infrastructure: **self-hosted + permissive (Apache-2.0) + isolation-optional + built-in observability & cost visibility + dev-first UX.** Run it on hardware you control, with predictable cost and no vendor lock-in.
 
 Design constraint #1: you should be able to launch *as many* agents/sandboxes as your *hardware* allows — the architecture adds near-zero per-sandbox overhead.
 
@@ -40,7 +40,12 @@ node packages/daemon/dist/index.js          # or: sb up
 
 # in another shell — run a command in a fresh sandbox
 sb run "python3 -c 'print(2+2)'"
+
+# resource usage + cost for a sandbox
+sb stats <id>
 ```
+
+Then open the **web dashboard** at <http://127.0.0.1:4750/> — sandbox list, live CPU/mem/net, cost meter, preview links, and stop/start/destroy.
 
 ## License
 

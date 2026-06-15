@@ -6,6 +6,7 @@ import { kernelFor, type KernelLanguage } from "../kernels.js";
 import { resumeSandbox } from "../lifecycle.js";
 import { computeCost } from "../cost.js";
 import { emptyUsage, SandboxStore } from "../store.js";
+import { DASHBOARD_HTML } from "../web/dashboard.js";
 import type {
   CodeContextInfo,
   CodeResult,
@@ -88,6 +89,24 @@ async function handle(
     } catch (err) {
       return sendJson(res, 503, { ok: false, error: String(err) });
     }
+  }
+
+  // Daemon info for the dashboard (cost rates, proxy port, driver, image).
+  if (method === "GET" && path === "/info") {
+    return sendJson(res, 200, {
+      driver: driver.name,
+      defaultImage: config.defaultImage,
+      proxyPort: config.proxyPort,
+      costCpuPerHour: config.costCpuPerHour,
+      costMemGbPerHour: config.costMemGbPerHour,
+      defaultSleepAfterMs: config.defaultSleepAfterMs,
+    });
+  }
+
+  // Embedded single-page dashboard (no build step, zero dependencies).
+  if (method === "GET" && (path === "/" || path === "/dashboard")) {
+    res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+    return void res.end(DASHBOARD_HTML);
   }
 
   if (method === "POST" && path === "/sandboxes") {
@@ -296,7 +315,8 @@ async function handle(
 
   const metricsMatch = path.match(/^\/sandboxes\/([^/]+)\/metrics$/);
   if (method === "GET" && metricsMatch) {
-    return getMetrics(res, { config, driver, store }, metricsMatch[1]);
+    const live = url.searchParams.get("live") !== "0";
+    return getMetrics(res, { config, driver, store }, metricsMatch[1], live);
   }
 
   const stopMatch = path.match(/^\/sandboxes\/([^/]+)\/stop$/);
@@ -429,11 +449,12 @@ async function getMetrics(
   res: ServerResponse,
   { config, driver, store }: Pick<Deps, "config" | "driver" | "store">,
   id: string,
+  includeLive = true,
 ): Promise<void> {
   const record = store.get(id);
   if (!record) return sendJson(res, 404, { error: "not found" });
   let live = null;
-  if (record.status === "running") {
+  if (includeLive && record.status === "running") {
     try {
       live = await driver.stats(id);
     } catch {

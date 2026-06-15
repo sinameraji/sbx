@@ -366,6 +366,19 @@ async function main(): Promise<number> {
     }
     console.error("[smoke] metrics + cost meter integrate CPU/mem usage");
 
+    // Dashboard + info endpoints.
+    const infoRes = await fetch(`${endpoint}/info`);
+    const info = (await infoRes.json()) as { costCpuPerHour?: number; driver?: string };
+    if (typeof info.costCpuPerHour !== "number" || !info.driver) {
+      throw new Error(`/info missing fields: ${JSON.stringify(info)}`);
+    }
+    const dashRes = await fetch(`${endpoint}/`);
+    const dashHtml = await dashRes.text();
+    if (!dashRes.ok || !dashHtml.includes("<title>sbx dashboard</title>")) {
+      throw new Error(`dashboard not served (status ${dashRes.status})`);
+    }
+    console.error("[smoke] dashboard + /info served");
+
     // Lifecycle FSM: an idle sandbox auto-pauses, and the next operation
     // transparently auto-resumes it (workspace intact). Use a dedicated sandbox
     // with no exposed ports/processes so the reaper is allowed to pause it.

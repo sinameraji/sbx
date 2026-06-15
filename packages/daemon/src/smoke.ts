@@ -51,6 +51,48 @@ async function main(): Promise<number> {
       throw new Error(`non-zero exit: ${exitCode}`);
     }
 
+    // File operations.
+    const writeRes = await fetch(`${endpoint}/sandboxes/${id}/files/write`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ path: "/workspace/smoke.txt", content: "file ops work" }),
+    });
+    if (!writeRes.ok) throw new Error(`write failed: ${writeRes.status}`);
+    console.error("[smoke] wrote file");
+
+    const readRes = await fetch(`${endpoint}/sandboxes/${id}/files/read`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ path: "/workspace/smoke.txt" }),
+    });
+    if (!readRes.ok) throw new Error(`read failed: ${readRes.status}`);
+    const { content } = (await readRes.json()) as { content: string };
+    if (content !== "file ops work") {
+      throw new Error(`unexpected file content: ${content}`);
+    }
+    console.error("[smoke] read file");
+
+    const mkdirRes = await fetch(`${endpoint}/sandboxes/${id}/files/mkdir`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ path: "/workspace/nested/dir", parents: true }),
+    });
+    if (!mkdirRes.ok) throw new Error(`mkdir failed: ${mkdirRes.status}`);
+    console.error("[smoke] created directory");
+
+    const listRes = await fetch(`${endpoint}/sandboxes/${id}/files/list`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ path: "/workspace" }),
+    });
+    if (!listRes.ok) throw new Error(`list failed: ${listRes.status}`);
+    const { entries } = (await listRes.json()) as { entries: { name: string; isDirectory: boolean }[] };
+    const names = entries.map((e) => e.name).sort();
+    if (!names.includes("smoke.txt") || !names.includes("nested")) {
+      throw new Error(`unexpected directory listing: ${names.join(", ")}`);
+    }
+    console.error("[smoke] listed files");
+
     // Destroy sandbox.
     const deleteRes = await fetch(`${endpoint}/sandboxes/${id}`, { method: "DELETE" });
     if (!deleteRes.ok) throw new Error(`destroy failed: ${deleteRes.status}`);

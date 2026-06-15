@@ -1,4 +1,12 @@
-import type { ExecEvent, ExecOptions } from "../types.js";
+import type {
+  ExecEvent,
+  ExecOptions,
+  FileInfo,
+  ListFilesOptions,
+  MkdirOptions,
+  ReadFileOptions,
+  WriteFileOptions,
+} from "../types.js";
 
 export interface CreateOptions {
   id: string;
@@ -33,6 +41,18 @@ export interface Driver {
     opts: ExecOptions,
     onEvent: (e: ExecEvent) => void,
   ): Promise<number>;
+
+  /** Write a file inside the sandbox. */
+  writeFile(id: string, opts: WriteFileOptions): Promise<void>;
+
+  /** Read a file from the sandbox, returning its UTF-8 contents. */
+  readFile(id: string, opts: ReadFileOptions): Promise<string>;
+
+  /** Create a directory inside the sandbox. */
+  mkdir(id: string, opts: MkdirOptions): Promise<void>;
+
+  /** List files and directories at the given path. */
+  listFiles(id: string, opts: ListFilesOptions): Promise<FileInfo[]>;
 
   /** Permanently destroy the sandbox and free its resources. */
   destroy(id: string): Promise<void>;

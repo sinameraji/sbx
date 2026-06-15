@@ -11,13 +11,17 @@ interface Deps {
 }
 
 /**
- * Phase 0 REST surface:
+ * Phase 0/1 REST surface:
  *   GET    /healthz
- *   POST   /sandboxes                 -> create
- *   GET    /sandboxes                 -> list
- *   GET    /sandboxes/:id             -> get
- *   DELETE /sandboxes/:id             -> destroy
- *   POST   /sandboxes/:id/exec        -> run command, stream output as SSE
+ *   POST   /sandboxes                      -> create
+ *   GET    /sandboxes                      -> list
+ *   GET    /sandboxes/:id                  -> get
+ *   DELETE /sandboxes/:id                  -> destroy
+ *   POST   /sandboxes/:id/exec             -> run command, stream output as SSE
+ *   POST   /sandboxes/:id/files/write      -> write file
+ *   POST   /sandboxes/:id/files/read       -> read file
+ *   POST   /sandboxes/:id/files/mkdir      -> create directory
+ *   POST   /sandboxes/:id/files/list       -> list directory
  */
 export function createApiServer({ config, driver, store }: Deps) {
   return createServer((req, res) => {
@@ -58,6 +62,18 @@ async function handle(
   if (method === "POST" && execMatch) {
     const body = await readJson(req);
     return execInSandbox(res, { driver, store }, execMatch[1], body);
+  }
+
+  const fileActionMatch = path.match(/^\/sandboxes\/([^/]+)\/files\/(write|read|mkdir|list)$/);
+  if (method === "POST" && fileActionMatch) {
+    const body = await readJson(req);
+    return handleFileAction(
+      res,
+      { driver, store },
+      fileActionMatch[1],
+      fileActionMatch[2] as "write" | "read" | "mkdir" | "list",
+      body,
+    );
   }
 
   const idMatch = path.match(/^\/sandboxes\/([^/]+)$/);
@@ -139,6 +155,51 @@ async function execInSandbox(
     write({ type: "exit", exitCode: 1 });
   } finally {
     res.end();
+  }
+}
+
+async function handleFileAction(
+  res: ServerResponse,
+  { driver, store }: Pick<Deps, "driver" | "store">,
+  id: string,
+  action: "write" | "read" | "mkdir" | "list",
+  body: Record<string, unknown>,
+): Promise<void> {
+  const record = store.get(id);
+  if (!record) return sendJson(res, 404, { error: "not found" });
+
+  const path = typeof body.path === "string" ? body.path : "";
+  if (!path) return sendJson(res, 400, { error: "path is required" });
+
+  try {
+    switch (action) {
+      case "write": {
+        if (typeof body.content !== "string") {
+          return sendJson(res, 400, { error: "content is required" });
+        }
+        await driver.writeFile(id, {
+          path,
+          content: body.content,
+          mode: typeof body.mode === "string" ? body.mode : undefined,
+        });
+        return sendJson(res, 200, { ok: true });
+      }
+      case "read": {
+        const content = await driver.readFile(id, { path });
+        return sendJson(res, 200, { content });
+      }
+      case "mkdir": {
+        await driver.mkdir(id, { path, parents: body.parents === true });
+        return sendJson(res, 200, { ok: true });
+      }
+      case "list": {
+        const entries = await driver.listFiles(id, { path });
+        return sendJson(res, 200, { entries });
+      }
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return sendJson(res, 500, { error: message });
   }
 }
 

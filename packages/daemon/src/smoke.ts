@@ -214,6 +214,38 @@ async function main(): Promise<number> {
     if (!delCtxRes.ok) throw new Error(`delete context failed: ${delCtxRes.status}`);
     console.error("[smoke] destroyed code context");
 
+    // File watching: open the stream, create a file, expect a change event.
+    const watchAbort = new AbortController();
+    const watchRes = await fetch(
+      `${endpoint}/sandboxes/${id}/watch?path=/workspace&interval=300`,
+      { signal: watchAbort.signal },
+    );
+    if (!watchRes.ok || !watchRes.body) throw new Error(`watch failed: ${watchRes.status}`);
+    const sawFile = (async () => {
+      for await (const ev of parseSSE(watchRes.body!)) {
+        if ((ev as unknown as { path?: string }).path?.endsWith("watched.txt")) {
+          return true;
+        }
+      }
+      return false;
+    })();
+    sawFile.catch(() => false); // avoid an unhandled rejection on abort
+
+    // Let the watcher take its first snapshot, then create a file.
+    await setTimeout(600);
+    await fetch(`${endpoint}/sandboxes/${id}/files/write`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ path: "/workspace/watched.txt", content: "watch me" }),
+    });
+    const detected = await Promise.race([
+      sawFile,
+      setTimeout(5000).then(() => false),
+    ]);
+    watchAbort.abort();
+    if (!detected) throw new Error("watch did not report the new file");
+    console.error("[smoke] watch reported the new file");
+
     // Persistence: a file in /workspace survives a stop/start (container is
     // recreated, the named volume is reattached).
     await fetch(`${endpoint}/sandboxes/${id}/files/write`, {

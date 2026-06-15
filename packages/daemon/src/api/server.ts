@@ -99,6 +99,7 @@ async function handle(
       proxyPort: config.proxyPort,
       costCpuPerHour: config.costCpuPerHour,
       costMemGbPerHour: config.costMemGbPerHour,
+      costEgressPerGb: config.costEgressPerGb,
       defaultSleepAfterMs: config.defaultSleepAfterMs,
     });
   }

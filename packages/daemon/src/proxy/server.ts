@@ -93,10 +93,18 @@ async function bridgeAndSplice(
   stream.pipe(socket);
   socket.resume();
 
+  // Meter egress: bytes flowing from the sandbox out to the client. Accumulate
+  // locally and flush once on close to avoid a DB write per chunk.
+  let egress = 0;
+  stream.on("data", (chunk: Buffer) => {
+    egress += chunk.length;
+  });
+
   let closed = false;
   const close = () => {
     if (closed) return;
     closed = true;
+    store.addEgress(target.sandboxId, egress);
     bridge.close();
     socket.destroy();
   };

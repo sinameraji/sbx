@@ -51,6 +51,8 @@ export interface SandboxUsage {
   cpuSeconds: number;
   /** Total memory byte-seconds (Σ of memBytes × seconds-since-last-sample). */
   memByteSeconds: number;
+  /** Total bytes the sandbox has sent out through the preview proxy. */
+  egressBytes: number;
   /** Last observed cumulative CPU ns, to compute the next delta (reset-safe). */
   lastCpuTotalNs: number;
   /** ISO timestamp of the last sample, to integrate memory over wall-clock. */
@@ -61,6 +63,7 @@ export interface SandboxUsage {
 export interface CostBreakdown {
   cpu: number;
   mem: number;
+  egress: number;
   total: number;
 }
 

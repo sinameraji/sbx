@@ -96,11 +96,14 @@ One self-contained control-plane daemon per host, a tiny in-sandbox agent, and t
 
 ### Phase 0 — Vertical slice (≈1–2 weeks) — prove the spine end-to-end
 
-- Daemon with container driver (containerd on Linux, Apple container/Docker on Mac).
-- In-sandbox agent over unix socket: spawn + stream stdout/stderr.
-- REST: `POST /sandboxes`, `POST /sandboxes/{id}/exec` (SSE stream), `DELETE /sandboxes/{id}`.
-- TS SDK: `getSandbox()`, `exec()`, `execStream()`. `sb run` CLI.
-- Acceptance: on both a Mac and a GCE Linux VM — create a sandbox, run a command, watch output stream live, destroy it. Run an actual harness (Claude Code or OpenCode) inside one sandbox.
+**Status: in progress.**
+
+- [x] Daemon with container driver. Implemented using Docker via `dockerode`; works on Linux and macOS. The original plan called for containerd/Apple container — Docker was chosen for the vertical slice because it is the most widely available runtime on developer machines.
+- [ ] In-sandbox agent over unix socket: spawn + stream stdout/stderr. **Not implemented.** The daemon currently `exec`s directly into containers. A dedicated agent is deferred until the microVM drivers in Phase 3 require it, or until file/port operations in Phase 1 make a sidecar cleaner.
+- [x] REST: `POST /sandboxes`, `POST /sandboxes/{id}/exec` (SSE stream), `DELETE /sandboxes/{id}`.
+- [x] TS SDK: `getSandbox()`, `exec()`, `execStream()`.
+- [x] `sb run` CLI. Also added `sb ls` and `sb rm` for basic ops.
+- [ ] Acceptance: on both a Mac and a GCE Linux VM — create a sandbox, run a command, watch output stream live, destroy it. Run an actual harness (Claude Code or OpenCode) inside one sandbox. **Partially done:** `npm run smoke` exercises create → exec → destroy locally. Multi-OS/harness validation is still pending.
 
 ### Phase 1 — Core sandbox API
 

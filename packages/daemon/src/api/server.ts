@@ -22,7 +22,9 @@ interface Deps {
  *   POST   /sandboxes                      -> create
  *   GET    /sandboxes                      -> list
  *   GET    /sandboxes/:id                  -> get
- *   DELETE /sandboxes/:id                  -> destroy
+ *   DELETE /sandboxes/:id                  -> destroy (removes volume too)
+ *   POST   /sandboxes/:id/stop             -> stop (remove container, keep volume)
+ *   POST   /sandboxes/:id/start            -> start (recreate container, reattach volume)
  *   POST   /sandboxes/:id/exec             -> run command, stream output as SSE
  *   POST   /sandboxes/:id/files/write      -> write file
  *   POST   /sandboxes/:id/files/read       -> read file
@@ -207,6 +209,16 @@ async function handle(
     }
   }
 
+  const stopMatch = path.match(/^\/sandboxes\/([^/]+)\/stop$/);
+  if (method === "POST" && stopMatch) {
+    return stopSandbox(res, { driver, store }, stopMatch[1]);
+  }
+
+  const startMatch = path.match(/^\/sandboxes\/([^/]+)\/start$/);
+  if (method === "POST" && startMatch) {
+    return startSandbox(res, { driver, store }, startMatch[1]);
+  }
+
   const idMatch = path.match(/^\/sandboxes\/([^/]+)$/);
   if (idMatch) {
     const id = idMatch[1];
@@ -237,8 +249,9 @@ async function createSandbox(
   const image = typeof body.image === "string" ? body.image : config.defaultImage;
   const env = (body.env as Record<string, string>) ?? {};
   const labels = (body.labels as Record<string, string>) ?? {};
+  const persist = body.persist !== false;
 
-  await driver.create({ id, image, env, labels });
+  await driver.create({ id, image, env, labels, persist });
 
   const record: SandboxRecord = {
     id,
@@ -247,9 +260,44 @@ async function createSandbox(
     createdAt: new Date().toISOString(),
     labels,
     env,
+    persist,
   };
   store.add(record);
   sendJson(res, 201, record);
+}
+
+async function stopSandbox(
+  res: ServerResponse,
+  { driver, store }: Pick<Deps, "driver" | "store">,
+  id: string,
+): Promise<void> {
+  const record = store.get(id);
+  if (!record) return sendJson(res, 404, { error: "not found" });
+  if (record.status === "stopped") return sendJson(res, 200, record);
+  await driver.stop(id);
+  // Processes and exposed ports die with the container; sessions persist.
+  store.clearRuntimeState(id);
+  record.status = "stopped";
+  sendJson(res, 200, record);
+}
+
+async function startSandbox(
+  res: ServerResponse,
+  { driver, store }: Pick<Deps, "driver" | "store">,
+  id: string,
+): Promise<void> {
+  const record = store.get(id);
+  if (!record) return sendJson(res, 404, { error: "not found" });
+  if (record.status === "running") return sendJson(res, 200, record);
+  await driver.start({
+    id,
+    image: record.image,
+    env: record.env,
+    labels: record.labels,
+    persist: record.persist,
+  });
+  record.status = "running";
+  sendJson(res, 200, record);
 }
 
 async function execInSandbox(

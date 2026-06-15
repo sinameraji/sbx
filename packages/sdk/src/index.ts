@@ -37,6 +37,8 @@ export interface SandboxInfo {
   status: "running" | "stopped";
   createdAt: string;
   labels: Record<string, string>;
+  /** Whether `/workspace` is backed by a volume that survives stop/start. */
+  persist: boolean;
 }
 
 export interface FileInfo {
@@ -51,6 +53,11 @@ export interface CreateOptions {
   image?: string;
   env?: Record<string, string>;
   labels?: Record<string, string>;
+  /**
+   * Back `/workspace` with a named volume so files survive `stop`/`start` and
+   * container recreation. Defaults to true.
+   */
+  persist?: boolean;
 }
 
 export interface WriteFileOptions {
@@ -161,11 +168,16 @@ export class SbxClient {
 export class Sandbox {
   constructor(
     private readonly client: SbxClient,
-    private readonly info: SandboxInfo,
+    private info: SandboxInfo,
   ) {}
 
   get id(): string {
     return this.info.id;
+  }
+
+  /** Current lifecycle status (`running` or `stopped`). */
+  get status(): "running" | "stopped" {
+    return this.info.status;
   }
 
   /** Run a command to completion, returning aggregated output. */
@@ -214,7 +226,27 @@ export class Sandbox {
     }
   }
 
-  /** Permanently destroy the sandbox. */
+  /**
+   * Stop the sandbox, freeing compute. With persistence the workspace volume is
+   * kept so `start` resumes with files intact; background processes do not
+   * survive. A no-op if already stopped.
+   */
+  async stop(): Promise<void> {
+    this.info = await this.client.request<SandboxInfo>(
+      "POST",
+      `/sandboxes/${this.info.id}/stop`,
+    );
+  }
+
+  /** Restart a stopped sandbox, reattaching its workspace. A no-op if running. */
+  async start(): Promise<void> {
+    this.info = await this.client.request<SandboxInfo>(
+      "POST",
+      `/sandboxes/${this.info.id}/start`,
+    );
+  }
+
+  /** Permanently destroy the sandbox, including its persistent volume. */
   async destroy(): Promise<void> {
     await this.client.request("DELETE", `/sandboxes/${this.info.id}`);
   }

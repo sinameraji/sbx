@@ -9,6 +9,10 @@ export interface Config {
    * for the richer toolset (Node 20, git, ripgrep, …).
    */
   defaultImage: string;
+  /** Bind host for the preview-URL reverse proxy. */
+  proxyHost: string;
+  /** Port for the preview-URL reverse proxy (separate from the REST API). */
+  proxyPort: number;
 }
 
 export function loadConfig(): Config {
@@ -16,5 +20,16 @@ export function loadConfig(): Config {
     host: process.env.SBX_HOST ?? "127.0.0.1",
     port: Number(process.env.SBX_PORT ?? 4750),
     defaultImage: process.env.SBX_IMAGE ?? "python:3.11-slim-bookworm",
+    proxyHost: process.env.SBX_PROXY_HOST ?? "127.0.0.1",
+    proxyPort: Number(process.env.SBX_PROXY_PORT ?? 4751),
   };
+}
+
+/**
+ * Build the preview URL for an exposed port. Uses a `*.localhost` subdomain,
+ * which browsers resolve to 127.0.0.1 with zero DNS/hosts config. Sandbox ids
+ * are dash-free hex, so `<id>-<port>` is an unambiguous label.
+ */
+export function previewUrl(config: Config, sandboxId: string, port: number): string {
+  return `http://${sandboxId}-${port}.localhost:${config.proxyPort}/`;
 }

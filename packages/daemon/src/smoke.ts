@@ -9,6 +9,7 @@ import { setTimeout } from "node:timers/promises";
 import { loadConfig } from "./config.js";
 import { ContainerDriver } from "./driver/container.js";
 import { createApiServer } from "./api/server.js";
+import { createProxyServer } from "./proxy/server.js";
 import { SandboxStore } from "./store.js";
 
 async function main(): Promise<number> {
@@ -19,6 +20,11 @@ async function main(): Promise<number> {
   const server = createApiServer({ config, driver, store });
   await new Promise<void>((resolve) => server.listen(config.port, config.host, resolve));
   const endpoint = `http://${config.host}:${config.port}`;
+  const proxy = createProxyServer({ config, driver, store });
+  await new Promise<void>((resolve) =>
+    proxy.listen(config.proxyPort, config.proxyHost, resolve),
+  );
+  const proxyEndpoint = `http://${config.proxyHost}:${config.proxyPort}`;
   console.error(`[smoke] daemon up at ${endpoint}`);
 
   try {
@@ -93,6 +99,41 @@ async function main(): Promise<number> {
     }
     console.error("[smoke] listed files");
 
+    // Background process + port readiness + preview proxy.
+    const startRes = await fetch(`${endpoint}/sandboxes/${id}/processes`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ command: "python3 -m http.server 8000" }),
+    });
+    if (!startRes.ok) throw new Error(`startProcess failed: ${startRes.status}`);
+    const proc = (await startRes.json()) as { procId: string };
+    console.error(`[smoke] started process ${proc.procId}`);
+
+    const waitRes = await fetch(`${endpoint}/sandboxes/${id}/wait-port`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ port: 8000, timeoutMs: 15000 }),
+    });
+    const { ready } = (await waitRes.json()) as { ready: boolean };
+    if (!ready) throw new Error("port 8000 never became ready");
+    console.error("[smoke] port 8000 ready");
+
+    const exposeRes = await fetch(`${endpoint}/sandboxes/${id}/expose`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ port: 8000 }),
+    });
+    if (!exposeRes.ok) throw new Error(`expose failed: ${exposeRes.status}`);
+    console.error("[smoke] exposed port 8000");
+
+    // Reach the in-sandbox server through the preview proxy (path-based route).
+    const previewRes = await fetch(`${proxyEndpoint}/_sbx/${id}/8000/`);
+    const previewBody = await previewRes.text();
+    if (!previewBody.includes("Directory listing")) {
+      throw new Error(`preview proxy did not serve the sandbox: ${previewBody.slice(0, 80)}`);
+    }
+    console.error("[smoke] preview proxy served the sandbox");
+
     // Destroy sandbox.
     const deleteRes = await fetch(`${endpoint}/sandboxes/${id}`, { method: "DELETE" });
     if (!deleteRes.ok) throw new Error(`destroy failed: ${deleteRes.status}`);
@@ -104,6 +145,7 @@ async function main(): Promise<number> {
     console.error(`[smoke] failed: ${err instanceof Error ? err.message : String(err)}`);
     return 1;
   } finally {
+    proxy.close();
     server.close();
     await setTimeout(100);
   }

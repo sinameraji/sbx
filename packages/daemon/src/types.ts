@@ -52,3 +52,43 @@ export interface MkdirOptions {
 export interface ListFilesOptions {
   path: string;
 }
+
+/** Options for launching a long-running background process. */
+export interface StartProcessOptions {
+  cwd?: string;
+  env?: Record<string, string>;
+}
+
+/** A long-running background process tracked by the daemon. */
+export interface ProcessInfo {
+  /** Daemon-assigned handle (stable across PID reuse). */
+  procId: string;
+  /** In-container PID of the detached process. */
+  pid: number;
+  command: string;
+  status: "running" | "exited";
+  exitCode: number | null;
+  startedAt: string;
+  /** Path of the process logfile inside the sandbox. */
+  logPath: string;
+}
+
+/** Options for waiting until a TCP port is listening inside a sandbox. */
+export interface WaitForPortOptions {
+  timeoutMs?: number;
+  intervalMs?: number;
+  host?: string;
+}
+
+/** A port exposed through the daemon's preview-URL reverse proxy. */
+export interface ExposedPort {
+  /** In-container port the app listens on. */
+  port: number;
+  /** Routing label / subdomain (`<sandboxId>-<port>`). */
+  exposeId: string;
+  /** Optional per-port bearer token; null means open on loopback. */
+  token: string | null;
+  createdAt: string;
+  /** Computed preview URL. */
+  url: string;
+}

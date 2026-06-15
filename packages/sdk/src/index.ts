@@ -59,6 +59,37 @@ export interface MkdirOptions {
   parents?: boolean;
 }
 
+export interface StartProcessOptions {
+  cwd?: string;
+  env?: Record<string, string>;
+}
+
+/** A long-running background process tracked by the daemon. */
+export interface ProcessHandle {
+  procId: string;
+  pid: number;
+  command: string;
+  status: "running" | "exited";
+  exitCode: number | null;
+  startedAt: string;
+  logPath: string;
+}
+
+export interface WaitForPortOptions {
+  timeoutMs?: number;
+  intervalMs?: number;
+  host?: string;
+}
+
+/** A port exposed through the daemon's preview-URL reverse proxy. */
+export interface ExposedPort {
+  port: number;
+  exposeId: string;
+  token: string | null;
+  createdAt: string;
+  url: string;
+}
+
 export interface SbxClientOptions {
   endpoint?: string;
 }
@@ -150,7 +181,7 @@ export class Sandbox {
       const text = await res.text().catch(() => "");
       throw new Error(`sbx exec -> ${res.status}: ${text}`);
     }
-    for await (const event of parseSSE(res.body)) {
+    for await (const event of parseSSE<ExecEvent>(res.body)) {
       if (
         options.onOutput &&
         (event.type === "stdout" || event.type === "stderr")
@@ -207,7 +238,100 @@ export class Sandbox {
     );
     return entries;
   }
+
+  /** Launch a long-running background process; returns immediately. */
+  async startProcess(
+    command: string,
+    options: StartProcessOptions = {},
+  ): Promise<ProcessHandle> {
+    return this.client.request<ProcessHandle>(
+      "POST",
+      `/sandboxes/${this.info.id}/processes`,
+      { command, cwd: options.cwd, env: options.env },
+    );
+  }
+
+  /** List background processes started in this sandbox. */
+  async listProcesses(): Promise<ProcessHandle[]> {
+    const { processes } = await this.client.request<{ processes: ProcessHandle[] }>(
+      "GET",
+      `/sandboxes/${this.info.id}/processes`,
+    );
+    return processes;
+  }
+
+  /** Signal a background process (default SIGTERM). */
+  async killProcess(procId: string, signal?: string): Promise<void> {
+    await this.client.request(
+      "DELETE",
+      `/sandboxes/${this.info.id}/processes/${procId}`,
+      signal ? { signal } : undefined,
+    );
+  }
+
+  /** Stream a process's logs; `follow` tails until the connection closes. */
+  async *streamLogs(
+    procId: string,
+    options: { follow?: boolean } = {},
+  ): AsyncGenerator<string> {
+    const follow = options.follow ? "1" : "0";
+    const res = await fetch(
+      `${this.client.endpoint}/sandboxes/${this.info.id}/processes/${procId}/logs?follow=${follow}`,
+    );
+    if (!res.ok || !res.body) {
+      const text = await res.text().catch(() => "");
+      throw new Error(`sbx logs -> ${res.status}: ${text}`);
+    }
+    for await (const event of parseSSE<LogEvent>(res.body)) {
+      if (event.type === "log") yield event.data;
+      else if (event.type === "end") return;
+    }
+  }
+
+  /** Block until a TCP port is listening inside the sandbox, or timeout. */
+  async waitForPort(
+    port: number,
+    options: WaitForPortOptions = {},
+  ): Promise<boolean> {
+    const { ready } = await this.client.request<{ ready: boolean }>(
+      "POST",
+      `/sandboxes/${this.info.id}/wait-port`,
+      { port, ...options },
+    );
+    return ready;
+  }
+
+  /** Expose an in-container port and return its preview URL. */
+  async exposePort(
+    port: number,
+    options: { token?: string } = {},
+  ): Promise<ExposedPort> {
+    return this.client.request<ExposedPort>(
+      "POST",
+      `/sandboxes/${this.info.id}/expose`,
+      { port, token: options.token },
+    );
+  }
+
+  /** Remove a previously exposed port. */
+  async unexposePort(port: number): Promise<void> {
+    await this.client.request(
+      "DELETE",
+      `/sandboxes/${this.info.id}/expose/${port}`,
+    );
+  }
+
+  /** List the ports currently exposed for this sandbox. */
+  async listExposedPorts(): Promise<ExposedPort[]> {
+    const { exposed } = await this.client.request<{ exposed: ExposedPort[] }>(
+      "GET",
+      `/sandboxes/${this.info.id}/expose`,
+    );
+    return exposed;
+  }
 }
+
+type LogEvent = { type: "log"; data: string } | { type: "end" };
 
 /** Convenience matching the Cloudflare `getSandbox(binding, id)` shape. */
 export function getSandbox(
@@ -226,10 +350,10 @@ function defaultEndpoint(): string {
   return env?.SBX_ENDPOINT ?? "http://127.0.0.1:4750";
 }
 
-/** Parse a `text/event-stream` body into typed ExecEvents. */
-async function* parseSSE(
+/** Parse a `text/event-stream` body into typed JSON events. */
+async function* parseSSE<T>(
   body: ReadableStream<Uint8Array>,
-): AsyncGenerator<ExecEvent> {
+): AsyncGenerator<T> {
   const reader = body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
@@ -244,7 +368,7 @@ async function* parseSSE(
       const line = frame.split("\n").find((l) => l.startsWith("data:"));
       if (!line) continue;
       const json = line.slice(5).trim();
-      if (json) yield JSON.parse(json) as ExecEvent;
+      if (json) yield JSON.parse(json) as T;
     }
   }
 }

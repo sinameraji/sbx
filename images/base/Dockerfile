@@ -6,9 +6,11 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PIP_NO_CACHE_DIR=1 \
     NODE_VERSION=20
 
+# socat backs the preview-URL proxy's binary-safe TCP bridge (clean half-close);
+# the daemon falls back to a bash /dev/tcp bridge on images without it.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates curl git bash build-essential procps \
-        ripgrep jq tini \
+        ripgrep jq tini socat \
     && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/*

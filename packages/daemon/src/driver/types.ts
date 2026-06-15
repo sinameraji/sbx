@@ -136,6 +136,19 @@ export interface Driver {
   openTcpBridge(id: string, port: number, host: string): Promise<TcpBridge>;
 
   /**
+   * Archive the sandbox's `/workspace` to a tar file at `tarPath` on the daemon
+   * host. Returns the number of bytes written. The sandbox must be running.
+   */
+  createBackup(id: string, tarPath: string): Promise<{ bytes: number }>;
+
+  /**
+   * Replace the sandbox's `/workspace` with the contents of the tar at
+   * `tarPath`. Existing workspace contents are cleared first. The sandbox must
+   * be running; the backup may originate from a different sandbox.
+   */
+  restoreBackup(id: string, tarPath: string): Promise<void>;
+
+  /**
    * Permanently destroy the sandbox and free its resources, including its
    * persistent workspace volume. This is irreversible — use `stop` to pause.
    */

@@ -114,6 +114,15 @@ export interface CreateSessionOptions {
   env?: Record<string, string>;
 }
 
+/** Metadata for a workspace backup. */
+export interface BackupInfo {
+  backupId: string;
+  sandboxId: string;
+  createdAt: string;
+  /** Size of the backup tarball in bytes. */
+  bytes: number;
+}
+
 export interface SbxClientOptions {
   endpoint?: string;
 }
@@ -148,6 +157,20 @@ export class SbxClient {
   /** Daemon health + active runtime driver. */
   async health(): Promise<{ ok: boolean; driver: string }> {
     return this.request("GET", "/healthz");
+  }
+
+  /** List all workspace backups across sandboxes. */
+  async listBackups(): Promise<BackupInfo[]> {
+    const { backups } = await this.request<{ backups: BackupInfo[] }>(
+      "GET",
+      "/backups",
+    );
+    return backups;
+  }
+
+  /** Delete a backup by id. */
+  async deleteBackup(backupId: string): Promise<void> {
+    await this.request("DELETE", `/backups/${backupId}`);
   }
 
   /** @internal */
@@ -244,6 +267,32 @@ export class Sandbox {
       "POST",
       `/sandboxes/${this.info.id}/start`,
     );
+  }
+
+  /** Snapshot `/workspace` to a durable backup; returns its metadata. */
+  async createBackup(): Promise<BackupInfo> {
+    return this.client.request<BackupInfo>(
+      "POST",
+      `/sandboxes/${this.info.id}/backups`,
+    );
+  }
+
+  /** Replace `/workspace` with the contents of a backup (taken from any sandbox). */
+  async restoreBackup(backupId: string): Promise<void> {
+    await this.client.request(
+      "POST",
+      `/sandboxes/${this.info.id}/restore`,
+      { backupId },
+    );
+  }
+
+  /** List the backups taken from this sandbox. */
+  async listBackups(): Promise<BackupInfo[]> {
+    const { backups } = await this.client.request<{ backups: BackupInfo[] }>(
+      "GET",
+      `/sandboxes/${this.info.id}/backups`,
+    );
+    return backups;
   }
 
   /** Permanently destroy the sandbox, including its persistent volume. */

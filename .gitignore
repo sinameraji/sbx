@@ -7,3 +7,9 @@ dist/
 .env
 .env.*
 coverage/
+
+# Python
+__pycache__/
+*.pyc
+sdk/python/build/
+sdk/python/*.egg-info/

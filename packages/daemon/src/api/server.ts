@@ -4,7 +4,8 @@ import { previewUrl, type Config } from "../config.js";
 import type { Driver } from "../driver/types.js";
 import { kernelFor, type KernelLanguage } from "../kernels.js";
 import { resumeSandbox } from "../lifecycle.js";
-import { SandboxStore } from "../store.js";
+import { computeCost } from "../cost.js";
+import { emptyUsage, SandboxStore } from "../store.js";
 import type {
   CodeContextInfo,
   CodeResult,
@@ -29,6 +30,7 @@ interface Deps {
  *   GET    /sandboxes                      -> list
  *   GET    /sandboxes/:id                  -> get
  *   DELETE /sandboxes/:id                  -> destroy (removes volume too)
+ *   GET    /sandboxes/:id/metrics          -> live stats + cumulative usage + cost
  *   POST   /sandboxes/:id/stop             -> stop (remove container, keep volume)
  *   POST   /sandboxes/:id/start            -> start (recreate container, reattach volume)
  *   POST   /sandboxes/:id/backups          -> back up /workspace, returns BackupInfo
@@ -292,6 +294,11 @@ async function handle(
     return runCode(res, { driver, store }, runCodeMatch[1], body);
   }
 
+  const metricsMatch = path.match(/^\/sandboxes\/([^/]+)\/metrics$/);
+  if (method === "GET" && metricsMatch) {
+    return getMetrics(res, { config, driver, store }, metricsMatch[1]);
+  }
+
   const stopMatch = path.match(/^\/sandboxes\/([^/]+)\/stop$/);
   if (method === "POST" && stopMatch) {
     return stopSandbox(res, { driver, store }, stopMatch[1]);
@@ -349,6 +356,7 @@ async function createSandbox(
     persist,
     lastActivityAt: now,
     sleepAfterMs,
+    usage: emptyUsage(),
   };
   store.add(record);
   sendJson(res, 201, record);
@@ -409,6 +417,35 @@ async function ensureLive(
     store.touch(id);
   }
   return record;
+}
+
+/**
+ * Resource metrics + cost for a sandbox. A live snapshot is included only when
+ * the sandbox is running (a paused/stopped sandbox has no container); the
+ * accumulated usage and cost are always returned. Reading metrics is a passive
+ * query — it does not count as activity nor auto-resume a paused sandbox.
+ */
+async function getMetrics(
+  res: ServerResponse,
+  { config, driver, store }: Pick<Deps, "config" | "driver" | "store">,
+  id: string,
+): Promise<void> {
+  const record = store.get(id);
+  if (!record) return sendJson(res, 404, { error: "not found" });
+  let live = null;
+  if (record.status === "running") {
+    try {
+      live = await driver.stats(id);
+    } catch {
+      // Container may have just gone away; report accumulated usage only.
+    }
+  }
+  return sendJson(res, 200, {
+    status: record.status,
+    live,
+    usage: record.usage,
+    cost: computeCost(record.usage, config),
+  });
 }
 
 async function createBackup(

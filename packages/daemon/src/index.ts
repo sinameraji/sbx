@@ -3,6 +3,7 @@ import { BackupRegistry } from "./backups.js";
 import { loadConfig } from "./config.js";
 import { ContainerDriver } from "./driver/container.js";
 import { startReaper } from "./lifecycle.js";
+import { startSampler } from "./metrics.js";
 import { SandboxStore } from "./store.js";
 import { createApiServer } from "./api/server.js";
 import { createProxyServer } from "./proxy/server.js";
@@ -46,9 +47,16 @@ async function main(): Promise<void> {
       ? startReaper({ driver, store, intervalMs: config.reapIntervalMs })
       : undefined;
 
+  // Metrics sampler: integrate per-sandbox CPU/mem usage for the cost meter.
+  const sampler =
+    config.metricsIntervalMs > 0
+      ? startSampler({ driver, store, intervalMs: config.metricsIntervalMs })
+      : undefined;
+
   const shutdown = () => {
     console.log("[sbd] shutting down");
     if (reaper) clearInterval(reaper);
+    if (sampler) clearInterval(sampler);
     proxy.close();
     server.close(() => {
       store.close();

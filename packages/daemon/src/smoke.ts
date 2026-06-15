@@ -14,6 +14,7 @@ import { loadConfig } from "./config.js";
 import { ContainerDriver } from "./driver/container.js";
 import { createApiServer } from "./api/server.js";
 import { reapIdle } from "./lifecycle.js";
+import { sampleUsage } from "./metrics.js";
 import { createProxyServer } from "./proxy/server.js";
 import { SandboxStore } from "./store.js";
 
@@ -340,6 +341,30 @@ async function main(): Promise<number> {
       reopened.close();
     }
     console.error("[smoke] control-plane state survived a simulated restart");
+
+    // Metrics + cost: run the sampler twice (advancing its clock) to integrate
+    // CPU-seconds and mem-byte-seconds, then read the metrics endpoint.
+    const t0 = Date.now();
+    await sampleUsage(driver, store, t0);
+    await sampleUsage(driver, store, t0 + 10_000);
+    const metrics = (await (
+      await fetch(`${endpoint}/sandboxes/${id}/metrics`)
+    ).json()) as {
+      live: { memLimitBytes: number } | null;
+      usage: { cpuSeconds: number; memByteSeconds: number };
+      cost: { total: number };
+    };
+    if (!metrics.live) throw new Error("metrics live snapshot missing for running sandbox");
+    if (!(metrics.usage.cpuSeconds > 0)) {
+      throw new Error(`expected cpuSeconds > 0, got ${metrics.usage.cpuSeconds}`);
+    }
+    if (!(metrics.usage.memByteSeconds > 0)) {
+      throw new Error(`expected memByteSeconds > 0, got ${metrics.usage.memByteSeconds}`);
+    }
+    if (!(metrics.cost.total > 0)) {
+      throw new Error(`expected cost.total > 0, got ${metrics.cost.total}`);
+    }
+    console.error("[smoke] metrics + cost meter integrate CPU/mem usage");
 
     // Lifecycle FSM: an idle sandbox auto-pauses, and the next operation
     // transparently auto-resumes it (workspace intact). Use a dedicated sandbox

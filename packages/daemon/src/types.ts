@@ -37,6 +37,31 @@ export interface SandboxRecord {
    * volume persists). `0` disables auto-pause. Set at create time.
    */
   sleepAfterMs: number;
+  /** Cumulative resource usage, integrated by the metrics sampler. */
+  usage: SandboxUsage;
+}
+
+/**
+ * Cumulative, time-integrated resource usage for a sandbox — the basis of the
+ * cost meter. Accumulated by the metrics sampler and persisted, so totals carry
+ * across daemon restarts. The two `last*` fields are sampler bookkeeping.
+ */
+export interface SandboxUsage {
+  /** Total vCPU-seconds consumed (Σ of cumulative-CPU-ns deltas / 1e9). */
+  cpuSeconds: number;
+  /** Total memory byte-seconds (Σ of memBytes × seconds-since-last-sample). */
+  memByteSeconds: number;
+  /** Last observed cumulative CPU ns, to compute the next delta (reset-safe). */
+  lastCpuTotalNs: number;
+  /** ISO timestamp of the last sample, to integrate memory over wall-clock. */
+  lastSampledAt: string;
+}
+
+/** Per-resource cost breakdown in the configured currency. */
+export interface CostBreakdown {
+  cpu: number;
+  mem: number;
+  total: number;
 }
 
 /**

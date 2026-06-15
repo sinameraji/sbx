@@ -50,6 +50,9 @@ Environment variables (`packages/daemon/src/config.ts`):
 | `SBX_DB` | `~/.sbx/state.db` | Embedded SQLite path for durable control-plane state (`:memory:` for ephemeral) |
 | `SBX_SLEEP_AFTER_MS` | `0` | Default idle timeout before a sandbox auto-pauses (`0` = disabled; per-sandbox override via `sleepAfter`) |
 | `SBX_REAP_INTERVAL_MS` | `15000` | How often the idle reaper scans for sandboxes to auto-pause |
+| `SBX_METRICS_INTERVAL_MS` | `10000` | How often the metrics sampler integrates per-sandbox CPU/mem usage (`0` = off) |
+| `SBX_COST_CPU_PER_HOUR` | `0.05` | Cost-meter rate: currency per vCPU-hour |
+| `SBX_COST_MEM_GB_PER_HOUR` | `0.005` | Cost-meter rate: currency per GB-hour of memory |
 | `SBX_ENDPOINT` | `http://127.0.0.1:4750` | SDK default endpoint |
 
 ---
@@ -74,6 +77,8 @@ Environment variables (`packages/daemon/src/config.ts`):
 | `src/driver/` | Runtime-driver interface (`types.ts`) and container implementation (`container.ts`). |
 | `src/store.ts` | Sandbox registry backed by embedded SQLite (`node:sqlite`); in-memory `Map`s are a write-through cache rehydrated from the DB on startup. |
 | `src/lifecycle.ts` | Lifecycle FSM transitions (`pauseSandbox`/`resumeSandbox`) + the idle reaper (`reapIdle`/`startReaper`). |
+| `src/metrics.ts` | In-process metrics sampler (`sampleUsage`/`startSampler`) integrating per-sandbox CPU/mem usage from the Docker stats API. |
+| `src/cost.ts` | Cost meter: turns cumulative usage into a `{cpu, mem, total}` breakdown via configurable rates. |
 | `src/config.ts` | Environment-driven configuration. |
 | `src/types.ts` | Shared daemon types. |
 
@@ -186,6 +191,7 @@ npm run build
 - **`ContainerDriver`**: backs sandboxes with long-lived Docker containers. The container stays alive (`sleep infinity`) and the daemon `exec`s into it on demand.
 - **`SandboxStore`**: registry backed by embedded SQLite (`node:sqlite`), with in-memory `Map`s as a write-through cache rehydrated on startup, so records survive a daemon restart.
 - **Lifecycle FSM**: status is `running` | `paused` | `stopped`. The idle reaper (`src/lifecycle.ts`) auto-pauses `running` sandboxes idle past `sleepAfterMs` (skipping those with exposed ports / running processes); any container-work op auto-resumes a `paused` sandbox via the `ensureLive` choke point in `api/server.ts`. `store.touch` records activity (also on proxy traffic). Manual `stop` → `stopped` is never auto-resumed.
+- **Metrics + cost (Phase 2)**: `driver.stats(id)` reads the Docker stats API; the sampler (`src/metrics.ts`) integrates `cpuSeconds`/`memByteSeconds` into the persisted `usage` column; `src/cost.ts` applies configurable rates. Surfaced at `GET /sandboxes/:id/metrics`, SDK `Sandbox.metrics()`, CLI `sb stats`.
 - **`SbxClient` / `Sandbox`**: SDK classes that expose `getSandbox`, `exec`, `execStream`, `destroy`, matching the Cloudflare Sandbox shape.
 
 ### Data flow

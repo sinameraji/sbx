@@ -1,0 +1,192 @@
+/**
+ * @sbx/sdk — TypeScript client for the sbx daemon.
+ *
+ * Mirrors the Cloudflare Sandbox SDK surface so existing harnesses port with
+ * minimal changes, but points at *your* self-hosted daemon instead of the edge.
+ *
+ *   const client = new SbxClient({ endpoint: "http://127.0.0.1:4750" });
+ *   const sandbox = await client.getSandbox();
+ *   const { stdout } = await sandbox.exec("python3 -c 'print(2+2)'");
+ *   await sandbox.destroy();
+ */
+
+export type ExecEvent =
+  | { type: "stdout"; data: string }
+  | { type: "stderr"; data: string }
+  | { type: "exit"; exitCode: number };
+
+export interface ExecOptions {
+  cwd?: string;
+  env?: Record<string, string>;
+  /** Called for each stdout/stderr chunk as it streams in. */
+  onOutput?: (stream: "stdout" | "stderr", data: string) => void;
+}
+
+export interface ExecResult {
+  stdout: string;
+  stderr: string;
+  exitCode: number;
+  success: boolean;
+}
+
+export interface SandboxInfo {
+  id: string;
+  image: string;
+  status: "running" | "stopped";
+  createdAt: string;
+  labels: Record<string, string>;
+}
+
+export interface CreateOptions {
+  image?: string;
+  env?: Record<string, string>;
+  labels?: Record<string, string>;
+}
+
+export interface SbxClientOptions {
+  endpoint?: string;
+}
+
+export class SbxClient {
+  readonly endpoint: string;
+
+  constructor(opts: SbxClientOptions = {}) {
+    this.endpoint = (opts.endpoint ?? defaultEndpoint()).replace(/\/$/, "");
+  }
+
+  /** Create a fresh sandbox (Cloudflare-style: omit id to provision a new one). */
+  async getSandbox(id?: string, options?: CreateOptions): Promise<Sandbox> {
+    if (id) {
+      // Attach to an existing sandbox by id.
+      const info = await this.request<SandboxInfo>("GET", `/sandboxes/${id}`);
+      return new Sandbox(this, info);
+    }
+    const info = await this.request<SandboxInfo>("POST", "/sandboxes", options ?? {});
+    return new Sandbox(this, info);
+  }
+
+  /** List all sandboxes managed by the daemon. */
+  async list(): Promise<SandboxInfo[]> {
+    const { sandboxes } = await this.request<{ sandboxes: SandboxInfo[] }>(
+      "GET",
+      "/sandboxes",
+    );
+    return sandboxes;
+  }
+
+  /** Daemon health + active runtime driver. */
+  async health(): Promise<{ ok: boolean; driver: string }> {
+    return this.request("GET", "/healthz");
+  }
+
+  /** @internal */
+  async request<T>(method: string, path: string, body?: unknown): Promise<T> {
+    const res = await fetch(this.endpoint + path, {
+      method,
+      headers: body ? { "content-type": "application/json" } : undefined,
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`sbx ${method} ${path} -> ${res.status}: ${text}`);
+    }
+    return (await res.json()) as T;
+  }
+}
+
+export class Sandbox {
+  constructor(
+    private readonly client: SbxClient,
+    private readonly info: SandboxInfo,
+  ) {}
+
+  get id(): string {
+    return this.info.id;
+  }
+
+  /** Run a command to completion, returning aggregated output. */
+  async exec(command: string, options: ExecOptions = {}): Promise<ExecResult> {
+    let stdout = "";
+    let stderr = "";
+    let exitCode = 0;
+    for await (const event of this.execStream(command, options)) {
+      if (event.type === "stdout") stdout += event.data;
+      else if (event.type === "stderr") stderr += event.data;
+      else exitCode = event.exitCode;
+    }
+    return { stdout, stderr, exitCode, success: exitCode === 0 };
+  }
+
+  /** Run a command, yielding output events as they stream in. */
+  async *execStream(
+    command: string,
+    options: ExecOptions = {},
+  ): AsyncGenerator<ExecEvent> {
+    const res = await fetch(
+      `${this.client.endpoint}/sandboxes/${this.info.id}/exec`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ command, cwd: options.cwd, env: options.env }),
+      },
+    );
+    if (!res.ok || !res.body) {
+      const text = await res.text().catch(() => "");
+      throw new Error(`sbx exec -> ${res.status}: ${text}`);
+    }
+    for await (const event of parseSSE(res.body)) {
+      if (
+        options.onOutput &&
+        (event.type === "stdout" || event.type === "stderr")
+      ) {
+        options.onOutput(event.type, event.data);
+      }
+      yield event;
+    }
+  }
+
+  /** Permanently destroy the sandbox. */
+  async destroy(): Promise<void> {
+    await this.client.request("DELETE", `/sandboxes/${this.info.id}`);
+  }
+}
+
+/** Convenience matching the Cloudflare `getSandbox(binding, id)` shape. */
+export function getSandbox(
+  client: SbxClient,
+  id?: string,
+  options?: CreateOptions,
+): Promise<Sandbox> {
+  return client.getSandbox(id, options);
+}
+
+// --- internals -------------------------------------------------------------
+
+function defaultEndpoint(): string {
+  const env = (globalThis as { process?: { env?: Record<string, string> } })
+    .process?.env;
+  return env?.SBX_ENDPOINT ?? "http://127.0.0.1:4750";
+}
+
+/** Parse a `text/event-stream` body into typed ExecEvents. */
+async function* parseSSE(
+  body: ReadableStream<Uint8Array>,
+): AsyncGenerator<ExecEvent> {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let idx: number;
+    while ((idx = buffer.indexOf("\n\n")) !== -1) {
+      const frame = buffer.slice(0, idx);
+      buffer = buffer.slice(idx + 2);
+      const line = frame.split("\n").find((l) => l.startsWith("data:"));
+      if (!line) continue;
+      const json = line.slice(5).trim();
+      if (json) yield JSON.parse(json) as ExecEvent;
+    }
+  }
+}

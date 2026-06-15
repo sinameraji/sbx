@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sbx-sdk"
+version = "0.0.1"
+description = "Python client for the sbx self-hostable agent sandbox daemon"
+readme = "README.md"
+license = { text = "Apache-2.0" }
+requires-python = ">=3.9"
+dependencies = []
+keywords = ["sandbox", "ai-agents", "sbx"]
+
+[project.urls]
+Homepage = "https://github.com/sinameraji/sbx"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["sbx*"]
+
+[tool.setuptools.package-data]
+sbx = ["py.typed"]

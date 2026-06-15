@@ -25,6 +25,7 @@ Design constraint #1: you should be able to launch *as many* agents/sandboxes as
 | `packages/daemon` (`@sbx/daemon`, bin `sbd`) | The control-plane daemon |
 | `packages/sdk` (`@sbx/sdk`) | TypeScript client SDK |
 | `packages/cli` (`@sbx/cli`, bin `sb`) | Command-line interface |
+| `sdk/python` (`sbx-sdk`) | Python client SDK (stdlib-only, mirrors the TS SDK) |
 | `images/base` | Base sandbox OCI image (Python 3.11 + Node 20 + git/bash) |
 
 ## Quick start (Phase 0)
@@ -46,6 +47,16 @@ sb stats <id>
 ```
 
 Then open the **web dashboard** at <http://127.0.0.1:4750/> — sandbox list, live CPU/mem/net, cost meter, preview links, and stop/start/destroy.
+
+From Python (`sdk/python`, stdlib-only):
+
+```python
+from sbx import SbxClient
+
+sandbox = SbxClient().get_sandbox()
+print(sandbox.exec("python3 -c 'print(2+2)'").stdout)   # "4\n"
+sandbox.destroy()
+```
 
 ## License
 

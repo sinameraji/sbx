@@ -27,7 +27,8 @@ All commands run from the repository root unless noted.
 | `npm run build` | Compile all workspaces (`tsc`) | Writes to `packages/*/dist/` |
 | `npm run dev:daemon` | Run daemon in watch mode with `tsx` | Fast feedback; does not rebuild `dist/` |
 | `node packages/daemon/dist/index.js` | Start compiled daemon | Or `sbd` via `node_modules/.bin` |
-| `npm run smoke` | Build + run `packages/daemon/dist/smoke.js` | End-to-end create → exec → destroy |
+| `npm run smoke` | Build + run `packages/daemon/dist/smoke.js` | Full end-to-end suite (TS surface) |
+| `npm run smoke:py` | Build + run `sdk/python/smoke.py` | Python SDK end-to-end (boots daemon on isolated ports) |
 | `npm run dev:cli` | Run CLI in watch mode with `tsx` | Fast feedback; does not rebuild `dist/` |
 | `sb run "<cmd>"` | Create a sandbox, run a command, destroy it | Via `node_modules/.bin/sb` after build |
 
@@ -64,6 +65,7 @@ Environment variables (`packages/daemon/src/config.ts`):
 |---|---|
 | `packages/daemon/` | Control-plane daemon (`sbd`). Owns the REST API, sandbox store, and runtime-driver abstraction. |
 | `packages/sdk/` | TypeScript client SDK (`@sbx/sdk`). Thin HTTP client that mirrors the Cloudflare Sandbox surface. |
+| `sdk/python/` | Python client SDK (`sbx-sdk`, package `sbx`). Stdlib-only; mirrors the TS surface, snake_cased. Outside `packages/*` so it's not an npm workspace. |
 | `packages/cli/` | `sb` CLI. Commands: `run`, `ls`, `rm`. Uses `@sbx/sdk` to talk to the daemon. |
 | `images/base/` | OCI image definition for the richer sandbox workspace (Python 3.11 + Node 20 + git/bash). |
 | `docs/plan.md` | Long-form product/architecture spec and phased build plan. |
@@ -137,7 +139,7 @@ npm install <pkg> --save-dev
 ### Conventions
 
 - Keep the daemon lightweight; avoid heavy frameworks. Current daemon uses only `dockerode` plus Node built-ins.
-- The SDK has **zero runtime dependencies** today — keep it that way if possible.
+- The SDK has **zero runtime dependencies** today — keep it that way if possible. The Python SDK (`sdk/python`) is likewise **stdlib-only** (`urllib` + `json`).
 - Native / external dependencies that must stay external:
   - `dockerode` and `@types/dockerode` (Docker Engine API client)
   - TypeScript toolchain (`typescript`, `tsx`, `@types/node`)

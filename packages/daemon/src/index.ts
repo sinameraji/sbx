@@ -3,6 +3,7 @@ import { loadConfig } from "./config.js";
 import { ContainerDriver } from "./driver/container.js";
 import { SandboxStore } from "./store.js";
 import { createApiServer } from "./api/server.js";
+import { createProxyServer } from "./proxy/server.js";
 
 async function main(): Promise<void> {
   const config = loadConfig();
@@ -28,8 +29,17 @@ async function main(): Promise<void> {
     );
   });
 
+  const proxy = createProxyServer({ config, driver, store });
+  proxy.listen(config.proxyPort, config.proxyHost, () => {
+    console.log(
+      `[sbd] preview proxy listening on http://${config.proxyHost}:${config.proxyPort} ` +
+        `(previews at http://<id>-<port>.localhost:${config.proxyPort}/)`,
+    );
+  });
+
   const shutdown = () => {
     console.log("[sbd] shutting down");
+    proxy.close();
     server.close(() => process.exit(0));
   };
   process.on("SIGINT", shutdown);

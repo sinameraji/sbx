@@ -2,6 +2,9 @@ import { runCommand } from "./run.js";
 import { listCommand } from "./list.js";
 import { removeCommand } from "./remove.js";
 import { filesCommand } from "./files.js";
+import { startCommand, psCommand, killCommand } from "./proc.js";
+import { logsCommand } from "./logs.js";
+import { waitPortCommand, exposeCommand } from "./ports.js";
 
 export interface GlobalArgs {
   endpoint?: string;
@@ -30,6 +33,18 @@ export async function cli(args: string[]): Promise<number> {
       return removeCommand(positional, globals);
     case "files":
       return filesCommand(positional, globals, flags);
+    case "start":
+      return startCommand(positional, globals, flags);
+    case "ps":
+      return psCommand(positional, globals);
+    case "kill":
+      return killCommand(positional, globals, flags);
+    case "logs":
+      return logsCommand(positional, globals, flags);
+    case "wait-port":
+      return waitPortCommand(positional, globals, flags);
+    case "expose":
+      return exposeCommand(positional, globals, flags);
     default:
       console.error(`Unknown command: ${command}`);
       printHelp();
@@ -54,6 +69,24 @@ Commands:
 
   sb files <subcommand> [args] [--endpoint <url>]
     Manage files inside a sandbox. Run \`sb files\` for subcommand help.
+
+  sb start <id> "<command>" [--cwd <dir>]
+    Launch a long-running background process inside a sandbox.
+
+  sb ps <id>
+    List background processes in a sandbox.
+
+  sb kill <id> <procId> [--signal <SIG>]
+    Signal a background process (default SIGTERM).
+
+  sb logs <id> <procId> [--follow]
+    Stream a background process's logs.
+
+  sb wait-port <id> <port> [--timeout <ms>]
+    Block until a TCP port is listening inside the sandbox.
+
+  sb expose <id> <port> [--token <token>]
+    Expose a port and print its preview URL.
 
 Global options:
   --endpoint <url>   Daemon URL (default: http://127.0.0.1:4750 or SBX_ENDPOINT)

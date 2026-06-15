@@ -109,8 +109,8 @@ One self-contained control-plane daemon per host, a tiny in-sandbox agent, and t
 
 - [x] Files (`writeFile`/`readFile`/`mkdir`/`listFiles`) implemented via the container driver and exposed through REST, SDK, and CLI.
 - [ ] `watch` file changes.
-- [ ] `startProcess()` + `waitForPort()`.
-- [ ] `exposePort()` + preview-URL proxy.
+- [x] `startProcess()` + `waitForPort()`. Background processes are detached with `setsid` and logged to `/tmp/sbx-proc-<id>.log` (streamable via `sb logs`); `waitForPort` probes with bash `/dev/tcp`. Exposed through REST (`/processes`, `/wait-port`), SDK, and CLI (`sb start|ps|kill|logs|wait-port`).
+- [x] `exposePort()` + preview-URL proxy. A separate L4 proxy server (`SBX_PROXY_PORT`, default 4751) gives each port a `http://<id>-<port>.localhost:<proxyPort>/` preview URL. **Decision:** the proxy reaches in-container ports through a hijacked `docker exec` of a TCP relay, *not* the container bridge IP — so it works on macOS Docker Desktop where container IPs are unreachable from the host. The relay is `socat` when present (added to `images/base`) and a bash `/dev/tcp` bridge otherwise. It runs **without** a TTY (`Tty:false`) and the daemon demultiplexes Docker's stream frames; an earlier `Tty:true` attempt corrupted bytes because the pty line discipline cooked `\n`→`\r\n` (curl saw "HTTP/0.9"). Connection-level splice means HTTP keep-alive, WebSocket upgrades, and binary/chunked payloads pass through untouched. Path-based fallback route: `/_sbx/<id>/<port>/`. Deferred: TLS/Caddy, wildcard remote domains, mandatory auth (per-port token is optional, loopback-only bind). `npm run smoke` now covers start→wait-port→expose→proxy-fetch→destroy end-to-end.
 - [ ] Sessions + `setEnvVars()`.
 - [ ] Persistence (named volume).
 - [ ] `createBackup`/`restoreBackup` (volume or CRIU snapshot).

@@ -5,8 +5,32 @@ import type {
   ListFilesOptions,
   MkdirOptions,
   ReadFileOptions,
+  StartProcessOptions,
+  WaitForPortOptions,
   WriteFileOptions,
 } from "../types.js";
+
+/** A live bidirectional byte stream bridged to a port inside a sandbox. */
+export interface TcpBridge {
+  /** Raw duplex carrying bytes to/from the in-container TCP relay. */
+  stream: NodeJS.ReadWriteStream;
+  /** Tear down the bridge and the in-container relay process. */
+  close(): void;
+}
+
+/** Result of launching a background process. */
+export interface StartProcessResult {
+  procId: string;
+  pid: number;
+  logPath: string;
+}
+
+/** Liveness view of a tracked background process. */
+export interface ProcessLiveness {
+  procId: string;
+  pid: number;
+  running: boolean;
+}
 
 export interface CreateOptions {
   id: string;
@@ -53,6 +77,44 @@ export interface Driver {
 
   /** List files and directories at the given path. */
   listFiles(id: string, opts: ListFilesOptions): Promise<FileInfo[]>;
+
+  /**
+   * Launch a detached background process. `procId` is daemon-supplied so the
+   * in-container logfile is deterministic. Resolves once the process is spawned.
+   */
+  startProcess(
+    id: string,
+    procId: string,
+    command: string,
+    opts: StartProcessOptions,
+  ): Promise<StartProcessResult>;
+
+  /** Report liveness for the given in-container PIDs. */
+  listProcesses(
+    id: string,
+    procs: Array<{ procId: string; pid: number }>,
+  ): Promise<ProcessLiveness[]>;
+
+  /** Send a signal to a process group (default TERM). */
+  killProcess(id: string, pid: number, signal?: string): Promise<void>;
+
+  /** Stream a process logfile to `onData`; `follow` tails it until aborted. */
+  streamProcessLogs(
+    id: string,
+    logPath: string,
+    opts: { follow: boolean; signal: AbortSignal },
+    onData: (chunk: string) => void,
+  ): Promise<void>;
+
+  /** Block until a TCP port is listening inside the sandbox, or timeout. */
+  waitForPort(id: string, port: number, opts: WaitForPortOptions): Promise<boolean>;
+
+  /**
+   * Open a raw bidirectional byte bridge to `host:port` inside the sandbox.
+   * Used by the preview-URL proxy; goes through the Docker socket so it works
+   * even where container IPs are unreachable from the host (macOS Docker Desktop).
+   */
+  openTcpBridge(id: string, port: number, host: string): Promise<TcpBridge>;
 
   /** Permanently destroy the sandbox and free its resources. */
   destroy(id: string): Promise<void>;

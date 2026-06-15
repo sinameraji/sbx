@@ -1,5 +1,5 @@
 import Docker from "dockerode";
-import { PassThrough } from "node:stream";
+import { Duplex, PassThrough } from "node:stream";
 import type {
   ExecEvent,
   ExecOptions,
@@ -7,9 +7,17 @@ import type {
   ListFilesOptions,
   MkdirOptions,
   ReadFileOptions,
+  StartProcessOptions,
+  WaitForPortOptions,
   WriteFileOptions,
 } from "../types.js";
-import type { CreateOptions, Driver } from "./types.js";
+import type {
+  CreateOptions,
+  Driver,
+  ProcessLiveness,
+  StartProcessResult,
+  TcpBridge,
+} from "./types.js";
 
 /**
  * Container driver — backs each sandbox with a long-lived OCI container via the
@@ -120,16 +128,21 @@ export class ContainerDriver implements Driver {
   }
 
   /**
-   * Run a non-interactive command and return its stdout as a UTF-8 string.
-   * Throws if the command exits non-zero.
+   * Run a non-interactive command and capture its streams + exit code. Never
+   * throws on a non-zero exit — callers decide what a failure means.
    */
-  private async runAndCapture(id: string, command: string): Promise<string> {
+  private async execCapture(
+    id: string,
+    command: string,
+    opts: { cwd?: string; env?: Record<string, string> } = {},
+  ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
     const container = this.docker.getContainer(this.containerName(id));
     const exec = await container.exec({
-      Cmd: ["/bin/sh", "-c", command],
+      Cmd: ["/bin/bash", "-c", command],
       AttachStdout: true,
       AttachStderr: true,
-      WorkingDir: "/workspace",
+      WorkingDir: opts.cwd ?? "/workspace",
+      Env: Object.entries(opts.env ?? {}).map(([k, v]) => `${k}=${v}`),
     });
 
     const stream = await exec.start({ hijack: true, stdin: false });
@@ -153,10 +166,19 @@ export class ContainerDriver implements Driver {
     stderr.end();
 
     const info = await exec.inspect();
-    if ((info.ExitCode ?? 0) !== 0) {
-      throw new Error(err.trim() || `command failed with exit code ${info.ExitCode}`);
+    return { stdout: out, stderr: err, exitCode: info.ExitCode ?? 0 };
+  }
+
+  /**
+   * Run a non-interactive command and return its stdout as a UTF-8 string.
+   * Throws if the command exits non-zero.
+   */
+  private async runAndCapture(id: string, command: string): Promise<string> {
+    const { stdout, stderr, exitCode } = await this.execCapture(id, command);
+    if (exitCode !== 0) {
+      throw new Error(stderr.trim() || `command failed with exit code ${exitCode}`);
     }
-    return out;
+    return stdout;
   }
 
   async writeFile(id: string, opts: WriteFileOptions): Promise<void> {
@@ -236,6 +258,157 @@ export class ContainerDriver implements Driver {
         modifiedAt: mtime ?? new Date().toISOString(),
       };
     });
+  }
+
+  async startProcess(
+    id: string,
+    procId: string,
+    command: string,
+    opts: StartProcessOptions,
+  ): Promise<StartProcessResult> {
+    const logPath = `/tmp/sbx-proc-${procId}.log`;
+    // `setsid` gives the process its own session + group (pgid == its pid), so we
+    // can later signal the whole tree, and it survives the exec that launched it.
+    // The inner `bash -lc` runs the user command with a login PATH like `exec`.
+    const launch = `setsid bash -lc ${shellEscape(command)} > ${shellEscape(logPath)} 2>&1 & echo $!`;
+    const { stdout, stderr, exitCode } = await this.execCapture(id, launch, {
+      cwd: opts.cwd,
+      env: opts.env,
+    });
+    const pid = Number.parseInt(stdout.trim(), 10);
+    if (exitCode !== 0 || !Number.isFinite(pid)) {
+      throw new Error(stderr.trim() || `startProcess failed (exit ${exitCode})`);
+    }
+    return { procId, pid, logPath };
+  }
+
+  async listProcesses(
+    id: string,
+    procs: Array<{ procId: string; pid: number }>,
+  ): Promise<ProcessLiveness[]> {
+    if (procs.length === 0) return [];
+    // Emit `<pid> 1` if alive, `<pid> 0` otherwise.
+    const pids = procs.map((p) => p.pid).join(" ");
+    const cmd = `for p in ${pids}; do if kill -0 "$p" 2>/dev/null; then echo "$p 1"; else echo "$p 0"; fi; done`;
+    const { stdout } = await this.execCapture(id, cmd);
+    const alive = new Map<number, boolean>();
+    for (const line of stdout.split("\n")) {
+      const [p, state] = line.trim().split(" ");
+      if (p) alive.set(Number(p), state === "1");
+    }
+    return procs.map((p) => ({
+      procId: p.procId,
+      pid: p.pid,
+      running: alive.get(p.pid) ?? false,
+    }));
+  }
+
+  async killProcess(id: string, pid: number, signal = "TERM"): Promise<void> {
+    const sig = signal.replace(/^SIG/, "");
+    // Signal the process group first (pid == pgid via setsid), then the pid.
+    const cmd = `kill -${sig} -${pid} 2>/dev/null; kill -${sig} ${pid} 2>/dev/null; true`;
+    await this.execCapture(id, cmd);
+  }
+
+  async streamProcessLogs(
+    id: string,
+    logPath: string,
+    opts: { follow: boolean; signal: AbortSignal },
+    onData: (chunk: string) => void,
+  ): Promise<void> {
+    const container = this.docker.getContainer(this.containerName(id));
+    // `-F` tolerates the logfile not existing yet (it waits for it).
+    const cmd = opts.follow
+      ? `tail -n +1 -F ${shellEscape(logPath)}`
+      : `cat ${shellEscape(logPath)}`;
+    const exec = await container.exec({
+      Cmd: ["/bin/sh", "-c", cmd],
+      AttachStdout: true,
+      AttachStderr: true,
+    });
+
+    const stream = await exec.start({ hijack: true, stdin: false });
+    const stdout = new PassThrough();
+    const stderr = new PassThrough();
+    stdout.on("data", (chunk: Buffer) => onData(chunk.toString("utf8")));
+    stderr.on("data", (chunk: Buffer) => onData(chunk.toString("utf8")));
+    this.docker.modem.demuxStream(stream, stdout, stderr);
+
+    const onAbort = () => {
+      (stream as unknown as { destroy?: () => void }).destroy?.();
+    };
+    if (opts.signal.aborted) onAbort();
+    else opts.signal.addEventListener("abort", onAbort, { once: true });
+
+    try {
+      await new Promise<void>((resolve) => {
+        stream.on("end", resolve);
+        stream.on("close", resolve);
+        stream.on("error", () => resolve());
+      });
+    } finally {
+      opts.signal.removeEventListener("abort", onAbort);
+      stdout.end();
+      stderr.end();
+    }
+  }
+
+  async waitForPort(
+    id: string,
+    port: number,
+    opts: WaitForPortOptions,
+  ): Promise<boolean> {
+    const host = opts.host ?? "127.0.0.1";
+    const timeoutMs = opts.timeoutMs ?? 30_000;
+    const intervalSec = ((opts.intervalMs ?? 250) / 1000).toFixed(3);
+    // bash `/dev/tcp` probe loop with a millisecond deadline.
+    const cmd =
+      `deadline=$(( $(date +%s%3N) + ${timeoutMs} )); ` +
+      `while true; do ` +
+      `if (exec 3<>/dev/tcp/${host}/${port}) 2>/dev/null; then exit 0; fi; ` +
+      `if [ "$(date +%s%3N)" -ge "$deadline" ]; then exit 1; fi; ` +
+      `sleep ${intervalSec}; ` +
+      `done`;
+    const { exitCode } = await this.execCapture(id, cmd);
+    return exitCode === 0;
+  }
+
+  async openTcpBridge(id: string, port: number, host: string): Promise<TcpBridge> {
+    const container = this.docker.getContainer(this.containerName(id));
+    // Relay raw bytes to the in-container port. socat is binary-safe and handles
+    // half-close cleanly; fall back to a bash /dev/tcp bridge when socat is
+    // absent (default slim image). We run WITHOUT a TTY (Tty:false) so no pty
+    // line discipline can cook the bytes — the response is demultiplexed below
+    // to strip Docker's 8-byte stream frames, leaving a clean byte stream.
+    const relay =
+      `if command -v socat >/dev/null 2>&1; then ` +
+      `exec socat - TCP:${host}:${port}; ` +
+      `else exec bash -c 'exec 3<>/dev/tcp/${host}/${port}; cat <&3 & cat >&3; wait'; fi`;
+    const exec = await container.exec({
+      Cmd: ["/bin/sh", "-c", relay],
+      AttachStdin: true,
+      AttachStdout: true,
+      AttachStderr: true,
+      Tty: false,
+    });
+    const hijacked = await exec.start({ hijack: true, stdin: true });
+
+    // Demux the multiplexed output into a clean readable; drain stderr.
+    const outbound = new PassThrough();
+    const errSink = new PassThrough();
+    errSink.resume();
+    this.docker.modem.demuxStream(hijacked, outbound, errSink);
+
+    // Present a single duplex: writes -> exec stdin, reads <- demuxed stdout.
+    const writable = hijacked as unknown as NodeJS.WritableStream;
+    const stream = Duplex.from({ readable: outbound, writable });
+    return {
+      stream,
+      close() {
+        (hijacked as unknown as { destroy?: () => void }).destroy?.();
+        outbound.destroy();
+      },
+    };
   }
 
   async destroy(id: string): Promise<void> {

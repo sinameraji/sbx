@@ -14,6 +14,11 @@ export interface SandboxRecord {
    * `setEnvVars`. Request- and session-level env take precedence over these.
    */
   env: Record<string, string>;
+  /**
+   * Whether `/workspace` is backed by a named volume that survives `stop`/`start`
+   * and container recreation. Set at create time; defaults to true.
+   */
+  persist: boolean;
 }
 
 /**

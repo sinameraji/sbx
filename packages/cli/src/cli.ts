@@ -3,6 +3,7 @@ import { listCommand } from "./list.js";
 import { removeCommand } from "./remove.js";
 import { filesCommand } from "./files.js";
 import { startCommand, psCommand, killCommand } from "./proc.js";
+import { stopCommand, startSandboxCommand } from "./lifecycle.js";
 import { logsCommand } from "./logs.js";
 import { waitPortCommand, exposeCommand } from "./ports.js";
 import { execCommand } from "./exec.js";
@@ -43,7 +44,13 @@ export async function cli(args: string[]): Promise<number> {
     case "files":
       return filesCommand(positional, globals, flags);
     case "start":
-      return startCommand(positional, globals, flags);
+      // Overload: `sb start <id> "<cmd>"` launches a process; `sb start <id>`
+      // (no command) resumes a stopped sandbox.
+      return positional.length >= 2
+        ? startCommand(positional, globals, flags)
+        : startSandboxCommand(positional, globals);
+    case "stop":
+      return stopCommand(positional, globals);
     case "ps":
       return psCommand(positional, globals);
     case "kill":
@@ -84,14 +91,21 @@ Commands:
   sb ls [--endpoint <url>]
     List sandboxes managed by the daemon.
 
+  sb stop <id>
+    Stop a sandbox, freeing compute but keeping its persistent workspace.
+
+  sb start <id>
+    Resume a stopped sandbox (workspace intact).
+
   sb rm <id> [--endpoint <url>]
-    Destroy a sandbox.
+    Destroy a sandbox, including its persistent workspace volume.
 
   sb files <subcommand> [args] [--endpoint <url>]
     Manage files inside a sandbox. Run \`sb files\` for subcommand help.
 
   sb start <id> "<command>" [--cwd <dir>]
     Launch a long-running background process inside a sandbox.
+    (With no command, "sb start <id>" resumes a stopped sandbox — see above.)
 
   sb ps <id>
     List background processes in a sandbox.

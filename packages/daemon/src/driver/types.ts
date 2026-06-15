@@ -37,6 +37,12 @@ export interface CreateOptions {
   image: string;
   env?: Record<string, string>;
   labels?: Record<string, string>;
+  /**
+   * Back `/workspace` with a named volume so files outlive the container. With
+   * persistence the container is cattle: `stop` removes it, `start` recreates it,
+   * and the workspace survives. Defaults to true.
+   */
+  persist?: boolean;
 }
 
 /**
@@ -52,8 +58,21 @@ export interface CreateOptions {
 export interface Driver {
   readonly name: string;
 
-  /** Provision and start a sandbox. */
+  /** Provision and start a sandbox (creating its persistent volume if needed). */
   create(opts: CreateOptions): Promise<void>;
+
+  /**
+   * Stop a sandbox, freeing its compute. With persistence the container is
+   * removed but its workspace volume is kept, so `start` can recreate it with
+   * the data intact. In-container processes do not survive a stop.
+   */
+  stop(id: string): Promise<void>;
+
+  /**
+   * (Re)create and start a sandbox's container, reattaching its persistent
+   * volume. Used to resume a stopped sandbox; the workspace is preserved.
+   */
+  start(opts: CreateOptions): Promise<void>;
 
   /**
    * Run a command inside the sandbox, streaming output via `onEvent`.
@@ -116,7 +135,10 @@ export interface Driver {
    */
   openTcpBridge(id: string, port: number, host: string): Promise<TcpBridge>;
 
-  /** Permanently destroy the sandbox and free its resources. */
+  /**
+   * Permanently destroy the sandbox and free its resources, including its
+   * persistent workspace volume. This is irreversible — use `stop` to pause.
+   */
   destroy(id: string): Promise<void>;
 
   /** Liveness check for the underlying runtime (e.g. Docker daemon reachable). */

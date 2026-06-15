@@ -42,8 +42,22 @@ export class ContainerDriver implements Driver {
     return `sbx-${id}`;
   }
 
+  /** Deterministic name for the sandbox's persistent workspace volume. */
+  private volumeName(id: string): string {
+    return `sbx-${id}-workspace`;
+  }
+
   async ping(): Promise<void> {
     await this.docker.ping();
+  }
+
+  /** Create the workspace volume if it does not already exist (idempotent). */
+  private async ensureVolume(id: string): Promise<void> {
+    const name = this.volumeName(id);
+    await this.docker.createVolume({
+      Name: name,
+      Labels: { "sbx.managed": "true", "sbx.id": id },
+    });
   }
 
   /** Pull the image if it is not already present locally. */
@@ -66,7 +80,34 @@ export class ContainerDriver implements Driver {
   }
 
   async create(opts: CreateOptions): Promise<void> {
+    await this.launchContainer(opts);
+  }
+
+  async start(opts: CreateOptions): Promise<void> {
+    try {
+      await this.launchContainer(opts);
+    } catch (err: unknown) {
+      // A 409 means the container already exists (already started) — treat as ok.
+      if (!isConflict(err)) throw err;
+    }
+  }
+
+  async stop(id: string): Promise<void> {
+    // Remove the container but keep the workspace volume. With persistence the
+    // data survives; without it, stop is effectively a destroy of the rootfs.
+    const container = this.docker.getContainer(this.containerName(id));
+    try {
+      await container.remove({ force: true });
+    } catch (err: unknown) {
+      if (!isNotFound(err)) throw err;
+    }
+  }
+
+  /** Shared create/start path: ensure image (+volume), then run the container. */
+  private async launchContainer(opts: CreateOptions): Promise<void> {
     await this.ensureImage(opts.image);
+    const persist = opts.persist ?? true;
+    if (persist) await this.ensureVolume(opts.id);
     const env = Object.entries(opts.env ?? {}).map(([k, v]) => `${k}=${v}`);
     const container = await this.docker.createContainer({
       name: this.containerName(opts.id),
@@ -81,6 +122,8 @@ export class ContainerDriver implements Driver {
         // Phase 0 single-tenant defaults. Per-sandbox cgroup limits and egress
         // controls land alongside the scheduler in Phase 1/3.
         AutoRemove: false,
+        // Back /workspace with the named volume so it outlives the container.
+        ...(persist ? { Binds: [`${this.volumeName(opts.id)}:/workspace`] } : {}),
       },
     });
     await container.start();
@@ -419,16 +462,27 @@ export class ContainerDriver implements Driver {
       // Already gone is fine; rethrow anything else.
       if (!isNotFound(err)) throw err;
     }
+    // Drop the persistent volume too — destroy is irreversible.
+    try {
+      await this.docker.getVolume(this.volumeName(id)).remove({ force: true });
+    } catch (err: unknown) {
+      if (!isNotFound(err)) throw err;
+    }
   }
 }
 
 function isNotFound(err: unknown): boolean {
-  return (
-    typeof err === "object" &&
-    err !== null &&
-    "statusCode" in err &&
-    (err as { statusCode?: number }).statusCode === 404
-  );
+  return statusCode(err) === 404;
+}
+
+function isConflict(err: unknown): boolean {
+  return statusCode(err) === 409;
+}
+
+function statusCode(err: unknown): number | undefined {
+  return typeof err === "object" && err !== null && "statusCode" in err
+    ? (err as { statusCode?: number }).statusCode
+    : undefined;
 }
 
 function shellEscape(value: string): string {

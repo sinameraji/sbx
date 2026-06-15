@@ -143,8 +143,17 @@ export class SandboxStore {
 
   /** Drop all process + exposed-port + session state for a destroyed sandbox. */
   clearSandbox(sandboxId: string): void {
-    this.procs.delete(sandboxId);
+    this.clearRuntimeState(sandboxId);
     this.sessions.delete(sandboxId);
+  }
+
+  /**
+   * Drop the state tied to a live container — background processes and exposed
+   * ports — when a sandbox is stopped. Sessions (just cwd/env strings) and the
+   * sandbox record are kept so `start` resumes with them intact.
+   */
+  clearRuntimeState(sandboxId: string): void {
+    this.procs.delete(sandboxId);
     const ports = this.exposed.get(sandboxId);
     if (ports) {
       for (const exposed of ports.values()) this.routes.delete(exposed.exposeId);

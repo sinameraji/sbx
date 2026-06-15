@@ -351,7 +351,7 @@ async function main(): Promise<number> {
       await fetch(`${endpoint}/sandboxes/${id}/metrics`)
     ).json()) as {
       live: { memLimitBytes: number } | null;
-      usage: { cpuSeconds: number; memByteSeconds: number };
+      usage: { cpuSeconds: number; memByteSeconds: number; egressBytes: number };
       cost: { total: number };
     };
     if (!metrics.live) throw new Error("metrics live snapshot missing for running sandbox");
@@ -360,6 +360,10 @@ async function main(): Promise<number> {
     }
     if (!(metrics.usage.memByteSeconds > 0)) {
       throw new Error(`expected memByteSeconds > 0, got ${metrics.usage.memByteSeconds}`);
+    }
+    // The earlier preview-proxy fetch should have metered egress bytes.
+    if (!(metrics.usage.egressBytes > 0)) {
+      throw new Error(`expected egressBytes > 0, got ${metrics.usage.egressBytes}`);
     }
     if (!(metrics.cost.total > 0)) {
       throw new Error(`expected cost.total > 0, got ${metrics.cost.total}`);

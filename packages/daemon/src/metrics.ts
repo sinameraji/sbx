@@ -31,6 +31,7 @@ export async function sampleUsage(
       const next: SandboxUsage = {
         cpuSeconds: prev.cpuSeconds + cpuDeltaNs / 1e9,
         memByteSeconds: prev.memByteSeconds + s.memBytes * dtSeconds,
+        egressBytes: prev.egressBytes, // metered by the proxy, not the sampler
         lastCpuTotalNs: s.cpuTotalUsageNs,
         lastSampledAt: new Date(now).toISOString(),
       };

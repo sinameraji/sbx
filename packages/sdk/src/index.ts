@@ -77,12 +77,14 @@ export interface SandboxStats {
 export interface SandboxUsage {
   cpuSeconds: number;
   memByteSeconds: number;
+  egressBytes: number;
 }
 
 /** Per-resource cost breakdown in the daemon's configured currency. */
 export interface CostBreakdown {
   cpu: number;
   mem: number;
+  egress: number;
   total: number;
 }
 

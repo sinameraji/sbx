@@ -53,6 +53,7 @@ Environment variables (`packages/daemon/src/config.ts`):
 | `SBX_METRICS_INTERVAL_MS` | `10000` | How often the metrics sampler integrates per-sandbox CPU/mem usage (`0` = off) |
 | `SBX_COST_CPU_PER_HOUR` | `0.05` | Cost-meter rate: currency per vCPU-hour |
 | `SBX_COST_MEM_GB_PER_HOUR` | `0.005` | Cost-meter rate: currency per GB-hour of memory |
+| `SBX_COST_EGRESS_PER_GB` | `0.01` | Cost-meter rate: currency per GB of preview-proxy egress |
 | `SBX_ENDPOINT` | `http://127.0.0.1:4750` | SDK default endpoint |
 
 ---
@@ -192,7 +193,7 @@ npm run build
 - **`ContainerDriver`**: backs sandboxes with long-lived Docker containers. The container stays alive (`sleep infinity`) and the daemon `exec`s into it on demand.
 - **`SandboxStore`**: registry backed by embedded SQLite (`node:sqlite`), with in-memory `Map`s as a write-through cache rehydrated on startup, so records survive a daemon restart.
 - **Lifecycle FSM**: status is `running` | `paused` | `stopped`. The idle reaper (`src/lifecycle.ts`) auto-pauses `running` sandboxes idle past `sleepAfterMs` (skipping those with exposed ports / running processes); any container-work op auto-resumes a `paused` sandbox via the `ensureLive` choke point in `api/server.ts`. `store.touch` records activity (also on proxy traffic). Manual `stop` → `stopped` is never auto-resumed.
-- **Metrics + cost (Phase 2)**: `driver.stats(id)` reads the Docker stats API; the sampler (`src/metrics.ts`) integrates `cpuSeconds`/`memByteSeconds` into the persisted `usage` column; `src/cost.ts` applies configurable rates. Surfaced at `GET /sandboxes/:id/metrics` (`?live=0` skips the live Docker call), SDK `Sandbox.metrics()`, CLI `sb stats`.
+- **Metrics + cost (Phase 2)**: `driver.stats(id)` reads the Docker stats API; the sampler (`src/metrics.ts`) integrates `cpuSeconds`/`memByteSeconds` into the persisted `usage` column and the preview proxy meters `egressBytes`; `src/cost.ts` applies configurable rates (cpu + mem + egress). Surfaced at `GET /sandboxes/:id/metrics` (`?live=0` skips the live Docker call), SDK `Sandbox.metrics()`, CLI `sb stats`.
 - **Dashboard (Phase 2)**: served at `GET /` from `src/web/dashboard.ts` (no build step); `GET /info` exposes driver/image/proxy/cost-rates for it.
 - **`SbxClient` / `Sandbox`**: SDK classes that expose `getSandbox`, `exec`, `execStream`, `destroy`, matching the Cloudflare Sandbox shape.
 

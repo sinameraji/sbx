@@ -118,7 +118,8 @@ function computeCost(u) {
   if (!u) return 0;
   var cpu = (u.cpuSeconds / 3600) * rates.costCpuPerHour;
   var mem = (u.memByteSeconds / 1e9 / 3600) * rates.costMemGbPerHour;
-  return cpu + mem;
+  var egress = ((u.egressBytes || 0) / 1e9) * (rates.costEgressPerGb || 0);
+  return cpu + mem + egress;
 }
 function money(n) { return "$" + n.toFixed(6); }
 function ago(iso) {
@@ -237,6 +238,7 @@ function renderDetail() {
       h += statCard("PIDs", live ? String(live.pids) : "—");
       h += statCard("CPU total", m.usage.cpuSeconds.toFixed(1) + " vCPU-s");
       h += statCard("Mem total", (m.usage.memByteSeconds / 1e9).toFixed(1) + " GB-s");
+      h += statCard("Egress", mb(m.usage.egressBytes || 0));
       h += statCard("Cost", money(m.cost.total));
       h += "</div>";
       if (ex.length) {

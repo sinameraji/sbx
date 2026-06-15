@@ -33,10 +33,10 @@ export async function statsCommand(
       console.log("  (not running — no live stats)");
     }
     console.log(
-      `  Usage: ${m.usage.cpuSeconds.toFixed(1)} vCPU-s, ${(m.usage.memByteSeconds / 1e9).toFixed(1)} GB-s`,
+      `  Usage: ${m.usage.cpuSeconds.toFixed(1)} vCPU-s, ${(m.usage.memByteSeconds / 1e9).toFixed(1)} GB-s, ${(m.usage.egressBytes / 1e6).toFixed(2)} MB egress`,
     );
     console.log(
-      `  Cost:  ${m.cost.total.toFixed(6)} (cpu ${m.cost.cpu.toFixed(6)} + mem ${m.cost.mem.toFixed(6)})`,
+      `  Cost:  ${m.cost.total.toFixed(6)} (cpu ${m.cost.cpu.toFixed(6)} + mem ${m.cost.mem.toFixed(6)} + egress ${m.cost.egress.toFixed(6)})`,
     );
     return 0;
   } catch (err) {

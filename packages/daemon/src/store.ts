@@ -13,7 +13,13 @@ import type {
 
 /** Zero-valued usage accumulator for a fresh sandbox. */
 export function emptyUsage(): SandboxUsage {
-  return { cpuSeconds: 0, memByteSeconds: 0, lastCpuTotalNs: 0, lastSampledAt: "" };
+  return {
+    cpuSeconds: 0,
+    memByteSeconds: 0,
+    egressBytes: 0,
+    lastCpuTotalNs: 0,
+    lastSampledAt: "",
+  };
 }
 
 /** Where a preview route points, resolved by the proxy on each request. */
@@ -220,6 +226,19 @@ export class SandboxStore {
     this.db
       .prepare("UPDATE sandboxes SET usage = ? WHERE id = ?")
       .run(JSON.stringify(usage), id);
+  }
+
+  /**
+   * Add to a sandbox's cumulative egress byte counter (write-through). Called by
+   * the preview proxy as connections close. No-op for an unknown id.
+   */
+  addEgress(id: string, bytes: number): void {
+    const rec = this.byId.get(id);
+    if (!rec || bytes <= 0) return;
+    rec.usage.egressBytes += bytes;
+    this.db
+      .prepare("UPDATE sandboxes SET usage = ? WHERE id = ?")
+      .run(JSON.stringify(rec.usage), id);
   }
 
   /**

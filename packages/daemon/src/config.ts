@@ -38,6 +38,8 @@ export interface Config {
   costCpuPerHour: number;
   /** Cost-meter rate: currency units per GB-hour of memory. */
   costMemGbPerHour: number;
+  /** Cost-meter rate: currency units per GB of preview-proxy egress. */
+  costEgressPerGb: number;
 }
 
 export function loadConfig(): Config {
@@ -54,6 +56,7 @@ export function loadConfig(): Config {
     metricsIntervalMs: Number(process.env.SBX_METRICS_INTERVAL_MS ?? 10000),
     costCpuPerHour: Number(process.env.SBX_COST_CPU_PER_HOUR ?? 0.05),
     costMemGbPerHour: Number(process.env.SBX_COST_MEM_GB_PER_HOUR ?? 0.005),
+    costEgressPerGb: Number(process.env.SBX_COST_EGRESS_PER_GB ?? 0.01),
   };
 }
 

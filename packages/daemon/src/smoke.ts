@@ -167,6 +167,35 @@ async function main(): Promise<number> {
     }
     console.error("[smoke] session cwd + env persisted");
 
+    // Persistence: a file in /workspace survives a stop/start (container is
+    // recreated, the named volume is reattached).
+    await fetch(`${endpoint}/sandboxes/${id}/files/write`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ path: "/workspace/persist.txt", content: "survives restart" }),
+    });
+    const stopRes = await fetch(`${endpoint}/sandboxes/${id}/stop`, { method: "POST" });
+    if (!stopRes.ok) throw new Error(`stop failed: ${stopRes.status}`);
+    const stopped = (await stopRes.json()) as { status: string };
+    if (stopped.status !== "stopped") throw new Error(`expected stopped, got ${stopped.status}`);
+    console.error("[smoke] stopped sandbox");
+
+    const startSbRes = await fetch(`${endpoint}/sandboxes/${id}/start`, { method: "POST" });
+    if (!startSbRes.ok) throw new Error(`start failed: ${startSbRes.status}`);
+    console.error("[smoke] started sandbox");
+
+    const persistRead = await fetch(`${endpoint}/sandboxes/${id}/files/read`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ path: "/workspace/persist.txt" }),
+    });
+    if (!persistRead.ok) throw new Error(`persist read failed: ${persistRead.status}`);
+    const { content: persisted } = (await persistRead.json()) as { content: string };
+    if (persisted !== "survives restart") {
+      throw new Error(`workspace did not persist across restart: "${persisted}"`);
+    }
+    console.error("[smoke] workspace persisted across stop/start");
+
     // Destroy sandbox.
     const deleteRes = await fetch(`${endpoint}/sandboxes/${id}`, { method: "DELETE" });
     if (!deleteRes.ok) throw new Error(`destroy failed: ${deleteRes.status}`);

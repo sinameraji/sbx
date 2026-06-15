@@ -1,6 +1,14 @@
 import Docker from "dockerode";
 import { PassThrough } from "node:stream";
-import type { ExecEvent, ExecOptions } from "../types.js";
+import type {
+  ExecEvent,
+  ExecOptions,
+  FileInfo,
+  ListFilesOptions,
+  MkdirOptions,
+  ReadFileOptions,
+  WriteFileOptions,
+} from "../types.js";
 import type { CreateOptions, Driver } from "./types.js";
 
 /**
@@ -111,6 +119,125 @@ export class ContainerDriver implements Driver {
     return exitCode;
   }
 
+  /**
+   * Run a non-interactive command and return its stdout as a UTF-8 string.
+   * Throws if the command exits non-zero.
+   */
+  private async runAndCapture(id: string, command: string): Promise<string> {
+    const container = this.docker.getContainer(this.containerName(id));
+    const exec = await container.exec({
+      Cmd: ["/bin/sh", "-c", command],
+      AttachStdout: true,
+      AttachStderr: true,
+      WorkingDir: "/workspace",
+    });
+
+    const stream = await exec.start({ hijack: true, stdin: false });
+    const stdout = new PassThrough();
+    const stderr = new PassThrough();
+    let out = "";
+    let err = "";
+    stdout.on("data", (chunk: Buffer) => {
+      out += chunk.toString("utf8");
+    });
+    stderr.on("data", (chunk: Buffer) => {
+      err += chunk.toString("utf8");
+    });
+    this.docker.modem.demuxStream(stream, stdout, stderr);
+
+    await new Promise<void>((resolve, reject) => {
+      stream.on("end", resolve);
+      stream.on("error", reject);
+    });
+    stdout.end();
+    stderr.end();
+
+    const info = await exec.inspect();
+    if ((info.ExitCode ?? 0) !== 0) {
+      throw new Error(err.trim() || `command failed with exit code ${info.ExitCode}`);
+    }
+    return out;
+  }
+
+  async writeFile(id: string, opts: WriteFileOptions): Promise<void> {
+    const dir = opts.path.includes("/")
+      ? opts.path.slice(0, opts.path.lastIndexOf("/"))
+      : "/workspace";
+    const encoded = Buffer.from(opts.content, "utf8").toString("base64");
+    const mode = opts.mode ? `chmod ${opts.mode} ${shellEscape(opts.path)} && ` : "";
+    const command = `mkdir -p ${shellEscape(dir)} && printf '%s' '${encoded}' | base64 -d > ${shellEscape(opts.path)} && ${mode}echo ok`;
+    const output = await this.runAndCapture(id, command);
+    if (output.trim() !== "ok") {
+      throw new Error(`writeFile failed: ${output}`);
+    }
+  }
+
+  async readFile(id: string, opts: ReadFileOptions): Promise<string> {
+    return this.runAndCapture(id, `cat ${shellEscape(opts.path)}`);
+  }
+
+  async mkdir(id: string, opts: MkdirOptions): Promise<void> {
+    const flag = opts.parents ? "-p" : "";
+    await this.runAndCapture(id, `mkdir ${flag} ${shellEscape(opts.path)}`);
+  }
+
+  async listFiles(id: string, opts: ListFilesOptions): Promise<FileInfo[]> {
+    const container = this.docker.getContainer(this.containerName(id));
+    const exec = await container.exec({
+      Cmd: [
+        "/bin/sh",
+        "-c",
+        `find ${shellEscape(opts.path)} -maxdepth 1 -printf '%y|%p|%s|%TY-%Tm-%TdT%TH:%TM:%TS\\n'`,
+      ],
+      AttachStdout: true,
+      AttachStderr: true,
+      WorkingDir: "/workspace",
+    });
+
+    const stream = await exec.start({ hijack: true, stdin: false });
+    const stdout = new PassThrough();
+    const stderr = new PassThrough();
+    let out = "";
+    let err = "";
+    stdout.on("data", (chunk: Buffer) => {
+      out += chunk.toString("utf8");
+    });
+    stderr.on("data", (chunk: Buffer) => {
+      err += chunk.toString("utf8");
+    });
+    this.docker.modem.demuxStream(stream, stdout, stderr);
+
+    await new Promise<void>((resolve, reject) => {
+      stream.on("end", resolve);
+      stream.on("error", reject);
+    });
+    stdout.end();
+    stderr.end();
+
+    const info = await exec.inspect();
+    if ((info.ExitCode ?? 0) !== 0) {
+      throw new Error(`listFiles failed: ${err || "unknown error"}`);
+    }
+
+    const lines = out
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean);
+
+    return lines.map((line) => {
+      const [type, rawPath, size, mtime] = line.split("|");
+      const path = rawPath!;
+      const name = path.slice(path.lastIndexOf("/") + 1);
+      return {
+        path,
+        name,
+        isDirectory: type === "d",
+        size: Number(size ?? 0),
+        modifiedAt: mtime ?? new Date().toISOString(),
+      };
+    });
+  }
+
   async destroy(id: string): Promise<void> {
     const container = this.docker.getContainer(this.containerName(id));
     try {
@@ -129,4 +256,9 @@ function isNotFound(err: unknown): boolean {
     "statusCode" in err &&
     (err as { statusCode?: number }).statusCode === 404
   );
+}
+
+function shellEscape(value: string): string {
+  // Use single quotes and escape any embedded single quotes.
+  return `'${value.replace(/'/g, "'\"'\"'")}'`;
 }

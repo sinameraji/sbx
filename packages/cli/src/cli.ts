@@ -1,6 +1,7 @@
 import { runCommand } from "./run.js";
 import { listCommand } from "./list.js";
 import { removeCommand } from "./remove.js";
+import { filesCommand } from "./files.js";
 
 export interface GlobalArgs {
   endpoint?: string;
@@ -27,6 +28,8 @@ export async function cli(args: string[]): Promise<number> {
     case "rm":
     case "remove":
       return removeCommand(positional, globals);
+    case "files":
+      return filesCommand(positional, globals, flags);
     default:
       console.error(`Unknown command: ${command}`);
       printHelp();
@@ -48,6 +51,9 @@ Commands:
 
   sb rm <id> [--endpoint <url>]
     Destroy a sandbox.
+
+  sb files <subcommand> [args] [--endpoint <url>]
+    Manage files inside a sandbox. Run \`sb files\` for subcommand help.
 
 Global options:
   --endpoint <url>   Daemon URL (default: http://127.0.0.1:4750 or SBX_ENDPOINT)

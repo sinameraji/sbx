@@ -37,10 +37,26 @@ export interface SandboxInfo {
   labels: Record<string, string>;
 }
 
+export interface FileInfo {
+  path: string;
+  name: string;
+  isDirectory: boolean;
+  size: number;
+  modifiedAt: string;
+}
+
 export interface CreateOptions {
   image?: string;
   env?: Record<string, string>;
   labels?: Record<string, string>;
+}
+
+export interface WriteFileOptions {
+  mode?: string;
+}
+
+export interface MkdirOptions {
+  parents?: boolean;
 }
 
 export interface SbxClientOptions {
@@ -148,6 +164,48 @@ export class Sandbox {
   /** Permanently destroy the sandbox. */
   async destroy(): Promise<void> {
     await this.client.request("DELETE", `/sandboxes/${this.info.id}`);
+  }
+
+  /** Write a UTF-8 file inside the sandbox. */
+  async writeFile(
+    path: string,
+    content: string,
+    options: WriteFileOptions = {},
+  ): Promise<void> {
+    await this.client.request<{ ok: boolean }>(
+      "POST",
+      `/sandboxes/${this.info.id}/files/write`,
+      { path, content, mode: options.mode },
+    );
+  }
+
+  /** Read a UTF-8 file from the sandbox. */
+  async readFile(path: string): Promise<string> {
+    const { content } = await this.client.request<{ content: string }>(
+      "POST",
+      `/sandboxes/${this.info.id}/files/read`,
+      { path },
+    );
+    return content;
+  }
+
+  /** Create a directory inside the sandbox. */
+  async mkdir(path: string, options: MkdirOptions = {}): Promise<void> {
+    await this.client.request<{ ok: boolean }>(
+      "POST",
+      `/sandboxes/${this.info.id}/files/mkdir`,
+      { path, parents: options.parents },
+    );
+  }
+
+  /** List files and directories at the given path. */
+  async listFiles(path: string): Promise<FileInfo[]> {
+    const { entries } = await this.client.request<{ entries: FileInfo[] }>(
+      "POST",
+      `/sandboxes/${this.info.id}/files/list`,
+      { path },
+    );
+    return entries;
   }
 }
 

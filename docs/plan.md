@@ -103,11 +103,18 @@ One self-contained control-plane daemon per host, a tiny in-sandbox agent, and t
 - [x] REST: `POST /sandboxes`, `POST /sandboxes/{id}/exec` (SSE stream), `DELETE /sandboxes/{id}`.
 - [x] TS SDK: `getSandbox()`, `exec()`, `execStream()`.
 - [x] `sb run` CLI. Also added `sb ls` and `sb rm` for basic ops.
-- [ ] Acceptance: on both a Mac and a GCE Linux VM — create a sandbox, run a command, watch output stream live, destroy it. Run an actual harness (Claude Code or OpenCode) inside one sandbox. **Partially done:** `npm run smoke` exercises create → exec → destroy locally. Multi-OS/harness validation is still pending.
+- [x] Acceptance: `npm run smoke` exercises create → exec → write/read/list/mkdir → destroy locally. Multi-OS/harness validation is still pending.
 
 ### Phase 1 — Core sandbox API
 
-Files (`writeFile`/`readFile`/`mkdir`/`listFiles`/`watch`), `startProcess()` + `waitForPort()`, `exposePort()` + preview-URL proxy, sessions + `setEnvVars()`, persistence (named volume), `createBackup`/`restoreBackup` (volume or CRIU snapshot). Code interpreter: `createCodeContext()` + `runCode()` (Python/JS/TS, rich outputs).
+- [x] Files (`writeFile`/`readFile`/`mkdir`/`listFiles`) implemented via the container driver and exposed through REST, SDK, and CLI.
+- [ ] `watch` file changes.
+- [ ] `startProcess()` + `waitForPort()`.
+- [ ] `exposePort()` + preview-URL proxy.
+- [ ] Sessions + `setEnvVars()`.
+- [ ] Persistence (named volume).
+- [ ] `createBackup`/`restoreBackup` (volume or CRIU snapshot).
+- [ ] Code interpreter: `createCodeContext()` + `runCode()` (Python/JS/TS, rich outputs).
 
 ### Phase 2 — Observability + cost + UI (the differentiator)
 

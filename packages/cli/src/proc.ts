@@ -1,7 +1,8 @@
 import { SbxClient } from "@sbx/sdk";
 import type { GlobalArgs } from "./cli.js";
+import { parseEnvPairs } from "./env.js";
 
-/** sb start <id> "<command>" [--cwd <dir>] */
+/** sb start <id> "<command>" [--cwd <dir>] [--env KEY=VAL,...] */
 export async function startCommand(
   positional: string[],
   globals: GlobalArgs,
@@ -9,14 +10,17 @@ export async function startCommand(
 ): Promise<number> {
   const [id, command] = positional;
   if (!id || !command) {
-    console.error('Usage: sb start <id> "<command>" [--cwd <dir>]');
+    console.error('Usage: sb start <id> "<command>" [--cwd <dir>] [--env KEY=VAL,...]');
     return 1;
   }
   const client = new SbxClient({ endpoint: globals.endpoint });
   try {
+    let env: Record<string, string> | undefined;
+    if (typeof flags.env === "string") env = parseEnvPairs(flags.env.split(","));
     const sandbox = await client.getSandbox(id);
     const proc = await sandbox.startProcess(command, {
       cwd: typeof flags.cwd === "string" ? flags.cwd : undefined,
+      env,
     });
     console.log(`Started ${proc.procId} (pid ${proc.pid}).`);
     return 0;

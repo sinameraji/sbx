@@ -1,5 +1,10 @@
 import { randomBytes } from "node:crypto";
-import type { ExposedPort, ProcessInfo, SandboxRecord } from "./types.js";
+import type {
+  ExposedPort,
+  ProcessInfo,
+  SandboxRecord,
+  SessionInfo,
+} from "./types.js";
 
 /** Where a preview route points, resolved by the proxy on each request. */
 export interface RouteTarget {
@@ -21,12 +26,18 @@ export class SandboxStore {
   private exposed = new Map<string, Map<number, ExposedPort>>();
   // exposeId -> route target (O(1) lookup for the proxy)
   private routes = new Map<string, RouteTarget>();
+  // sandboxId -> sessionId -> session
+  private sessions = new Map<string, Map<string, SessionInfo>>();
 
   static newId(): string {
     return randomBytes(6).toString("hex");
   }
 
   static newProcId(): string {
+    return randomBytes(4).toString("hex");
+  }
+
+  static newSessionId(): string {
     return randomBytes(4).toString("hex");
   }
 
@@ -105,9 +116,35 @@ export class SandboxStore {
     return this.routes.get(exposeId);
   }
 
-  /** Drop all process + exposed-port state for a destroyed sandbox. */
+  // --- sessions ------------------------------------------------------------
+
+  addSession(sandboxId: string, session: SessionInfo): void {
+    let map = this.sessions.get(sandboxId);
+    if (!map) {
+      map = new Map();
+      this.sessions.set(sandboxId, map);
+    }
+    map.set(session.sessionId, session);
+  }
+
+  getSession(sandboxId: string, sessionId: string): SessionInfo | undefined {
+    return this.sessions.get(sandboxId)?.get(sessionId);
+  }
+
+  listSessions(sandboxId: string): SessionInfo[] {
+    return [...(this.sessions.get(sandboxId)?.values() ?? [])].sort((a, b) =>
+      a.createdAt < b.createdAt ? 1 : -1,
+    );
+  }
+
+  removeSession(sandboxId: string, sessionId: string): boolean {
+    return this.sessions.get(sandboxId)?.delete(sessionId) ?? false;
+  }
+
+  /** Drop all process + exposed-port + session state for a destroyed sandbox. */
   clearSandbox(sandboxId: string): void {
     this.procs.delete(sandboxId);
+    this.sessions.delete(sandboxId);
     const ports = this.exposed.get(sandboxId);
     if (ports) {
       for (const exposed of ports.values()) this.routes.delete(exposed.exposeId);

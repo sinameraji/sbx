@@ -1,0 +1,47 @@
+import { SbxClient } from "@sbx/sdk";
+import type { GlobalArgs } from "./cli.js";
+
+/** sb env <id> [KEY=VALUE ...] — set sandbox env vars, or print them if none given. */
+export async function envCommand(
+  positional: string[],
+  globals: GlobalArgs,
+): Promise<number> {
+  const [id, ...pairs] = positional;
+  if (!id) {
+    console.error("Usage: sb env <id> [KEY=VALUE ...]");
+    return 1;
+  }
+  const client = new SbxClient({ endpoint: globals.endpoint });
+  try {
+    const sandbox = await client.getSandbox(id);
+    const env =
+      pairs.length > 0
+        ? await sandbox.setEnvVars(parseEnvPairs(pairs))
+        : await sandbox.getEnvVars();
+    const keys = Object.keys(env).sort();
+    if (keys.length === 0) {
+      console.log("No environment variables set.");
+      return 0;
+    }
+    for (const key of keys) console.log(`${key}=${env[key]}`);
+    return 0;
+  } catch (err) {
+    console.error(`Failed: ${formatError(err)}`);
+    return 1;
+  }
+}
+
+/** Parse `KEY=VALUE` tokens into a record. Throws on a malformed token. */
+export function parseEnvPairs(pairs: string[]): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const pair of pairs) {
+    const eq = pair.indexOf("=");
+    if (eq <= 0) throw new Error(`invalid env var "${pair}" (expected KEY=VALUE)`);
+    env[pair.slice(0, eq)] = pair.slice(eq + 1);
+  }
+  return env;
+}
+
+function formatError(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}

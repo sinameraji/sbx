@@ -5,6 +5,9 @@ import { filesCommand } from "./files.js";
 import { startCommand, psCommand, killCommand } from "./proc.js";
 import { logsCommand } from "./logs.js";
 import { waitPortCommand, exposeCommand } from "./ports.js";
+import { execCommand } from "./exec.js";
+import { envCommand } from "./env.js";
+import { sessionCommand } from "./session.js";
 
 export interface GlobalArgs {
   endpoint?: string;
@@ -25,6 +28,12 @@ export async function cli(args: string[]): Promise<number> {
   switch (command) {
     case "run":
       return runCommand(positional, globals, flags);
+    case "exec":
+      return execCommand(positional, globals, flags);
+    case "env":
+      return envCommand(positional, globals);
+    case "session":
+      return sessionCommand(positional, globals, flags);
     case "ls":
     case "list":
       return listCommand(globals);
@@ -60,6 +69,17 @@ Usage: sb <command> [options]
 Commands:
   sb run "<command>" [--image <image>] [--keep] [--endpoint <url>]
     Create a sandbox, run a command, stream output, then destroy it.
+
+  sb exec <id> "<command>" [--session <sid>] [--cwd <dir>] [--env KEY=VAL,...]
+    Run a command in an existing sandbox (optionally within a session).
+
+  sb env <id> [KEY=VALUE ...]
+    Set sandbox environment variables, or print them when none are given.
+
+  sb session create <id> [--cwd <dir>] [--env KEY=VAL,...] [--id <sid>]
+  sb session ls <id>
+  sb session rm <id> <sessionId>
+    Manage persistent sessions (working directory + env) inside a sandbox.
 
   sb ls [--endpoint <url>]
     List sandboxes managed by the daemon.

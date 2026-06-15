@@ -1,5 +1,6 @@
 import { SbxClient } from "@sbx/sdk";
 import type { GlobalArgs } from "./cli.js";
+import { parseEnvPairs } from "./env.js";
 
 export async function runCommand(
   positional: string[],
@@ -8,17 +9,29 @@ export async function runCommand(
 ): Promise<number> {
   const command = positional[0];
   if (!command) {
-    console.error("Usage: sb run \"<command>\" [--image <image>] [--keep]");
+    console.error('Usage: sb run "<command>" [--image <image>] [--keep] [--env KEY=VAL,...]');
     return 1;
   }
 
   const client = new SbxClient({ endpoint: globals.endpoint });
   const image = typeof flags.image === "string" ? flags.image : undefined;
   const keep = flags.keep === true;
+  let env: Record<string, string> | undefined;
+  if (typeof flags.env === "string") {
+    try {
+      env = parseEnvPairs(flags.env.split(","));
+    } catch (err) {
+      console.error(formatError(err));
+      return 1;
+    }
+  }
 
   let sandbox;
   try {
-    sandbox = await client.getSandbox(undefined, image ? { image } : undefined);
+    sandbox = await client.getSandbox(
+      undefined,
+      image || env ? { image, env } : undefined,
+    );
   } catch (err) {
     console.error(`Failed to create sandbox: ${formatError(err)}`);
     return 1;

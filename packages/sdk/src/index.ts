@@ -18,6 +18,8 @@ export type ExecEvent =
 export interface ExecOptions {
   cwd?: string;
   env?: Record<string, string>;
+  /** Run inside a persistent session (its cwd/env apply and `cd` persists). */
+  sessionId?: string;
   /** Called for each stdout/stderr chunk as it streams in. */
   onOutput?: (stream: "stdout" | "stderr", data: string) => void;
 }
@@ -88,6 +90,21 @@ export interface ExposedPort {
   token: string | null;
   createdAt: string;
   url: string;
+}
+
+/** A persistent execution context (working directory + env) inside a sandbox. */
+export interface SessionInfo {
+  sessionId: string;
+  cwd: string;
+  env: Record<string, string>;
+  createdAt: string;
+}
+
+export interface CreateSessionOptions {
+  /** Explicit session id; a random one is assigned when omitted. */
+  id?: string;
+  cwd?: string;
+  env?: Record<string, string>;
 }
 
 export interface SbxClientOptions {
@@ -174,7 +191,12 @@ export class Sandbox {
       {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ command, cwd: options.cwd, env: options.env }),
+        body: JSON.stringify({
+          command,
+          cwd: options.cwd,
+          env: options.env,
+          sessionId: options.sessionId,
+        }),
       },
     );
     if (!res.ok || !res.body) {
@@ -328,6 +350,94 @@ export class Sandbox {
       `/sandboxes/${this.info.id}/expose`,
     );
     return exposed;
+  }
+
+  /** Merge environment variables applied to every subsequent command. */
+  async setEnvVars(env: Record<string, string>): Promise<Record<string, string>> {
+    const res = await this.client.request<{ env: Record<string, string> }>(
+      "POST",
+      `/sandboxes/${this.info.id}/env`,
+      { env },
+    );
+    return res.env;
+  }
+
+  /** Read the sandbox-level environment variables. */
+  async getEnvVars(): Promise<Record<string, string>> {
+    const res = await this.client.request<{ env: Record<string, string> }>(
+      "GET",
+      `/sandboxes/${this.info.id}/env`,
+    );
+    return res.env;
+  }
+
+  /** Create a persistent session; commands run in it share cwd + env. */
+  async createSession(options: CreateSessionOptions = {}): Promise<Session> {
+    const info = await this.client.request<SessionInfo>(
+      "POST",
+      `/sandboxes/${this.info.id}/sessions`,
+      { id: options.id, cwd: options.cwd, env: options.env },
+    );
+    return new Session(this, info);
+  }
+
+  /** List the sessions open in this sandbox. */
+  async listSessions(): Promise<SessionInfo[]> {
+    const { sessions } = await this.client.request<{ sessions: SessionInfo[] }>(
+      "GET",
+      `/sandboxes/${this.info.id}/sessions`,
+    );
+    return sessions;
+  }
+
+  /** @internal — used by Session to reach the env/session endpoints. */
+  get _client(): SbxClient {
+    return this.client;
+  }
+}
+
+/**
+ * A persistent execution context inside a sandbox. `exec` runs in the session's
+ * working directory with its env overlay, and a `cd` persists to later commands.
+ */
+export class Session {
+  constructor(
+    private readonly sandbox: Sandbox,
+    private readonly info: SessionInfo,
+  ) {}
+
+  get sessionId(): string {
+    return this.info.sessionId;
+  }
+
+  /** Run a command to completion within this session. */
+  exec(command: string, options: ExecOptions = {}): Promise<ExecResult> {
+    return this.sandbox.exec(command, { ...options, sessionId: this.sessionId });
+  }
+
+  /** Run a command, yielding output events as they stream in. */
+  execStream(command: string, options: ExecOptions = {}): AsyncGenerator<ExecEvent> {
+    return this.sandbox.execStream(command, {
+      ...options,
+      sessionId: this.sessionId,
+    });
+  }
+
+  /** Merge environment variables applied to subsequent commands in this session. */
+  async setEnvVars(env: Record<string, string>): Promise<SessionInfo> {
+    return this.sandbox._client.request<SessionInfo>(
+      "POST",
+      `/sandboxes/${this.sandbox.id}/sessions/${this.sessionId}/env`,
+      { env },
+    );
+  }
+
+  /** Delete this session (the sandbox and its files are untouched). */
+  async destroy(): Promise<void> {
+    await this.sandbox._client.request(
+      "DELETE",
+      `/sandboxes/${this.sandbox.id}/sessions/${this.sessionId}`,
+    );
   }
 }
 

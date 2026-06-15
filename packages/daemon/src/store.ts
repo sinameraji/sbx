@@ -7,8 +7,14 @@ import type {
   ExposedPort,
   ProcessInfo,
   SandboxRecord,
+  SandboxUsage,
   SessionInfo,
 } from "./types.js";
+
+/** Zero-valued usage accumulator for a fresh sandbox. */
+export function emptyUsage(): SandboxUsage {
+  return { cpuSeconds: 0, memByteSeconds: 0, lastCpuTotalNs: 0, lastSampledAt: "" };
+}
 
 /** Where a preview route points, resolved by the proxy on each request. */
 export interface RouteTarget {
@@ -69,7 +75,8 @@ export class SandboxStore {
         env            TEXT NOT NULL,
         persist        INTEGER NOT NULL,
         lastActivityAt TEXT NOT NULL DEFAULT '',
-        sleepAfterMs   INTEGER NOT NULL DEFAULT 0
+        sleepAfterMs   INTEGER NOT NULL DEFAULT 0,
+        usage          TEXT NOT NULL DEFAULT '{}'
       );
       CREATE TABLE IF NOT EXISTS processes (
         sandboxId TEXT NOT NULL,
@@ -115,6 +122,7 @@ export class SandboxStore {
     // older daemon (CREATE TABLE IF NOT EXISTS leaves existing tables untouched).
     this.ensureColumn("sandboxes", "lastActivityAt", "TEXT NOT NULL DEFAULT ''");
     this.ensureColumn("sandboxes", "sleepAfterMs", "INTEGER NOT NULL DEFAULT 0");
+    this.ensureColumn("sandboxes", "usage", "TEXT NOT NULL DEFAULT '{}'");
   }
 
   /** Add a column to a table if it isn't already present (idempotent migration). */
@@ -179,13 +187,13 @@ export class SandboxStore {
     this.db
       .prepare(
         `INSERT INTO sandboxes
-           (id, image, status, createdAt, labels, env, persist, lastActivityAt, sleepAfterMs)
+           (id, image, status, createdAt, labels, env, persist, lastActivityAt, sleepAfterMs, usage)
          VALUES
-           ($id, $image, $status, $createdAt, $labels, $env, $persist, $lastActivityAt, $sleepAfterMs)
+           ($id, $image, $status, $createdAt, $labels, $env, $persist, $lastActivityAt, $sleepAfterMs, $usage)
          ON CONFLICT(id) DO UPDATE SET
            image=$image, status=$status, createdAt=$createdAt,
            labels=$labels, env=$env, persist=$persist,
-           lastActivityAt=$lastActivityAt, sleepAfterMs=$sleepAfterMs`,
+           lastActivityAt=$lastActivityAt, sleepAfterMs=$sleepAfterMs, usage=$usage`,
       )
       .run({
         id: record.id,
@@ -197,7 +205,21 @@ export class SandboxStore {
         persist: record.persist ? 1 : 0,
         lastActivityAt: record.lastActivityAt,
         sleepAfterMs: record.sleepAfterMs,
+        usage: JSON.stringify(record.usage),
       });
+  }
+
+  /**
+   * Persist updated cumulative usage for a sandbox (write-through). Cheap single
+   * column used by the metrics sampler on every tick. No-op for an unknown id.
+   */
+  setUsage(id: string, usage: SandboxUsage): void {
+    const rec = this.byId.get(id);
+    if (!rec) return;
+    rec.usage = usage;
+    this.db
+      .prepare("UPDATE sandboxes SET usage = ? WHERE id = ?")
+      .run(JSON.stringify(usage), id);
   }
 
   /**
@@ -443,7 +465,17 @@ function rowToSandbox(row: any): SandboxRecord {
     persist: row.persist === 1,
     lastActivityAt: row.lastActivityAt || row.createdAt,
     sleepAfterMs: row.sleepAfterMs ?? 0,
+    usage: { ...emptyUsage(), ...parseUsage(row.usage) },
   };
+}
+
+function parseUsage(raw: unknown): Partial<SandboxUsage> {
+  if (typeof raw !== "string" || !raw) return {};
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return {};
+  }
 }
 
 function rowToProcess(row: any): ProcessInfo {

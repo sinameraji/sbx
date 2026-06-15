@@ -32,6 +32,12 @@ export interface Config {
   defaultSleepAfterMs: number;
   /** How often (ms) the idle reaper scans for sandboxes to auto-pause. */
   reapIntervalMs: number;
+  /** How often (ms) the metrics sampler integrates per-sandbox usage. `0` disables it. */
+  metricsIntervalMs: number;
+  /** Cost-meter rate: currency units per vCPU-hour. */
+  costCpuPerHour: number;
+  /** Cost-meter rate: currency units per GB-hour of memory. */
+  costMemGbPerHour: number;
 }
 
 export function loadConfig(): Config {
@@ -45,6 +51,9 @@ export function loadConfig(): Config {
     dbPath: process.env.SBX_DB ?? join(homedir(), ".sbx", "state.db"),
     defaultSleepAfterMs: Number(process.env.SBX_SLEEP_AFTER_MS ?? 0),
     reapIntervalMs: Number(process.env.SBX_REAP_INTERVAL_MS ?? 15000),
+    metricsIntervalMs: Number(process.env.SBX_METRICS_INTERVAL_MS ?? 10000),
+    costCpuPerHour: Number(process.env.SBX_COST_CPU_PER_HOUR ?? 0.05),
+    costMemGbPerHour: Number(process.env.SBX_COST_MEM_GB_PER_HOUR ?? 0.005),
   };
 }
 

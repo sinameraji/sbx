@@ -21,6 +21,7 @@ import type {
   CreateOptions,
   Driver,
   ProcessLiveness,
+  SandboxStats,
   StartProcessResult,
   TcpBridge,
 } from "./types.js";
@@ -545,6 +546,20 @@ export class ContainerDriver implements Driver {
     await container.putArchive(createReadStream(tarPath), { path: "/" });
   }
 
+  async stats(id: string): Promise<SandboxStats> {
+    const container = this.docker.getContainer(this.containerName(id));
+    // `stream:false` makes the daemon take two samples ~1s apart and populate
+    // `precpu_stats`, so the CPU% delta is correct from a single call (a
+    // `one-shot` read would leave precpu zero and inflate CPU%). Depending on the
+    // dockerode version this resolves either to a parsed object or a one-shot
+    // stream, so handle both.
+    const result: unknown = await container.stats({ stream: false });
+    const raw = isReadable(result)
+      ? await collectJson(result)
+      : result;
+    return normalizeStats(raw);
+  }
+
   async destroy(id: string): Promise<void> {
     const container = this.docker.getContainer(this.containerName(id));
     try {
@@ -560,6 +575,63 @@ export class ContainerDriver implements Driver {
       if (!isNotFound(err)) throw err;
     }
   }
+}
+
+/** Duck-type check for a Node readable stream. */
+function isReadable(value: unknown): value is NodeJS.ReadableStream {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    typeof (value as { pipe?: unknown }).pipe === "function"
+  );
+}
+
+/** Read a readable stream to completion and JSON.parse its contents. */
+async function collectJson(stream: NodeJS.ReadableStream): Promise<any> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of stream) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  }
+  return JSON.parse(Buffer.concat(chunks).toString("utf8").trim() || "{}");
+}
+
+/** Normalize Docker's raw stats JSON into our cross-driver SandboxStats shape. */
+function normalizeStats(s: any): SandboxStats {
+  const cpu = s.cpu_stats ?? {};
+  const precpu = s.precpu_stats ?? {};
+  const cpuDelta = (cpu.cpu_usage?.total_usage ?? 0) - (precpu.cpu_usage?.total_usage ?? 0);
+  const systemDelta = (cpu.system_cpu_usage ?? 0) - (precpu.system_cpu_usage ?? 0);
+  const onlineCpus =
+    cpu.online_cpus || cpu.cpu_usage?.percpu_usage?.length || 1;
+  let cpuPercent = 0;
+  if (systemDelta > 0 && cpuDelta > 0) {
+    cpuPercent = (cpuDelta / systemDelta) * onlineCpus * 100;
+  }
+
+  const mem = s.memory_stats ?? {};
+  // Exclude reclaimable page cache where the runtime breaks it out (cgroup v2
+  // reports `inactive_file`; v1 reports `cache`).
+  const cache = mem.stats?.inactive_file ?? mem.stats?.cache ?? 0;
+  const memBytes = Math.max(0, (mem.usage ?? 0) - cache);
+
+  let netRxBytes = 0;
+  let netTxBytes = 0;
+  for (const net of Object.values(s.networks ?? {}) as any[]) {
+    netRxBytes += net.rx_bytes ?? 0;
+    netTxBytes += net.tx_bytes ?? 0;
+  }
+
+  return {
+    cpuPercent,
+    cpuTotalUsageNs: cpu.cpu_usage?.total_usage ?? 0,
+    onlineCpus,
+    memBytes,
+    memLimitBytes: mem.limit ?? 0,
+    netRxBytes,
+    netTxBytes,
+    pids: s.pids_stats?.current ?? 0,
+    sampledAt: new Date().toISOString(),
+  };
 }
 
 function isNotFound(err: unknown): boolean {

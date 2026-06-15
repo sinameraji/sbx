@@ -12,6 +12,7 @@ import { waitPortCommand, exposeCommand } from "./ports.js";
 import { execCommand } from "./exec.js";
 import { envCommand } from "./env.js";
 import { sessionCommand } from "./session.js";
+import { statsCommand } from "./stats.js";
 
 export interface GlobalArgs {
   endpoint?: string;
@@ -41,6 +42,8 @@ export async function cli(args: string[]): Promise<number> {
     case "ls":
     case "list":
       return listCommand(globals);
+    case "stats":
+      return statsCommand(positional, globals);
     case "rm":
     case "remove":
       return removeCommand(positional, globals);
@@ -87,7 +90,7 @@ function printHelp(): void {
 Usage: sb <command> [options]
 
 Commands:
-  sb run "<command>" [--image <image>] [--keep] [--endpoint <url>]
+  sb run "<command>" [--image <image>] [--keep] [--sleep-after <ms>] [--endpoint <url>]
     Create a sandbox, run a command, stream output, then destroy it.
 
   sb exec <id> "<command>" [--session <sid>] [--cwd <dir>] [--env KEY=VAL,...]
@@ -103,6 +106,9 @@ Commands:
 
   sb ls [--endpoint <url>]
     List sandboxes managed by the daemon.
+
+  sb stats <id>
+    Show live CPU/mem/net usage and accumulated cost for a sandbox.
 
   sb stop <id>
     Stop a sandbox, freeing compute but keeping its persistent workspace.

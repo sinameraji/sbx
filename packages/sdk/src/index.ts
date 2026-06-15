@@ -60,6 +60,40 @@ export interface FileInfo {
   modifiedAt: string;
 }
 
+/** Live resource snapshot for a running sandbox. */
+export interface SandboxStats {
+  cpuPercent: number;
+  cpuTotalUsageNs: number;
+  onlineCpus: number;
+  memBytes: number;
+  memLimitBytes: number;
+  netRxBytes: number;
+  netTxBytes: number;
+  pids: number;
+  sampledAt: string;
+}
+
+/** Cumulative, time-integrated usage backing the cost meter. */
+export interface SandboxUsage {
+  cpuSeconds: number;
+  memByteSeconds: number;
+}
+
+/** Per-resource cost breakdown in the daemon's configured currency. */
+export interface CostBreakdown {
+  cpu: number;
+  mem: number;
+  total: number;
+}
+
+/** Metrics + cost for a sandbox; `live` is null when not running. */
+export interface SandboxMetrics {
+  status: SandboxStatus;
+  live: SandboxStats | null;
+  usage: SandboxUsage;
+  cost: CostBreakdown;
+}
+
 export interface CreateOptions {
   image?: string;
   env?: Record<string, string>;
@@ -313,6 +347,18 @@ export class Sandbox {
     this.info = await this.client.request<SandboxInfo>(
       "POST",
       `/sandboxes/${this.info.id}/start`,
+    );
+  }
+
+  /**
+   * Fetch live resource stats, cumulative usage, and cost. `live` is null when
+   * the sandbox isn't running. Reading metrics does not count as activity, so it
+   * won't keep an idle sandbox from auto-pausing.
+   */
+  async metrics(): Promise<SandboxMetrics> {
+    return this.client.request<SandboxMetrics>(
+      "GET",
+      `/sandboxes/${this.info.id}/metrics`,
     );
   }
 

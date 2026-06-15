@@ -34,6 +34,29 @@ export interface ProcessLiveness {
   running: boolean;
 }
 
+/** A point-in-time resource snapshot for a running sandbox. */
+export interface SandboxStats {
+  /** Instantaneous CPU usage as a percent of one core (can exceed 100). */
+  cpuPercent: number;
+  /** Cumulative CPU time the container has consumed, in nanoseconds (resets on
+   * container recreation). The cost meter integrates the delta of this. */
+  cpuTotalUsageNs: number;
+  /** Number of CPUs visible to the container (CPU% is over all of them). */
+  onlineCpus: number;
+  /** Resident memory in bytes (page cache excluded where the runtime reports it). */
+  memBytes: number;
+  /** Memory limit in bytes (0 if unlimited/unknown). */
+  memLimitBytes: number;
+  /** Cumulative network bytes received across all interfaces. */
+  netRxBytes: number;
+  /** Cumulative network bytes transmitted across all interfaces. */
+  netTxBytes: number;
+  /** Number of processes/threads in the container. */
+  pids: number;
+  /** ISO timestamp the snapshot was taken. */
+  sampledAt: string;
+}
+
 export interface CreateOptions {
   id: string;
   image: string;
@@ -166,6 +189,12 @@ export interface Driver {
    * persistent workspace volume. This is irreversible — use `stop` to pause.
    */
   destroy(id: string): Promise<void>;
+
+  /**
+   * Snapshot the sandbox's live resource usage (CPU, memory, network, pids).
+   * The sandbox must be running.
+   */
+  stats(id: string): Promise<SandboxStats>;
 
   /** Liveness check for the underlying runtime (e.g. Docker daemon reachable). */
   ping(): Promise<void>;

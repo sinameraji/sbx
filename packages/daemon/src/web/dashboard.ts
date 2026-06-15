@@ -1,0 +1,273 @@
+// Embedded single-page dashboard for sbx — dependency-free vanilla JS + CSS,
+// served by the daemon at GET /. No build step: the markup is a plain string so
+// it compiles straight to dist with the rest of the daemon. It talks to the same
+// REST API the SDK/CLI use (same origin, so no CORS), polling the sandbox list +
+// cost and showing live metrics for the selected sandbox.
+//
+// Implementation note: this is authored without JS template literals/backticks
+// on purpose, so it can live inside this TS template-literal export without an
+// escaping minefield. String concatenation it is.
+
+export const DASHBOARD_HTML = String.raw`<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>sbx dashboard</title>
+<style>
+  :root {
+    --bg: #0d1117; --panel: #161b22; --border: #30363d; --fg: #e6edf3;
+    --muted: #8b949e; --accent: #2f81f7; --green: #3fb950; --yellow: #d29922;
+    --red: #f85149; --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg);
+    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  header { display: flex; align-items: center; gap: 16px; padding: 14px 20px;
+    border-bottom: 1px solid var(--border); background: var(--panel); }
+  header h1 { font-size: 16px; margin: 0; letter-spacing: .5px; }
+  header .meta { color: var(--muted); font-size: 12px; }
+  header .spacer { flex: 1; }
+  header .cost { font-family: var(--mono); font-size: 13px; }
+  header .cost b { color: var(--green); }
+  main { padding: 20px; max-width: 1200px; margin: 0 auto; }
+  .bar { display: flex; gap: 8px; margin-bottom: 14px; align-items: center; }
+  input, button, select { font: inherit; }
+  input, select { background: var(--bg); color: var(--fg);
+    border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; }
+  button { background: var(--accent); color: #fff; border: 0; border-radius: 6px;
+    padding: 6px 12px; cursor: pointer; }
+  button.secondary { background: #21262d; color: var(--fg); border: 1px solid var(--border); }
+  button.danger { background: transparent; color: var(--red); border: 1px solid var(--border); }
+  button:hover { filter: brightness(1.1); }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--border);
+    font-size: 13px; }
+  th { color: var(--muted); font-weight: 600; font-size: 11px; text-transform: uppercase;
+    letter-spacing: .5px; }
+  tbody tr { cursor: pointer; }
+  tbody tr:hover { background: #1c2230; }
+  tbody tr.sel { background: #1f2937; }
+  td.id { font-family: var(--mono); }
+  .badge { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11px;
+    font-weight: 600; }
+  .badge.running { background: rgba(63,185,80,.15); color: var(--green); }
+  .badge.paused { background: rgba(210,153,34,.15); color: var(--yellow); }
+  .badge.stopped { background: rgba(139,148,158,.15); color: var(--muted); }
+  .num { font-family: var(--mono); text-align: right; }
+  .actions { white-space: nowrap; }
+  .actions button { padding: 3px 8px; font-size: 12px; margin-left: 4px; }
+  .detail { margin-top: 18px; padding: 16px; background: var(--panel);
+    border: 1px solid var(--border); border-radius: 8px; }
+  .detail h2 { font-size: 14px; margin: 0 0 10px; font-family: var(--mono); }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 12px; }
+  .stat { background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+    padding: 10px 12px; }
+  .stat .k { color: var(--muted); font-size: 11px; text-transform: uppercase; }
+  .stat .v { font-family: var(--mono); font-size: 18px; margin-top: 2px; }
+  .ports a { color: var(--accent); font-family: var(--mono); font-size: 12px;
+    display: inline-block; margin-right: 12px; }
+  .empty { color: var(--muted); padding: 30px; text-align: center; }
+  .err { color: var(--red); padding: 8px 0; font-size: 13px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>sbx</h1>
+  <span class="meta" id="info">connecting…</span>
+  <span class="spacer"></span>
+  <span class="cost">total cost: <b id="totalCost">$0.000000</b></span>
+</header>
+<main>
+  <div class="bar">
+    <input id="newImage" placeholder="image (optional)" size="28" />
+    <input id="newSleep" placeholder="sleepAfter ms (optional)" size="20" />
+    <button id="newBtn">New sandbox</button>
+    <span class="spacer" style="flex:1"></span>
+    <button class="secondary" id="refreshBtn">Refresh</button>
+  </div>
+  <div id="err" class="err" style="display:none"></div>
+  <table>
+    <thead><tr>
+      <th>ID</th><th>Status</th><th>Image</th><th>Created</th><th>Last activity</th>
+      <th class="num">vCPU-s</th><th class="num">GB-s</th><th class="num">Cost</th><th></th>
+    </tr></thead>
+    <tbody id="rows"></tbody>
+  </table>
+  <div id="detail"></div>
+</main>
+<script>
+var rates = { costCpuPerHour: 0, costMemGbPerHour: 0 };
+var selected = null;
+var liveTimer = null;
+
+function api(path, opts) {
+  return fetch(path, opts).then(function (r) {
+    if (!r.ok) return r.text().then(function (t) { throw new Error(r.status + ": " + t); });
+    return r.status === 204 ? null : r.json();
+  });
+}
+function showErr(e) {
+  var el = document.getElementById("err");
+  el.style.display = "block"; el.textContent = String(e && e.message ? e.message : e);
+}
+function clearErr() { document.getElementById("err").style.display = "none"; }
+
+function computeCost(u) {
+  if (!u) return 0;
+  var cpu = (u.cpuSeconds / 3600) * rates.costCpuPerHour;
+  var mem = (u.memByteSeconds / 1e9 / 3600) * rates.costMemGbPerHour;
+  return cpu + mem;
+}
+function money(n) { return "$" + n.toFixed(6); }
+function ago(iso) {
+  if (!iso) return "—";
+  var s = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
+  if (s < 60) return Math.floor(s) + "s ago";
+  if (s < 3600) return Math.floor(s / 60) + "m ago";
+  if (s < 86400) return Math.floor(s / 3600) + "h ago";
+  return Math.floor(s / 86400) + "d ago";
+}
+function mb(b) { return (b / 1e6).toFixed(1) + " MB"; }
+function esc(s) { return String(s).replace(/[&<>"]/g, function (c) {
+  return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
+
+function loadInfo() {
+  return api("/info").then(function (i) {
+    rates = i;
+    document.getElementById("info").textContent =
+      "driver=" + i.driver + " · image=" + i.defaultImage + " · proxy=:" + i.proxyPort;
+    document.getElementById("newImage").placeholder = "image (default " + i.defaultImage + ")";
+  });
+}
+
+function refresh() {
+  api("/sandboxes").then(function (data) {
+    clearErr();
+    var list = data.sandboxes || [];
+    var total = 0;
+    var html = "";
+    list.forEach(function (s) {
+      var cost = computeCost(s.usage);
+      total += cost;
+      var sel = s.id === selected ? " class=\"sel\"" : "";
+      html += "<tr data-id=\"" + s.id + "\"" + sel + ">";
+      html += "<td class=\"id\">" + esc(s.id) + "</td>";
+      html += "<td><span class=\"badge " + s.status + "\">" + s.status + "</span></td>";
+      html += "<td>" + esc(s.image) + "</td>";
+      html += "<td>" + ago(s.createdAt) + "</td>";
+      html += "<td>" + ago(s.lastActivityAt) + "</td>";
+      html += "<td class=\"num\">" + (s.usage ? s.usage.cpuSeconds.toFixed(1) : "0") + "</td>";
+      html += "<td class=\"num\">" + (s.usage ? (s.usage.memByteSeconds / 1e9).toFixed(1) : "0") + "</td>";
+      html += "<td class=\"num\">" + money(cost) + "</td>";
+      html += "<td class=\"actions\">";
+      if (s.status === "running" || s.status === "paused") {
+        html += "<button class=\"secondary\" data-act=\"stop\" data-id=\"" + s.id + "\">Stop</button>";
+      } else {
+        html += "<button class=\"secondary\" data-act=\"start\" data-id=\"" + s.id + "\">Start</button>";
+      }
+      html += "<button class=\"danger\" data-act=\"rm\" data-id=\"" + s.id + "\">Destroy</button>";
+      html += "</td></tr>";
+    });
+    var rows = document.getElementById("rows");
+    rows.innerHTML = html ||
+      "<tr><td colspan=\"9\" class=\"empty\">No sandboxes. Create one above.</td></tr>";
+    document.getElementById("totalCost").textContent = money(total);
+    if (selected && !list.some(function (s) { return s.id === selected; })) {
+      selected = null; renderDetail();
+    }
+  }).catch(showErr);
+}
+
+function act(action, id) {
+  var p;
+  if (action === "stop") p = api("/sandboxes/" + id + "/stop", { method: "POST" });
+  else if (action === "start") p = api("/sandboxes/" + id + "/start", { method: "POST" });
+  else if (action === "rm") {
+    if (!confirm("Destroy " + id + "? Its workspace volume is deleted too.")) return;
+    p = api("/sandboxes/" + id, { method: "DELETE" });
+  }
+  p.then(refresh).catch(showErr);
+}
+
+function createSandbox() {
+  var body = {};
+  var img = document.getElementById("newImage").value.trim();
+  var sleep = document.getElementById("newSleep").value.trim();
+  if (img) body.image = img;
+  if (sleep) body.sleepAfter = Number(sleep);
+  api("/sandboxes", {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  }).then(function () {
+    document.getElementById("newImage").value = "";
+    document.getElementById("newSleep").value = "";
+    refresh();
+  }).catch(showErr);
+}
+
+function select(id) {
+  selected = (selected === id) ? null : id;
+  refresh();
+  renderDetail();
+}
+
+function renderDetail() {
+  if (liveTimer) { clearInterval(liveTimer); liveTimer = null; }
+  var el = document.getElementById("detail");
+  if (!selected) { el.innerHTML = ""; return; }
+  var id = selected;
+  function paint() {
+    Promise.all([
+      api("/sandboxes/" + id + "/metrics"),
+      api("/sandboxes/" + id + "/expose").catch(function () { return { exposed: [] }; }),
+    ]).then(function (res) {
+      if (selected !== id) return;
+      var m = res[0], ex = res[1].exposed || [];
+      var live = m.live;
+      var h = "<div class=\"detail\"><h2>" + esc(id) +
+        " <span class=\"badge " + m.status + "\">" + m.status + "</span></h2>";
+      h += "<div class=\"grid\">";
+      h += statCard("CPU", live ? live.cpuPercent.toFixed(1) + "%" : "—");
+      h += statCard("Memory", live ? mb(live.memBytes) : "—");
+      h += statCard("Mem limit", live && live.memLimitBytes ? mb(live.memLimitBytes) : "∞");
+      h += statCard("Net in", live ? mb(live.netRxBytes) : "—");
+      h += statCard("Net out", live ? mb(live.netTxBytes) : "—");
+      h += statCard("PIDs", live ? String(live.pids) : "—");
+      h += statCard("CPU total", m.usage.cpuSeconds.toFixed(1) + " vCPU-s");
+      h += statCard("Mem total", (m.usage.memByteSeconds / 1e9).toFixed(1) + " GB-s");
+      h += statCard("Cost", money(m.cost.total));
+      h += "</div>";
+      if (ex.length) {
+        h += "<div class=\"ports\" style=\"margin-top:12px\"><b>Preview:</b> ";
+        ex.forEach(function (p) {
+          h += "<a href=\"" + esc(p.url) + "\" target=\"_blank\">:" + p.port + " ↗</a>";
+        });
+        h += "</div>";
+      }
+      h += "</div>";
+      el.innerHTML = h;
+    }).catch(function (e) { if (selected === id) showErr(e); });
+  }
+  paint();
+  liveTimer = setInterval(paint, 2500);
+}
+function statCard(k, v) {
+  return "<div class=\"stat\"><div class=\"k\">" + k + "</div><div class=\"v\">" + v + "</div></div>";
+}
+
+document.getElementById("rows").addEventListener("click", function (e) {
+  var btn = e.target.closest("button");
+  if (btn && btn.dataset.act) { e.stopPropagation(); act(btn.dataset.act, btn.dataset.id); return; }
+  var tr = e.target.closest("tr");
+  if (tr && tr.dataset.id) select(tr.dataset.id);
+});
+document.getElementById("newBtn").addEventListener("click", createSandbox);
+document.getElementById("refreshBtn").addEventListener("click", refresh);
+
+loadInfo().then(refresh).catch(showErr);
+setInterval(refresh, 3000);
+</script>
+</body>
+</html>`;

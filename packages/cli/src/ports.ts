@@ -13,7 +13,7 @@ export async function waitPortCommand(
     console.error("Usage: sb wait-port <id> <port> [--timeout <ms>]");
     return 1;
   }
-  const client = new SbxClient({ endpoint: globals.endpoint });
+  const client = new SbxClient({ endpoint: globals.endpoint, apiKey: globals.apiKey });
   try {
     const sandbox = await client.getSandbox(id);
     const ready = await sandbox.waitForPort(port, {
@@ -43,7 +43,7 @@ export async function exposeCommand(
     console.error("Usage: sb expose <id> <port> [--token <token>]");
     return 1;
   }
-  const client = new SbxClient({ endpoint: globals.endpoint });
+  const client = new SbxClient({ endpoint: globals.endpoint, apiKey: globals.apiKey });
   try {
     const sandbox = await client.getSandbox(id);
     const exposed = await sandbox.exposePort(port, {

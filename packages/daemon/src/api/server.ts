@@ -5,6 +5,9 @@ import type { Driver } from "../driver/types.js";
 import { kernelFor, type KernelLanguage } from "../kernels.js";
 import { resumeSandbox } from "../lifecycle.js";
 import { computeCost } from "../cost.js";
+import { log } from "../logger.js";
+import type { MetricsHistory } from "../metrics.js";
+import { recentSpans, startSpan } from "../tracing.js";
 import { emptyUsage, SandboxStore } from "../store.js";
 import { DASHBOARD_HTML } from "../web/dashboard.js";
 import type {
@@ -22,6 +25,7 @@ interface Deps {
   driver: Driver;
   store: SandboxStore;
   backups: BackupRegistry;
+  history?: MetricsHistory;
 }
 
 /**
@@ -66,10 +70,65 @@ interface Deps {
  */
 export function createApiServer(deps: Deps) {
   return createServer((req, res) => {
+    const method = req.method ?? "GET";
+    const rawPath = (req.url ?? "/").split("?")[0];
+    // One server span per request — the create→exec→destroy trace the plan asks
+    // for falls out naturally (route is normalized so ids don't explode names).
+    const span = startSpan(`${method} ${normalizeRoute(rawPath)}`, {
+      "http.method": method,
+      "http.target": rawPath,
+    });
+    const startedMs = Date.now();
+    res.on("finish", () => {
+      span.setAttribute("http.status_code", res.statusCode);
+      if (res.statusCode >= 500) span.setStatus("error");
+      span.end();
+      const line = {
+        method,
+        path: rawPath,
+        status: res.statusCode,
+        durMs: Date.now() - startedMs,
+        traceId: span.traceId,
+      };
+      if (res.statusCode >= 500) log.error("request", line);
+      else log.info("request", line);
+    });
     handle(req, res, deps).catch((err) => {
+      span.setStatus("error").setAttribute("error", String(err?.message ?? err));
       sendJson(res, 500, { error: String(err?.message ?? err) });
     });
   });
+}
+
+/** Collapse high-cardinality id segments so span/route names stay bounded. */
+function normalizeRoute(path: string): string {
+  return path
+    .replace(/^\/sandboxes\/[^/]+/, "/sandboxes/:id")
+    .replace(/\/(processes|sessions|code-contexts|expose|backups)\/[^/]+/, "/$1/:sub");
+}
+
+/**
+ * Enforce the API key when one is configured. `/healthz` and the dashboard HTML
+ * stay open (probes + first paint, so the dashboard can prompt for the key).
+ * Accepts `Authorization: Bearer <key>` or `X-API-Key: <key>`.
+ */
+function isAuthorized(req: IncomingMessage, config: Config, path: string): boolean {
+  if (!config.apiKey) return true;
+  // Open: health probes, the dashboard shell, and /info (non-sensitive — it only
+  // reports driver/image/cost-rates and whether auth is on, so the dashboard can
+  // decide to prompt for a key before making authenticated calls).
+  if (path === "/healthz" || path === "/" || path === "/dashboard" || path === "/info") {
+    return true;
+  }
+  const header = req.headers["authorization"];
+  const bearer =
+    typeof header === "string" && header.startsWith("Bearer ")
+      ? header.slice(7)
+      : undefined;
+  const apiKeyHeader = req.headers["x-api-key"];
+  const provided =
+    bearer ?? (typeof apiKeyHeader === "string" ? apiKeyHeader : undefined);
+  return provided === config.apiKey;
 }
 
 async function handle(
@@ -81,6 +140,11 @@ async function handle(
   const url = new URL(req.url ?? "/", `http://${req.headers.host}`);
   const path = url.pathname;
   const method = req.method ?? "GET";
+
+  if (!isAuthorized(req, config, path)) {
+    res.setHeader("WWW-Authenticate", "Bearer");
+    return sendJson(res, 401, { error: "missing or invalid API key" });
+  }
 
   if (method === "GET" && path === "/healthz") {
     try {
@@ -101,7 +165,15 @@ async function handle(
       costMemGbPerHour: config.costMemGbPerHour,
       costEgressPerGb: config.costEgressPerGb,
       defaultSleepAfterMs: config.defaultSleepAfterMs,
+      auth: config.apiKey.length > 0,
+      otlp: config.otlpEndpoint.length > 0,
     });
+  }
+
+  // Recent finished spans, for debugging and the trace view. Newest first.
+  if (method === "GET" && path === "/traces") {
+    const limit = Number(url.searchParams.get("limit") ?? "100") || 100;
+    return sendJson(res, 200, { spans: recentSpans().slice(0, limit) });
   }
 
   // Embedded single-page dashboard (no build step, zero dependencies).
@@ -314,6 +386,12 @@ async function handle(
     return runCode(res, { driver, store }, runCodeMatch[1], body);
   }
 
+  const historyMatch = path.match(/^\/sandboxes\/([^/]+)\/metrics\/history$/);
+  if (method === "GET" && historyMatch) {
+    if (!store.get(historyMatch[1])) return sendJson(res, 404, { error: "not found" });
+    return sendJson(res, 200, { samples: deps.history?.get(historyMatch[1]) ?? [] });
+  }
+
   const metricsMatch = path.match(/^\/sandboxes\/([^/]+)\/metrics$/);
   if (method === "GET" && metricsMatch) {
     const live = url.searchParams.get("live") !== "0";
@@ -344,6 +422,7 @@ async function handle(
       await driver.destroy(id);
       store.remove(id);
       store.clearSandbox(id);
+      deps.history?.clear(id);
       return sendJson(res, 200, { id, destroyed: true });
     }
   }

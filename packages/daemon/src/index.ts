@@ -3,42 +3,52 @@ import { BackupRegistry } from "./backups.js";
 import { loadConfig } from "./config.js";
 import { ContainerDriver } from "./driver/container.js";
 import { startReaper } from "./lifecycle.js";
-import { startSampler } from "./metrics.js";
+import { configureLogger, log } from "./logger.js";
+import { MetricsHistory, startSampler } from "./metrics.js";
+import { configureTracing, stopTracing } from "./tracing.js";
 import { SandboxStore } from "./store.js";
 import { createApiServer } from "./api/server.js";
 import { createProxyServer } from "./proxy/server.js";
 
 async function main(): Promise<void> {
   const config = loadConfig();
+  configureLogger({ level: config.logLevel, format: config.logFormat });
+  configureTracing({
+    serviceName: "sbd",
+    otlpEndpoint: config.otlpEndpoint,
+    ringSize: config.traceRing,
+  });
   const driver = new ContainerDriver();
   const store = new SandboxStore(config.dbPath);
   const backups = new BackupRegistry(config.backupDir);
+  const history = new MetricsHistory(config.metricsHistory);
 
   // Fail fast with a friendly message if the runtime backend is unreachable.
   try {
     await driver.ping();
   } catch (err) {
-    console.error(
-      `[sbd] container runtime (Docker) is not reachable: ${String(err)}\n` +
-        `      Start Docker (or colima / Apple 'container') and retry.`,
-    );
+    log.error("container runtime (Docker) is not reachable", { error: String(err) });
+    log.error("start Docker (or colima / Apple 'container') and retry");
     process.exit(1);
   }
 
-  const server = createApiServer({ config, driver, store, backups });
+  const server = createApiServer({ config, driver, store, backups, history });
   server.listen(config.port, config.host, () => {
-    console.log(
-      `[sbd] sbx daemon listening on http://${config.host}:${config.port} ` +
-        `(driver=${driver.name}, image=${config.defaultImage})`,
-    );
+    log.info("daemon listening", {
+      url: `http://${config.host}:${config.port}`,
+      driver: driver.name,
+      image: config.defaultImage,
+      auth: config.apiKey ? "on" : "off",
+      otlp: config.otlpEndpoint || "off",
+    });
   });
 
   const proxy = createProxyServer({ config, driver, store });
   proxy.listen(config.proxyPort, config.proxyHost, () => {
-    console.log(
-      `[sbd] preview proxy listening on http://${config.proxyHost}:${config.proxyPort} ` +
-        `(previews at http://<id>-<port>.localhost:${config.proxyPort}/)`,
-    );
+    log.info("preview proxy listening", {
+      url: `http://${config.proxyHost}:${config.proxyPort}`,
+      previews: `http://<id>-<port>.localhost:${config.proxyPort}/`,
+    });
   });
 
   // Idle reaper: auto-pause sandboxes left idle past their sleepAfterMs.
@@ -50,13 +60,14 @@ async function main(): Promise<void> {
   // Metrics sampler: integrate per-sandbox CPU/mem usage for the cost meter.
   const sampler =
     config.metricsIntervalMs > 0
-      ? startSampler({ driver, store, intervalMs: config.metricsIntervalMs })
+      ? startSampler({ driver, store, history, intervalMs: config.metricsIntervalMs })
       : undefined;
 
   const shutdown = () => {
-    console.log("[sbd] shutting down");
+    log.info("shutting down");
     if (reaper) clearInterval(reaper);
     if (sampler) clearInterval(sampler);
+    stopTracing();
     proxy.close();
     server.close(() => {
       store.close();
@@ -68,6 +79,6 @@ async function main(): Promise<void> {
 }
 
 main().catch((err) => {
-  console.error("[sbd] fatal:", err);
+  log.error("fatal", { error: String(err?.stack ?? err) });
   process.exit(1);
 });

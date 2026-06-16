@@ -12,7 +12,7 @@ export async function filesCommand(
     return 0;
   }
 
-  const client = new SbxClient({ endpoint: globals.endpoint });
+  const client = new SbxClient({ endpoint: globals.endpoint, apiKey: globals.apiKey });
 
   try {
     const sandbox = await client.getSandbox(id);

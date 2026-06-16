@@ -310,9 +310,13 @@ class FileChangeEvent:
 class SbxClient:
     """Entry point. Talks to one sbx daemon over its REST API."""
 
-    def __init__(self, endpoint: Optional[str] = None):
+    def __init__(self, endpoint: Optional[str] = None,
+                 api_key: Optional[str] = None):
         self.endpoint = (endpoint or os.environ.get("SBX_ENDPOINT")
                          or DEFAULT_ENDPOINT).rstrip("/")
+        # API key sent as `Authorization: Bearer <key>`; required when the daemon
+        # runs with SBX_API_KEY. Falls back to the SBX_API_KEY env var.
+        self.api_key = api_key if api_key is not None else os.environ.get("SBX_API_KEY", "")
 
     def get_sandbox(
         self,
@@ -401,6 +405,8 @@ class SbxClient:
             url += "?" + urllib.parse.urlencode(params)
         data = None
         headers = {}
+        if self.api_key:
+            headers["authorization"] = "Bearer " + self.api_key
         if body is not None:
             data = json.dumps(body).encode("utf-8")
             headers["content-type"] = "application/json"
@@ -491,6 +497,11 @@ class Sandbox:
         return SandboxMetrics.from_dict(
             self._client.request("GET", f"/sandboxes/{self.id}/metrics")
         )
+
+    def metrics_history(self) -> List[Dict[str, Any]]:
+        """Recent live-metrics samples (oldest->newest) for sparklines/history."""
+        data = self._client.request("GET", f"/sandboxes/{self.id}/metrics/history")
+        return data.get("samples", [])
 
     # -- files --------------------------------------------------------------
 

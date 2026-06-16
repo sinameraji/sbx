@@ -14,7 +14,7 @@ export async function sessionCommand(
   flags: Record<string, string | boolean>,
 ): Promise<number> {
   const [sub, id, arg] = positional;
-  const client = new SbxClient({ endpoint: globals.endpoint });
+  const client = new SbxClient({ endpoint: globals.endpoint, apiKey: globals.apiKey });
   try {
     switch (sub) {
       case "create": {

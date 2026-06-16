@@ -15,7 +15,7 @@ export async function runCommand(
     return 1;
   }
 
-  const client = new SbxClient({ endpoint: globals.endpoint });
+  const client = new SbxClient({ endpoint: globals.endpoint, apiKey: globals.apiKey });
   const image = typeof flags.image === "string" ? flags.image : undefined;
   const keep = flags.keep === true;
   const sleepAfter =

@@ -15,7 +15,7 @@ export async function execCommand(
     );
     return 1;
   }
-  const client = new SbxClient({ endpoint: globals.endpoint });
+  const client = new SbxClient({ endpoint: globals.endpoint, apiKey: globals.apiKey });
   let env: Record<string, string> | undefined;
   if (typeof flags.env === "string") {
     try {

@@ -1,6 +1,46 @@
 import type { Driver } from "./driver/types.js";
+import { log } from "./logger.js";
 import type { SandboxStore } from "./store.js";
 import type { SandboxUsage } from "./types.js";
+
+/** One point in a sandbox's live-metrics history (for dashboard sparklines). */
+export interface MetricSample {
+  at: string;
+  cpuPercent: number;
+  memBytes: number;
+  netRxBytes: number;
+  netTxBytes: number;
+  pids: number;
+}
+
+/**
+ * In-memory ring of recent live samples per sandbox — backs the dashboard's CPU
+ * and memory sparklines (`GET /sandboxes/:id/metrics/history`). Deliberately not
+ * persisted: it's a short rolling window, cheap to rebuild after a restart.
+ */
+export class MetricsHistory {
+  private readonly byId = new Map<string, MetricSample[]>();
+
+  constructor(private readonly cap = 60) {}
+
+  record(id: string, sample: MetricSample): void {
+    let arr = this.byId.get(id);
+    if (!arr) {
+      arr = [];
+      this.byId.set(id, arr);
+    }
+    arr.push(sample);
+    while (arr.length > this.cap) arr.shift();
+  }
+
+  get(id: string): MetricSample[] {
+    return this.byId.get(id) ?? [];
+  }
+
+  clear(id: string): void {
+    this.byId.delete(id);
+  }
+}
 
 /**
  * In-process metrics sampler — the cAdvisor-style collection the plan calls for,
@@ -14,6 +54,7 @@ import type { SandboxUsage } from "./types.js";
 export async function sampleUsage(
   driver: Driver,
   store: SandboxStore,
+  history?: MetricsHistory,
   now: number = Date.now(),
 ): Promise<void> {
   for (const record of store.list()) {
@@ -21,6 +62,15 @@ export async function sampleUsage(
     try {
       const s = await driver.stats(record.id);
       const prev = record.usage;
+
+      history?.record(record.id, {
+        at: new Date(now).toISOString(),
+        cpuPercent: s.cpuPercent,
+        memBytes: s.memBytes,
+        netRxBytes: s.netRxBytes,
+        netTxBytes: s.netTxBytes,
+        pids: s.pids,
+      });
 
       let cpuDeltaNs = s.cpuTotalUsageNs - prev.lastCpuTotalNs;
       if (cpuDeltaNs < 0) cpuDeltaNs = s.cpuTotalUsageNs; // container recreated
@@ -38,7 +88,7 @@ export async function sampleUsage(
       store.setUsage(record.id, next);
     } catch (err) {
       // A sandbox can race a stop/destroy mid-tick; skip it and move on.
-      console.error(`[sbd] metrics sample failed for ${record.id}: ${String(err)}`);
+      log.debug("metrics sample failed", { sandbox: record.id, error: String(err) });
     }
   }
 }
@@ -51,11 +101,12 @@ export function startSampler(opts: {
   driver: Driver;
   store: SandboxStore;
   intervalMs: number;
+  history?: MetricsHistory;
 }): NodeJS.Timeout {
-  const { driver, store, intervalMs } = opts;
+  const { driver, store, intervalMs, history } = opts;
   const timer = setInterval(() => {
-    sampleUsage(driver, store).catch((err) =>
-      console.error(`[sbd] sampler error: ${String(err)}`),
+    sampleUsage(driver, store, history).catch((err) =>
+      log.error("sampler error", { error: String(err) }),
     );
   }, intervalMs);
   timer.unref?.();

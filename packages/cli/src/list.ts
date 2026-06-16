@@ -2,7 +2,7 @@ import { SbxClient } from "@sbx/sdk";
 import type { GlobalArgs } from "./cli.js";
 
 export async function listCommand(globals: GlobalArgs): Promise<number> {
-  const client = new SbxClient({ endpoint: globals.endpoint });
+  const client = new SbxClient({ endpoint: globals.endpoint, apiKey: globals.apiKey });
 
   try {
     const sandboxes = await client.list();

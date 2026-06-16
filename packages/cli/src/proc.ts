@@ -13,7 +13,7 @@ export async function startCommand(
     console.error('Usage: sb start <id> "<command>" [--cwd <dir>] [--env KEY=VAL,...]');
     return 1;
   }
-  const client = new SbxClient({ endpoint: globals.endpoint });
+  const client = new SbxClient({ endpoint: globals.endpoint, apiKey: globals.apiKey });
   try {
     let env: Record<string, string> | undefined;
     if (typeof flags.env === "string") env = parseEnvPairs(flags.env.split(","));
@@ -40,7 +40,7 @@ export async function psCommand(
     console.error("Usage: sb ps <id>");
     return 1;
   }
-  const client = new SbxClient({ endpoint: globals.endpoint });
+  const client = new SbxClient({ endpoint: globals.endpoint, apiKey: globals.apiKey });
   try {
     const sandbox = await client.getSandbox(id);
     const procs = await sandbox.listProcesses();
@@ -74,7 +74,7 @@ export async function killCommand(
     console.error("Usage: sb kill <id> <procId> [--signal <SIG>]");
     return 1;
   }
-  const client = new SbxClient({ endpoint: globals.endpoint });
+  const client = new SbxClient({ endpoint: globals.endpoint, apiKey: globals.apiKey });
   try {
     const sandbox = await client.getSandbox(id);
     await sandbox.killProcess(

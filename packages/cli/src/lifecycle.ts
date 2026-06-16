@@ -11,7 +11,7 @@ export async function stopCommand(
     return 1;
   }
 
-  const client = new SbxClient({ endpoint: globals.endpoint });
+  const client = new SbxClient({ endpoint: globals.endpoint, apiKey: globals.apiKey });
   try {
     const sandbox = await client.getSandbox(id);
     await sandbox.stop();
@@ -33,7 +33,7 @@ export async function startSandboxCommand(
     return 1;
   }
 
-  const client = new SbxClient({ endpoint: globals.endpoint });
+  const client = new SbxClient({ endpoint: globals.endpoint, apiKey: globals.apiKey });
   try {
     const sandbox = await client.getSandbox(id);
     await sandbox.start();

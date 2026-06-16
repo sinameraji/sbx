@@ -12,7 +12,7 @@ export async function logsCommand(
     console.error("Usage: sb logs <id> <procId> [--follow]");
     return 1;
   }
-  const client = new SbxClient({ endpoint: globals.endpoint });
+  const client = new SbxClient({ endpoint: globals.endpoint, apiKey: globals.apiKey });
   try {
     const sandbox = await client.getSandbox(id);
     for await (const chunk of sandbox.streamLogs(procId, {

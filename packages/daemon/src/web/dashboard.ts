@@ -70,6 +70,13 @@ export const DASHBOARD_HTML = String.raw`<!doctype html>
     display: inline-block; margin-right: 12px; }
   .empty { color: var(--muted); padding: 30px; text-align: center; }
   .err { color: var(--red); padding: 8px 0; font-size: 13px; }
+  .sparks { display: flex; gap: 16px; margin: 0 0 14px; }
+  .sparkbox { background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+    padding: 8px 12px; }
+  .sparkbox .k { color: var(--muted); font-size: 11px; text-transform: uppercase;
+    margin-bottom: 4px; }
+  .spark { display: block; }
+  .spark-empty { color: var(--muted); }
 </style>
 </head>
 <body>
@@ -101,9 +108,26 @@ export const DASHBOARD_HTML = String.raw`<!doctype html>
 var rates = { costCpuPerHour: 0, costMemGbPerHour: 0 };
 var selected = null;
 var liveTimer = null;
+var apiKey = localStorage.getItem("sbx_api_key") || "";
 
+function authHeaders(h) {
+  h = h || {};
+  if (apiKey) h["authorization"] = "Bearer " + apiKey;
+  return h;
+}
+function promptKey() {
+  var k = window.prompt("This daemon requires an API key (SBX_API_KEY):", apiKey);
+  if (k != null) { apiKey = k; localStorage.setItem("sbx_api_key", k); }
+  return k;
+}
 function api(path, opts) {
+  opts = opts || {};
+  opts.headers = authHeaders(opts.headers);
   return fetch(path, opts).then(function (r) {
+    if (r.status === 401) {
+      if (promptKey()) return api(path, opts);
+      throw new Error("401: API key required");
+    }
     if (!r.ok) return r.text().then(function (t) { throw new Error(r.status + ": " + t); });
     return r.status === 204 ? null : r.json();
   });
@@ -131,16 +155,39 @@ function ago(iso) {
   return Math.floor(s / 86400) + "d ago";
 }
 function mb(b) { return (b / 1e6).toFixed(1) + " MB"; }
+function sparkline(values, color) {
+  if (!values || values.length < 2) return "<span class=\"spark-empty\">—</span>";
+  var w = 120, h = 28, n = values.length;
+  var max = Math.max.apply(null, values);
+  var min = Math.min.apply(null, values);
+  var range = max - min || 1;
+  var pts = values.map(function (v, i) {
+    var x = (i / (n - 1)) * w;
+    var y = h - ((v - min) / range) * (h - 4) - 2;
+    return x.toFixed(1) + "," + y.toFixed(1);
+  }).join(" ");
+  return "<svg class=\"spark\" viewBox=\"0 0 " + w + " " + h + "\" width=\"" + w +
+    "\" height=\"" + h + "\" preserveAspectRatio=\"none\"><polyline fill=\"none\" stroke=\"" +
+    color + "\" stroke-width=\"1.5\" points=\"" + pts + "\" /></svg>";
+}
 function esc(s) { return String(s).replace(/[&<>"]/g, function (c) {
   return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
 
 function loadInfo() {
+  // /info is unauthenticated, so we can read whether auth is on and prompt for
+  // the key before any authenticated call.
   return api("/info").then(function (i) {
-    rates = i;
-    document.getElementById("info").textContent =
-      "driver=" + i.driver + " · image=" + i.defaultImage + " · proxy=:" + i.proxyPort;
-    document.getElementById("newImage").placeholder = "image (default " + i.defaultImage + ")";
+    if (i.auth && !apiKey) promptKey();
+    applyInfo(i);
   });
+}
+function applyInfo(i) {
+  if (!i) return;
+  rates = i;
+  document.getElementById("info").textContent =
+    "driver=" + i.driver + " · image=" + i.defaultImage + " · proxy=:" + i.proxyPort +
+    (i.auth ? " · auth=on" : "") + (i.otlp ? " · otlp=on" : "");
+  document.getElementById("newImage").placeholder = "image (default " + i.defaultImage + ")";
 }
 
 function refresh() {
@@ -223,12 +270,21 @@ function renderDetail() {
     Promise.all([
       api("/sandboxes/" + id + "/metrics"),
       api("/sandboxes/" + id + "/expose").catch(function () { return { exposed: [] }; }),
+      api("/sandboxes/" + id + "/metrics/history").catch(function () { return { samples: [] }; }),
     ]).then(function (res) {
       if (selected !== id) return;
-      var m = res[0], ex = res[1].exposed || [];
+      var m = res[0], ex = res[1].exposed || [], hist = res[2].samples || [];
       var live = m.live;
       var h = "<div class=\"detail\"><h2>" + esc(id) +
         " <span class=\"badge " + m.status + "\">" + m.status + "</span></h2>";
+      if (hist.length >= 2) {
+        h += "<div class=\"sparks\">";
+        h += "<div class=\"sparkbox\"><div class=\"k\">CPU %</div>" +
+          sparkline(hist.map(function (s) { return s.cpuPercent; }), "#2f81f7") + "</div>";
+        h += "<div class=\"sparkbox\"><div class=\"k\">Memory</div>" +
+          sparkline(hist.map(function (s) { return s.memBytes; }), "#3fb950") + "</div>";
+        h += "</div>";
+      }
       h += "<div class=\"grid\">";
       h += statCard("CPU", live ? live.cpuPercent.toFixed(1) + "%" : "—");
       h += statCard("Memory", live ? mb(live.memBytes) : "—");

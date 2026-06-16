@@ -16,6 +16,8 @@ import { statsCommand } from "./stats.js";
 
 export interface GlobalArgs {
   endpoint?: string;
+  /** API key for an auth-enabled daemon. Falls back to SBX_API_KEY. */
+  apiKey?: string;
 }
 
 export async function cli(args: string[]): Promise<number> {
@@ -28,6 +30,7 @@ export async function cli(args: string[]): Promise<number> {
   const { flags, positional } = parseFlags(rest);
   const globals: GlobalArgs = {
     endpoint: flags.endpoint as string | undefined,
+    apiKey: (flags["api-key"] as string | undefined) ?? process.env.SBX_API_KEY,
   };
 
   switch (command) {
@@ -158,6 +161,7 @@ Commands:
 
 Global options:
   --endpoint <url>   Daemon URL (default: http://127.0.0.1:4750 or SBX_ENDPOINT)
+  --api-key <key>    API key for an auth-enabled daemon (or SBX_API_KEY)
   -h, --help         Show this help`);
 }
 

@@ -14,7 +14,7 @@ import { loadConfig } from "./config.js";
 import { ContainerDriver } from "./driver/container.js";
 import { createApiServer } from "./api/server.js";
 import { reapIdle } from "./lifecycle.js";
-import { sampleUsage } from "./metrics.js";
+import { MetricsHistory, sampleUsage } from "./metrics.js";
 import { createProxyServer } from "./proxy/server.js";
 import { SandboxStore } from "./store.js";
 
@@ -27,8 +27,9 @@ async function main(): Promise<number> {
   const driver = new ContainerDriver();
   const store = new SandboxStore(config.dbPath);
   const backups = new BackupRegistry(config.backupDir);
+  const history = new MetricsHistory(config.metricsHistory);
 
-  const server = createApiServer({ config, driver, store, backups });
+  const server = createApiServer({ config, driver, store, backups, history });
   await new Promise<void>((resolve) => server.listen(config.port, config.host, resolve));
   const endpoint = `http://${config.host}:${config.port}`;
   const proxy = createProxyServer({ config, driver, store });
@@ -345,8 +346,8 @@ async function main(): Promise<number> {
     // Metrics + cost: run the sampler twice (advancing its clock) to integrate
     // CPU-seconds and mem-byte-seconds, then read the metrics endpoint.
     const t0 = Date.now();
-    await sampleUsage(driver, store, t0);
-    await sampleUsage(driver, store, t0 + 10_000);
+    await sampleUsage(driver, store, history, t0);
+    await sampleUsage(driver, store, history, t0 + 10_000);
     const metrics = (await (
       await fetch(`${endpoint}/sandboxes/${id}/metrics`)
     ).json()) as {
@@ -369,6 +370,58 @@ async function main(): Promise<number> {
       throw new Error(`expected cost.total > 0, got ${metrics.cost.total}`);
     }
     console.error("[smoke] metrics + cost meter integrate CPU/mem usage");
+
+    // Metrics history: the two sampler ticks above recorded live samples that
+    // back the dashboard sparklines.
+    const histRes = await fetch(`${endpoint}/sandboxes/${id}/metrics/history`);
+    const hist = (await histRes.json()) as { samples: { cpuPercent: number }[] };
+    if (!Array.isArray(hist.samples) || hist.samples.length < 2) {
+      throw new Error(`expected >=2 history samples, got ${hist.samples?.length}`);
+    }
+    console.error(`[smoke] metrics history recorded ${hist.samples.length} samples`);
+
+    // Tracing: every request opens a server span; recent ones are queryable.
+    const tracesRes = await fetch(`${endpoint}/traces`);
+    const traces = (await tracesRes.json()) as { spans: { name: string }[] };
+    if (!Array.isArray(traces.spans) || traces.spans.length === 0) {
+      throw new Error("expected recent spans in /traces, got none");
+    }
+    if (!traces.spans.some((s) => s.name.includes("/sandboxes/:id"))) {
+      throw new Error("expected a normalized /sandboxes/:id span in /traces");
+    }
+    console.error(`[smoke] tracing recorded ${traces.spans.length} spans`);
+
+    // API-key auth: a second server with a key set rejects keyless calls (401),
+    // accepts the right key, and leaves /info open so the dashboard can prompt.
+    const authedServer = createApiServer({
+      config: { ...config, apiKey: "smoke-secret" },
+      driver,
+      store,
+      backups,
+      history,
+    });
+    const authPort = config.port + 2;
+    await new Promise<void>((resolve) => authedServer.listen(authPort, config.host, resolve));
+    const authBase = `http://${config.host}:${authPort}`;
+    try {
+      const noKey = await fetch(`${authBase}/sandboxes`);
+      if (noKey.status !== 401) throw new Error(`keyless call should 401, got ${noKey.status}`);
+      const wrongKey = await fetch(`${authBase}/sandboxes`, {
+        headers: { authorization: "Bearer nope" },
+      });
+      if (wrongKey.status !== 401) throw new Error(`wrong key should 401, got ${wrongKey.status}`);
+      const goodKey = await fetch(`${authBase}/sandboxes`, {
+        headers: { authorization: "Bearer smoke-secret" },
+      });
+      if (!goodKey.ok) throw new Error(`valid key should pass, got ${goodKey.status}`);
+      const openInfo = await fetch(`${authBase}/info`);
+      if (!openInfo.ok) throw new Error(`/info must stay open under auth, got ${openInfo.status}`);
+      const infoBody = (await openInfo.json()) as { auth?: boolean };
+      if (infoBody.auth !== true) throw new Error("/info.auth should be true when keyed");
+    } finally {
+      await new Promise<void>((resolve) => authedServer.close(() => resolve()));
+    }
+    console.error("[smoke] API-key auth gate enforces key (401) and keeps /info open");
 
     // Dashboard + info endpoints.
     const infoRes = await fetch(`${endpoint}/info`);

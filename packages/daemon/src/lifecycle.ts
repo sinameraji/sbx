@@ -1,4 +1,5 @@
 import type { Driver } from "./driver/types.js";
+import { log } from "./logger.js";
 import type { SandboxStore } from "./store.js";
 import type { SandboxRecord } from "./types.js";
 
@@ -74,7 +75,7 @@ export async function reapIdle(
       await pauseSandbox(driver, store, record);
       paused.push(record.id);
     } catch (err) {
-      console.error(`[sbd] reaper failed to pause ${record.id}: ${String(err)}`);
+      log.warn("reaper failed to pause sandbox", { sandbox: record.id, error: String(err) });
     }
   }
   return paused;
@@ -93,11 +94,9 @@ export function startReaper(opts: {
   const timer = setInterval(() => {
     reapIdle(driver, store)
       .then((ids) => {
-        if (ids.length) {
-          console.log(`[sbd] auto-paused idle sandboxes: ${ids.join(", ")}`);
-        }
+        if (ids.length) log.info("auto-paused idle sandboxes", { ids });
       })
-      .catch((err) => console.error(`[sbd] reaper error: ${String(err)}`));
+      .catch((err) => log.error("reaper error", { error: String(err) }));
   }, intervalMs);
   timer.unref?.();
   return timer;

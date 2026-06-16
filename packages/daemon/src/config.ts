@@ -40,7 +40,29 @@ export interface Config {
   costMemGbPerHour: number;
   /** Cost-meter rate: currency units per GB of preview-proxy egress. */
   costEgressPerGb: number;
+  /** Minimum level emitted by the structured logger. */
+  logLevel: LogLevel;
+  /** Log encoding: `json` (one JSON object per line) or `pretty` (human). */
+  logFormat: LogFormat;
+  /**
+   * API key required on every REST call (except `/healthz` and the dashboard
+   * HTML). Empty string (the default) disables auth — loopback, single-tenant.
+   */
+  apiKey: string;
+  /**
+   * OTLP/HTTP traces endpoint (e.g. `http://localhost:4318`). When set, spans are
+   * batch-exported to `<endpoint>/v1/traces`. Empty disables export; recent spans
+   * are always kept in-memory for `GET /traces` regardless.
+   */
+  otlpEndpoint: string;
+  /** How many of the most recent metric samples per sandbox to retain in memory. */
+  metricsHistory: number;
+  /** How many of the most recent finished spans to retain in memory for `/traces`. */
+  traceRing: number;
 }
+
+export type LogLevel = "debug" | "info" | "warn" | "error";
+export type LogFormat = "json" | "pretty";
 
 export function loadConfig(): Config {
   return {
@@ -57,7 +79,19 @@ export function loadConfig(): Config {
     costCpuPerHour: Number(process.env.SBX_COST_CPU_PER_HOUR ?? 0.05),
     costMemGbPerHour: Number(process.env.SBX_COST_MEM_GB_PER_HOUR ?? 0.005),
     costEgressPerGb: Number(process.env.SBX_COST_EGRESS_PER_GB ?? 0.01),
+    logLevel: parseLogLevel(process.env.SBX_LOG_LEVEL),
+    logFormat: process.env.SBX_LOG_FORMAT === "json" ? "json" : "pretty",
+    apiKey: process.env.SBX_API_KEY ?? "",
+    otlpEndpoint: (process.env.SBX_OTLP_ENDPOINT ?? "").replace(/\/$/, ""),
+    metricsHistory: Number(process.env.SBX_METRICS_HISTORY ?? 60),
+    traceRing: Number(process.env.SBX_TRACE_RING ?? 200),
   };
+}
+
+function parseLogLevel(value: string | undefined): LogLevel {
+  return value === "debug" || value === "info" || value === "warn" || value === "error"
+    ? value
+    : "info";
 }
 
 /**

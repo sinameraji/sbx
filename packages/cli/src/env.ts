@@ -11,7 +11,7 @@ export async function envCommand(
     console.error("Usage: sb env <id> [KEY=VALUE ...]");
     return 1;
   }
-  const client = new SbxClient({ endpoint: globals.endpoint });
+  const client = new SbxClient({ endpoint: globals.endpoint, apiKey: globals.apiKey });
   try {
     const sandbox = await client.getSandbox(id);
     const env =

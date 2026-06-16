@@ -208,13 +208,38 @@ export interface BackupInfo {
 
 export interface SbxClientOptions {
   endpoint?: string;
+  /**
+   * API key sent as `Authorization: Bearer <key>` on every request. Required when
+   * the daemon is started with `SBX_API_KEY`. Defaults to the `SBX_API_KEY` env
+   * var when omitted.
+   */
+  apiKey?: string;
+}
+
+/** One live-metrics sample (for sparklines / history charts). */
+export interface MetricSample {
+  at: string;
+  cpuPercent: number;
+  memBytes: number;
+  netRxBytes: number;
+  netTxBytes: number;
+  pids: number;
 }
 
 export class SbxClient {
   readonly endpoint: string;
+  private readonly apiKey: string;
 
   constructor(opts: SbxClientOptions = {}) {
     this.endpoint = (opts.endpoint ?? defaultEndpoint()).replace(/\/$/, "");
+    this.apiKey = opts.apiKey ?? defaultApiKey();
+  }
+
+  /** Build request headers, attaching the API key and any extras. */
+  authHeaders(extra?: Record<string, string>): Record<string, string> {
+    const headers: Record<string, string> = { ...extra };
+    if (this.apiKey) headers["authorization"] = `Bearer ${this.apiKey}`;
+    return headers;
   }
 
   /** Create a fresh sandbox (Cloudflare-style: omit id to provision a new one). */
@@ -260,7 +285,7 @@ export class SbxClient {
   async request<T>(method: string, path: string, body?: unknown): Promise<T> {
     const res = await fetch(this.endpoint + path, {
       method,
-      headers: body ? { "content-type": "application/json" } : undefined,
+      headers: this.authHeaders(body ? { "content-type": "application/json" } : undefined),
       body: body ? JSON.stringify(body) : undefined,
     });
     if (!res.ok) {
@@ -308,7 +333,7 @@ export class Sandbox {
       `${this.client.endpoint}/sandboxes/${this.info.id}/exec`,
       {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: this.client.authHeaders({ "content-type": "application/json" }),
         body: JSON.stringify({
           command,
           cwd: options.cwd,
@@ -362,6 +387,15 @@ export class Sandbox {
       "GET",
       `/sandboxes/${this.info.id}/metrics`,
     );
+  }
+
+  /** Recent live-metrics samples (oldest→newest) for sparklines/history charts. */
+  async metricsHistory(): Promise<MetricSample[]> {
+    const { samples } = await this.client.request<{ samples: MetricSample[] }>(
+      "GET",
+      `/sandboxes/${this.info.id}/metrics/history`,
+    );
+    return samples;
   }
 
   /** Snapshot `/workspace` to a durable backup; returns its metadata. */
@@ -493,6 +527,7 @@ export class Sandbox {
     if (options.intervalMs) params.set("interval", String(options.intervalMs));
     const res = await fetch(
       `${this.client.endpoint}/sandboxes/${this.info.id}/watch?${params}`,
+      { headers: this.client.authHeaders() },
     );
     if (!res.ok || !res.body) {
       const text = await res.text().catch(() => "");
@@ -541,6 +576,7 @@ export class Sandbox {
     const follow = options.follow ? "1" : "0";
     const res = await fetch(
       `${this.client.endpoint}/sandboxes/${this.info.id}/processes/${procId}/logs?follow=${follow}`,
+      { headers: this.client.authHeaders() },
     );
     if (!res.ok || !res.body) {
       const text = await res.text().catch(() => "");
@@ -729,9 +765,17 @@ export function getSandbox(
 // --- internals -------------------------------------------------------------
 
 function defaultEndpoint(): string {
-  const env = (globalThis as { process?: { env?: Record<string, string> } })
-    .process?.env;
-  return env?.SBX_ENDPOINT ?? "http://127.0.0.1:4750";
+  return envVar("SBX_ENDPOINT") ?? "http://127.0.0.1:4750";
+}
+
+function defaultApiKey(): string {
+  return envVar("SBX_API_KEY") ?? "";
+}
+
+function envVar(name: string): string | undefined {
+  return (globalThis as { process?: { env?: Record<string, string> } }).process?.env?.[
+    name
+  ];
 }
 
 /** Parse a `text/event-stream` body into typed JSON events. */

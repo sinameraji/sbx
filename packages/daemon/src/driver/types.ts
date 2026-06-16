@@ -20,6 +20,31 @@ export interface TcpBridge {
   close(): void;
 }
 
+/** Options for opening an interactive terminal (PTY) inside a sandbox. */
+export interface TerminalOptions {
+  /** Initial terminal width in columns. */
+  cols?: number;
+  /** Initial terminal height in rows. */
+  rows?: number;
+  cwd?: string;
+  env?: Record<string, string>;
+}
+
+/**
+ * A live interactive shell (PTY) inside a sandbox. `stream` is a raw duplex:
+ * write bytes to send keystrokes to the shell's stdin, read bytes to receive its
+ * terminal output (already TTY-cooked, no Docker stream framing). This is the
+ * interactive-exec primitive the in-sandbox agent (Phase 3) and the dashboard
+ * terminal both build on.
+ */
+export interface TerminalSession {
+  stream: NodeJS.ReadWriteStream;
+  /** Inform the PTY of a new client window size. */
+  resize(cols: number, rows: number): void;
+  /** Tear down the shell and its exec. */
+  close(): void;
+}
+
 /** Result of launching a background process. */
 export interface StartProcessResult {
   procId: string;
@@ -170,6 +195,13 @@ export interface Driver {
    * even where container IPs are unreachable from the host (macOS Docker Desktop).
    */
   openTcpBridge(id: string, port: number, host: string): Promise<TcpBridge>;
+
+  /**
+   * Open an interactive shell (PTY) inside the sandbox. Returns a duplex byte
+   * stream (write = stdin, read = terminal output) plus resize/close controls.
+   * Backs the dashboard's live terminal over WebSocket. The sandbox must be live.
+   */
+  openTerminal(id: string, opts: TerminalOptions): Promise<TerminalSession>;
 
   /**
    * Archive the sandbox's `/workspace` to a tar file at `tarPath` on the daemon

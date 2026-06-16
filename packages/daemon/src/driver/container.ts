@@ -24,6 +24,8 @@ import type {
   SandboxStats,
   StartProcessResult,
   TcpBridge,
+  TerminalOptions,
+  TerminalSession,
 } from "./types.js";
 
 /**
@@ -515,6 +517,45 @@ export class ContainerDriver implements Driver {
       close() {
         (hijacked as unknown as { destroy?: () => void }).destroy?.();
         outbound.destroy();
+      },
+    };
+  }
+
+  async openTerminal(id: string, opts: TerminalOptions): Promise<TerminalSession> {
+    const container = this.docker.getContainer(this.containerName(id));
+    // A real PTY: Tty:true makes Docker allocate a pseudo-terminal, so the output
+    // is raw (no 8-byte stream framing) and line discipline / control chars work.
+    // Prefer an interactive login bash, falling back to sh on minimal images.
+    const exec = await container.exec({
+      Cmd: [
+        "/bin/sh",
+        "-c",
+        "if command -v bash >/dev/null 2>&1; then exec bash -l; else exec sh -l; fi",
+      ],
+      AttachStdin: true,
+      AttachStdout: true,
+      AttachStderr: true,
+      Tty: true,
+      WorkingDir: opts.cwd ?? "/workspace",
+      Env: Object.entries(opts.env ?? {}).map(([k, v]) => `${k}=${v}`),
+    });
+    const stream = (await exec.start({
+      hijack: true,
+      stdin: true,
+      // Tell dockerode this is a TTY stream so it doesn't try to demux frames.
+      Tty: true,
+    } as Docker.ExecStartOptions)) as unknown as NodeJS.ReadWriteStream;
+
+    if (opts.cols && opts.rows) {
+      await exec.resize({ w: opts.cols, h: opts.rows }).catch(() => {});
+    }
+    return {
+      stream,
+      resize(cols: number, rows: number) {
+        exec.resize({ w: cols, h: rows }).catch(() => {});
+      },
+      close() {
+        (stream as unknown as { destroy?: () => void }).destroy?.();
       },
     };
   }

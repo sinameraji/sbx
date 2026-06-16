@@ -77,6 +77,15 @@ export const DASHBOARD_HTML = String.raw`<!doctype html>
     margin-bottom: 4px; }
   .spark { display: block; }
   .spark-empty { color: var(--muted); }
+  #terminal { margin-top: 18px; }
+  #terminal:empty { margin-top: 0; }
+  .termbar { display: flex; align-items: center; gap: 10px; padding: 8px 12px;
+    background: var(--panel); border: 1px solid var(--border); border-bottom: 0;
+    border-radius: 8px 8px 0 0; font-family: var(--mono); font-size: 12px; }
+  .termbar .spacer { flex: 1; }
+  #termMount { height: 360px; background: #0d1117; border: 1px solid var(--border);
+    border-radius: 0 0 8px 8px; padding: 6px; }
+  .detail h2 .termbtn { float: right; padding: 2px 10px; font-size: 12px; }
 </style>
 </head>
 <body>
@@ -103,6 +112,7 @@ export const DASHBOARD_HTML = String.raw`<!doctype html>
     <tbody id="rows"></tbody>
   </table>
   <div id="detail"></div>
+  <div id="terminal"></div>
 </main>
 <script>
 var rates = { costCpuPerHour: 0, costMemGbPerHour: 0 };
@@ -276,7 +286,8 @@ function renderDetail() {
       var m = res[0], ex = res[1].exposed || [], hist = res[2].samples || [];
       var live = m.live;
       var h = "<div class=\"detail\"><h2>" + esc(id) +
-        " <span class=\"badge " + m.status + "\">" + m.status + "</span></h2>";
+        " <span class=\"badge " + m.status + "\">" + m.status + "</span>" +
+        "<button class=\"secondary termbtn\" data-term=\"" + id + "\">Terminal</button></h2>";
       if (hist.length >= 2) {
         h += "<div class=\"sparks\">";
         h += "<div class=\"sparkbox\"><div class=\"k\">CPU %</div>" +
@@ -314,6 +325,83 @@ function renderDetail() {
 function statCard(k, v) {
   return "<div class=\"stat\"><div class=\"k\">" + k + "</div><div class=\"v\">" + v + "</div></div>";
 }
+
+// --- live terminal (xterm.js over WebSocket) -------------------------------
+// xterm is loaded lazily from a CDN only when a terminal is first opened, so the
+// rest of the dashboard stays dependency-free and works offline on loopback.
+var XTERM_VER = "5.5.0", FIT_VER = "0.10.0";
+function loadScript(src) {
+  return new Promise(function (res, rej) {
+    var s = document.createElement("script");
+    s.src = src; s.onload = res;
+    s.onerror = function () { rej(new Error("failed to load " + src)); };
+    document.head.appendChild(s);
+  });
+}
+function loadXterm() {
+  if (window.Terminal && window.FitAddon) return Promise.resolve();
+  var css = document.createElement("link");
+  css.rel = "stylesheet";
+  css.href = "https://cdn.jsdelivr.net/npm/@xterm/xterm@" + XTERM_VER + "/css/xterm.min.css";
+  document.head.appendChild(css);
+  return loadScript("https://cdn.jsdelivr.net/npm/@xterm/xterm@" + XTERM_VER + "/lib/xterm.min.js")
+    .then(function () {
+      return loadScript("https://cdn.jsdelivr.net/npm/@xterm/addon-fit@" + FIT_VER + "/lib/addon-fit.min.js");
+    });
+}
+function closeTerm() {
+  var host = document.getElementById("terminal");
+  if (host._ws) { try { host._ws.close(); } catch (e) {} host._ws = null; }
+  if (host._term) { try { host._term.dispose(); } catch (e) {} host._term = null; }
+  if (host._onResize) { window.removeEventListener("resize", host._onResize); host._onResize = null; }
+  host.innerHTML = ""; host.dataset.id = "";
+}
+function openTerm(id) {
+  var host = document.getElementById("terminal");
+  if (host.dataset.id === id) { closeTerm(); return; } // toggle off
+  closeTerm();
+  host.dataset.id = id;
+  host.innerHTML =
+    "<div class=\"termbar\"><span>terminal — " + esc(id) + "</span><span class=\"spacer\"></span>" +
+    "<button class=\"secondary\" id=\"termClose\">Close</button></div><div id=\"termMount\"></div>";
+  document.getElementById("termClose").addEventListener("click", closeTerm);
+  loadXterm().then(function () {
+    if (host.dataset.id !== id) return; // closed while loading
+    connectTerm(id, host);
+  }).catch(showErr);
+}
+function connectTerm(id, host) {
+  var term = new window.Terminal({ fontSize: 13, cursorBlink: true,
+    theme: { background: "#0d1117", foreground: "#e6edf3" } });
+  var fit = new window.FitAddon.FitAddon();
+  term.loadAddon(fit);
+  term.open(document.getElementById("termMount"));
+  try { fit.fit(); } catch (e) {}
+  var wsProto = location.protocol === "https:" ? "wss:" : "ws:";
+  var url = wsProto + "//" + location.host + "/sandboxes/" + id + "/terminal" +
+    "?cols=" + term.cols + "&rows=" + term.rows;
+  if (apiKey) url += "&key=" + encodeURIComponent(apiKey);
+  var ws = new WebSocket(url);
+  ws.binaryType = "arraybuffer";
+  host._ws = ws; host._term = term;
+  var enc = new TextEncoder();
+  ws.onmessage = function (e) {
+    if (typeof e.data === "string") term.write(e.data);
+    else term.write(new Uint8Array(e.data));
+  };
+  ws.onclose = function () { try { term.write("\r\n\x1b[90m[connection closed]\x1b[0m\r\n"); } catch (x) {} };
+  ws.onerror = function () { showErr("terminal websocket error"); };
+  term.onData(function (d) { if (ws.readyState === 1) ws.send(enc.encode(d)); });
+  term.onResize(function (s) {
+    if (ws.readyState === 1) ws.send(JSON.stringify({ type: "resize", cols: s.cols, rows: s.rows }));
+  });
+  host._onResize = function () { try { fit.fit(); } catch (e) {} };
+  window.addEventListener("resize", host._onResize);
+}
+document.getElementById("detail").addEventListener("click", function (e) {
+  var b = e.target.closest("button[data-term]");
+  if (b) { e.stopPropagation(); openTerm(b.dataset.term); }
+});
 
 document.getElementById("rows").addEventListener("click", function (e) {
   var btn = e.target.closest("button");

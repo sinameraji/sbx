@@ -423,6 +423,40 @@ async function main(): Promise<number> {
     }
     console.error("[smoke] API-key auth gate enforces key (401) and keeps /info open");
 
+    // Interactive terminal over WebSocket: open a PTY shell, type a command, and
+    // read its output back. 6*7 is evaluated by the shell, so seeing the result
+    // (not the literal "$((6*7))" that input-echo prints) proves real execution.
+    const wsUrl = `${endpoint.replace(/^http/, "ws")}/sandboxes/${id}/terminal?cols=80&rows=24`;
+    const termOutput = await new Promise<string>((resolve, reject) => {
+      const WS = (globalThis as { WebSocket?: any }).WebSocket;
+      if (!WS) return reject(new Error("global WebSocket unavailable (need Node >=21)"));
+      const ws = new WS(wsUrl);
+      ws.binaryType = "arraybuffer";
+      let out = "";
+      // NB: this module imports the promise-based setTimeout, so use the globals.
+      const timer = globalThis.setTimeout(() => {
+        try { ws.close(); } catch {}
+        resolve(out);
+      }, 6000);
+      ws.onopen = () => ws.send(new TextEncoder().encode("echo TERMINAL_OK_$((6*7))\n"));
+      ws.onmessage = (e: { data: unknown }) => {
+        out += typeof e.data === "string" ? e.data : Buffer.from(e.data as ArrayBuffer).toString("utf8");
+        if (out.includes("TERMINAL_OK_42")) {
+          globalThis.clearTimeout(timer);
+          try { ws.close(); } catch {}
+          resolve(out);
+        }
+      };
+      ws.onerror = (e: { message?: string }) => {
+        globalThis.clearTimeout(timer);
+        reject(new Error(`terminal ws error: ${e?.message ?? "unknown"}`));
+      };
+    });
+    if (!termOutput.includes("TERMINAL_OK_42")) {
+      throw new Error(`terminal did not run command; output: ${JSON.stringify(termOutput.slice(0, 200))}`);
+    }
+    console.error("[smoke] interactive terminal (WebSocket PTY) round-trips a command");
+
     // Dashboard + info endpoints.
     const infoRes = await fetch(`${endpoint}/info`);
     const info = (await infoRes.json()) as { costCpuPerHour?: number; driver?: string };

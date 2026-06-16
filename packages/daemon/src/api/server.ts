@@ -1,7 +1,8 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import type { Duplex } from "node:stream";
 import { type BackupInfo, BackupRegistry } from "../backups.js";
 import { previewUrl, type Config } from "../config.js";
-import type { Driver } from "../driver/types.js";
+import type { Driver, TerminalSession } from "../driver/types.js";
 import { kernelFor, type KernelLanguage } from "../kernels.js";
 import { resumeSandbox } from "../lifecycle.js";
 import { computeCost } from "../cost.js";
@@ -9,6 +10,7 @@ import { log } from "../logger.js";
 import type { MetricsHistory } from "../metrics.js";
 import { recentSpans, startSpan } from "../tracing.js";
 import { emptyUsage, SandboxStore } from "../store.js";
+import { acceptWebSocket } from "./ws.js";
 import { DASHBOARD_HTML } from "../web/dashboard.js";
 import type {
   CodeContextInfo,
@@ -53,6 +55,9 @@ interface Deps {
  *   POST   /sandboxes/:id/files/mkdir      -> create directory
  *   POST   /sandboxes/:id/files/list       -> list directory
  *   GET    /sandboxes/:id/watch            -> stream file-change events (SSE)
+ *   GET    /sandboxes/:id/terminal         -> interactive PTY shell (WebSocket upgrade)
+ *   GET    /sandboxes/:id/metrics/history  -> recent live-metrics samples (sparklines)
+ *   GET    /traces                         -> recent finished trace spans
  *   POST   /sandboxes/:id/processes              -> start background process
  *   GET    /sandboxes/:id/processes              -> list processes
  *   DELETE /sandboxes/:id/processes/:procId      -> signal/kill process
@@ -69,7 +74,7 @@ interface Deps {
  *   POST   /sandboxes/:id/sessions/:sid/env      -> merge session env vars
  */
 export function createApiServer(deps: Deps) {
-  return createServer((req, res) => {
+  const server = createServer((req, res) => {
     const method = req.method ?? "GET";
     const rawPath = (req.url ?? "/").split("?")[0];
     // One server span per request — the create→exec→destroy trace the plan asks
@@ -97,6 +102,106 @@ export function createApiServer(deps: Deps) {
       span.setStatus("error").setAttribute("error", String(err?.message ?? err));
       sendJson(res, 500, { error: String(err?.message ?? err) });
     });
+  });
+  // Live terminal: a WebSocket upgrade bridged to an in-sandbox PTY.
+  server.on("upgrade", (req, socket, head) => {
+    handleTerminalUpgrade(req, socket as Duplex, head, deps).catch(() => socket.destroy());
+  });
+  return server;
+}
+
+/** Pull a Bearer token from the Authorization header, if present. */
+function bearerFromHeader(req: IncomingMessage): string | undefined {
+  const header = req.headers["authorization"];
+  return typeof header === "string" && header.startsWith("Bearer ")
+    ? header.slice(7)
+    : undefined;
+}
+
+/**
+ * Handle a WebSocket upgrade for `GET /sandboxes/:id/terminal`: authenticate,
+ * resolve (and auto-resume) the sandbox, open a PTY, and splice bytes both ways.
+ * Inbound binary frames are stdin; inbound text frames are control JSON (resize).
+ * Browsers can't set headers on a WebSocket, so the API key may arrive as `?key=`.
+ */
+async function handleTerminalUpgrade(
+  req: IncomingMessage,
+  socket: Duplex,
+  head: Buffer,
+  deps: Deps,
+): Promise<void> {
+  const { config, driver, store } = deps;
+  const url = new URL(req.url ?? "/", `http://${req.headers.host}`);
+  const match = url.pathname.match(/^\/sandboxes\/([^/]+)\/terminal$/);
+  if (!match) {
+    socket.destroy();
+    return;
+  }
+  if (config.apiKey) {
+    const provided = url.searchParams.get("key") ?? bearerFromHeader(req);
+    if (provided !== config.apiKey) {
+      socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
+      socket.destroy();
+      return;
+    }
+  }
+  const id = match[1];
+  const record = store.get(id);
+  if (!record) {
+    socket.write("HTTP/1.1 404 Not Found\r\n\r\n");
+    socket.destroy();
+    return;
+  }
+  if (record.status === "stopped") {
+    socket.write("HTTP/1.1 409 Conflict\r\n\r\n");
+    socket.destroy();
+    return;
+  }
+  if (record.status === "paused") await resumeSandbox(driver, store, record);
+  else store.touch(id);
+
+  const ws = acceptWebSocket(req, socket, head);
+  if (!ws) return;
+
+  const cols = Number(url.searchParams.get("cols")) || 80;
+  const rows = Number(url.searchParams.get("rows")) || 24;
+  const span = startSpan("WS /sandboxes/:id/terminal", { "sandbox.id": id });
+
+  let term: TerminalSession;
+  try {
+    term = await driver.openTerminal(id, { cols, rows, env: record.env });
+  } catch (err) {
+    ws.send(`\r\n[sbx] failed to open terminal: ${errMessage(err)}\r\n`);
+    ws.close();
+    span.setStatus("error").end();
+    return;
+  }
+  log.info("terminal opened", { sandbox: id, traceId: span.traceId });
+
+  term.stream.on("data", (chunk: Buffer) => ws.send(chunk));
+  term.stream.on("end", () => ws.close());
+  term.stream.on("error", () => ws.close());
+
+  ws.onMessage((data, isBinary) => {
+    if (isBinary) {
+      term.stream.write(data);
+      store.touch(id);
+      return;
+    }
+    try {
+      const msg = JSON.parse(data.toString("utf8"));
+      if (msg && msg.type === "resize") {
+        term.resize(Number(msg.cols) || cols, Number(msg.rows) || rows);
+      }
+    } catch {
+      // Non-JSON text frames are ignored; keystrokes arrive as binary frames.
+    }
+  });
+
+  ws.onClose(() => {
+    term.close();
+    span.end();
+    log.info("terminal closed", { sandbox: id });
   });
 }
 

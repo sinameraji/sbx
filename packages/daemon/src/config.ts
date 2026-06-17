@@ -16,6 +16,23 @@ export interface Config {
   proxyHost: string;
   /** Port for the preview-URL reverse proxy (separate from the REST API). */
   proxyPort: number;
+  /** Bind host for the egress credential proxy (LLM gateway). */
+  egressHost: string;
+  /** Port for the egress credential proxy. `0` disables it. */
+  egressPort: number;
+  /**
+   * Hostname advertised in egress base URLs returned to clients. Sandboxes reach
+   * the daemon host through this name, so on Docker Desktop it defaults to
+   * `host.docker.internal`. Set to a LAN IP/DNS name for remote sandboxes.
+   */
+  egressAdvertiseHost: string;
+  /**
+   * Provider API keys, held on the daemon host and injected into outbound calls
+   * so they never live inside a sandbox. Keyed by lower-case provider name
+   * (`openai`, `anthropic`, `openrouter`). A provider's gateway route exists only
+   * when its key is present here. Sourced from `SBX_PROVIDER_KEY_<NAME>` env vars.
+   */
+  providerKeys: Record<string, string>;
   /** Host directory where sandbox backup tarballs + metadata are stored. */
   backupDir: string;
   /**
@@ -71,6 +88,10 @@ export function loadConfig(): Config {
     defaultImage: process.env.SBX_IMAGE ?? "python:3.11-slim-bookworm",
     proxyHost: process.env.SBX_PROXY_HOST ?? "127.0.0.1",
     proxyPort: Number(process.env.SBX_PROXY_PORT ?? 4751),
+    egressHost: process.env.SBX_EGRESS_HOST ?? "127.0.0.1",
+    egressPort: Number(process.env.SBX_EGRESS_PORT ?? 4752),
+    egressAdvertiseHost: process.env.SBX_EGRESS_ADVERTISE_HOST ?? "host.docker.internal",
+    providerKeys: loadProviderKeys(),
     backupDir: process.env.SBX_BACKUP_DIR ?? join(homedir(), ".sbx", "backups"),
     dbPath: process.env.SBX_DB ?? join(homedir(), ".sbx", "state.db"),
     defaultSleepAfterMs: Number(process.env.SBX_SLEEP_AFTER_MS ?? 0),
@@ -86,6 +107,18 @@ export function loadConfig(): Config {
     metricsHistory: Number(process.env.SBX_METRICS_HISTORY ?? 60),
     traceRing: Number(process.env.SBX_TRACE_RING ?? 200),
   };
+}
+
+/** Collect provider keys from `SBX_PROVIDER_KEY_<NAME>` env vars (name lowercased). */
+function loadProviderKeys(): Record<string, string> {
+  const keys: Record<string, string> = {};
+  const prefix = "SBX_PROVIDER_KEY_";
+  for (const [name, value] of Object.entries(process.env)) {
+    if (name.startsWith(prefix) && value) {
+      keys[name.slice(prefix.length).toLowerCase()] = value;
+    }
+  }
+  return keys;
 }
 
 function parseLogLevel(value: string | undefined): LogLevel {

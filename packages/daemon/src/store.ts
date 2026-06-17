@@ -17,9 +17,20 @@ export function emptyUsage(): SandboxUsage {
     cpuSeconds: 0,
     memByteSeconds: 0,
     egressBytes: 0,
+    providerCalls: 0,
+    providerBytes: 0,
+    providerTokensIn: 0,
+    providerTokensOut: 0,
     lastCpuTotalNs: 0,
     lastSampledAt: "",
   };
+}
+
+/** A provider-call's metered usage, accumulated by the egress proxy. */
+export interface ProviderUsageDelta {
+  bytes: number;
+  tokensIn: number;
+  tokensOut: number;
 }
 
 /** Where a preview route points, resolved by the proxy on each request. */
@@ -56,6 +67,8 @@ export class SandboxStore {
   private sessions = new Map<string, Map<string, SessionInfo>>();
   // sandboxId -> contextId -> code context
   private contexts = new Map<string, Map<string, CodeContextInfo>>();
+  // egress token -> sandboxId (O(1) lookup for the egress proxy)
+  private egressTokens = new Map<string, string>();
 
   constructor(dbPath = ":memory:") {
     if (dbPath !== ":memory:") mkdirSync(dirname(dbPath), { recursive: true });
@@ -123,6 +136,11 @@ export class SandboxStore {
         createdAt TEXT NOT NULL,
         PRIMARY KEY (sandboxId, contextId)
       );
+      CREATE TABLE IF NOT EXISTS egress_tokens (
+        token     TEXT PRIMARY KEY,
+        sandboxId TEXT NOT NULL,
+        createdAt TEXT NOT NULL
+      );
     `);
     // Backfill columns added after the first release on databases created by an
     // older daemon (CREATE TABLE IF NOT EXISTS leaves existing tables untouched).
@@ -162,6 +180,9 @@ export class SandboxStore {
     for (const row of this.db.prepare("SELECT * FROM code_contexts").all() as any[]) {
       mapIn(this.contexts, row.sandboxId).set(row.contextId, rowToContext(row));
     }
+    for (const row of this.db.prepare("SELECT * FROM egress_tokens").all() as any[]) {
+      this.egressTokens.set(row.token, row.sandboxId);
+    }
   }
 
   static newId(): string {
@@ -182,6 +203,11 @@ export class SandboxStore {
 
   static newBackupId(): string {
     return randomBytes(6).toString("hex");
+  }
+
+  /** Mint an opaque per-sandbox egress token (used as the gateway's API key). */
+  static newEgressToken(): string {
+    return "sbx-" + randomBytes(24).toString("hex");
   }
 
   // --- sandboxes -----------------------------------------------------------
@@ -239,6 +265,52 @@ export class SandboxStore {
     this.db
       .prepare("UPDATE sandboxes SET usage = ? WHERE id = ?")
       .run(JSON.stringify(rec.usage), id);
+  }
+
+  /**
+   * Record one LLM-provider call's usage (write-through). Called by the egress
+   * credential proxy as each provider response completes. No-op for unknown id.
+   */
+  addProviderUsage(id: string, delta: ProviderUsageDelta): void {
+    const rec = this.byId.get(id);
+    if (!rec) return;
+    rec.usage.providerCalls += 1;
+    rec.usage.providerBytes += Math.max(0, delta.bytes);
+    rec.usage.providerTokensIn += Math.max(0, delta.tokensIn);
+    rec.usage.providerTokensOut += Math.max(0, delta.tokensOut);
+    this.db
+      .prepare("UPDATE sandboxes SET usage = ? WHERE id = ?")
+      .run(JSON.stringify(rec.usage), id);
+  }
+
+  // --- egress tokens -------------------------------------------------------
+
+  /** Bind an egress token to a sandbox (write-through). */
+  addEgressToken(token: string, sandboxId: string): void {
+    this.egressTokens.set(token, sandboxId);
+    this.db
+      .prepare(
+        "INSERT OR REPLACE INTO egress_tokens (token, sandboxId, createdAt) VALUES (?, ?, ?)",
+      )
+      .run(token, sandboxId, new Date().toISOString());
+  }
+
+  /** Resolve an egress token to its sandbox id (O(1), used per provider call). */
+  resolveEgressToken(token: string): string | undefined {
+    return this.egressTokens.get(token);
+  }
+
+  /** List the egress tokens minted for a sandbox. */
+  listEgressTokens(sandboxId: string): string[] {
+    return [...this.egressTokens.entries()]
+      .filter(([, sid]) => sid === sandboxId)
+      .map(([token]) => token);
+  }
+
+  /** Revoke a single egress token. Returns whether it existed. */
+  removeEgressToken(token: string): boolean {
+    this.db.prepare("DELETE FROM egress_tokens WHERE token = ?").run(token);
+    return this.egressTokens.delete(token);
   }
 
   /**
@@ -436,11 +508,13 @@ export class SandboxStore {
     return this.contexts.get(sandboxId)?.delete(contextId) ?? false;
   }
 
-  /** Drop all process + exposed-port + session + context state for a destroyed sandbox. */
+  /** Drop all process + exposed-port + session + context + egress-token state for a destroyed sandbox. */
   clearSandbox(sandboxId: string): void {
     this.clearRuntimeState(sandboxId);
     this.sessions.delete(sandboxId);
     this.db.prepare("DELETE FROM sessions WHERE sandboxId = ?").run(sandboxId);
+    for (const token of this.listEgressTokens(sandboxId)) this.egressTokens.delete(token);
+    this.db.prepare("DELETE FROM egress_tokens WHERE sandboxId = ?").run(sandboxId);
   }
 
   /**

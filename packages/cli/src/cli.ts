@@ -13,6 +13,7 @@ import { execCommand } from "./exec.js";
 import { envCommand } from "./env.js";
 import { sessionCommand } from "./session.js";
 import { statsCommand } from "./stats.js";
+import { egressCommand } from "./egress.js";
 
 export interface GlobalArgs {
   endpoint?: string;
@@ -47,6 +48,8 @@ export async function cli(args: string[]): Promise<number> {
       return listCommand(globals);
     case "stats":
       return statsCommand(positional, globals);
+    case "egress":
+      return egressCommand(positional, globals, flags);
     case "rm":
     case "remove":
       return removeCommand(positional, globals);
@@ -112,6 +115,10 @@ Commands:
 
   sb stats <id>
     Show live CPU/mem/net usage and accumulated cost for a sandbox.
+
+  sb egress <id> [--list] [--revoke <token>]
+    Mint an egress (LLM gateway) token so the sandbox reaches providers without
+    baked-in keys; prints the provider base URLs + env exports to set.
 
   sb stop <id>
     Stop a sandbox, freeing compute but keeping its persistent workspace.

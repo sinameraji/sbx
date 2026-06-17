@@ -79,9 +79,10 @@ export async function sampleUsage(
       const dtSeconds = Math.max(0, (now - lastMs) / 1000);
 
       const next: SandboxUsage = {
+        // egress + provider counters are metered by the proxies, not the sampler.
+        ...prev,
         cpuSeconds: prev.cpuSeconds + cpuDeltaNs / 1e9,
         memByteSeconds: prev.memByteSeconds + s.memBytes * dtSeconds,
-        egressBytes: prev.egressBytes, // metered by the proxy, not the sampler
         lastCpuTotalNs: s.cpuTotalUsageNs,
         lastSampledAt: new Date(now).toISOString(),
       };

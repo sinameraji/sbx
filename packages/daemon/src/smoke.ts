@@ -5,11 +5,13 @@
  * destroys the sandbox, and exits with the command's status.
  */
 
+import { createServer as httpCreateServer } from "node:http";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout } from "node:timers/promises";
 import { BackupRegistry } from "./backups.js";
+import { createEgressProxy } from "./proxy/egress.js";
 import { loadConfig } from "./config.js";
 import { ContainerDriver } from "./driver/container.js";
 import { createApiServer } from "./api/server.js";
@@ -422,6 +424,85 @@ async function main(): Promise<number> {
       await new Promise<void>((resolve) => authedServer.close(() => resolve()));
     }
     console.error("[smoke] API-key auth gate enforces key (401) and keeps /info open");
+
+    // Egress credential proxy (LLM gateway): a mock provider upstream proves the
+    // daemon injects the real key (held host-side) and meters calls + tokens.
+    {
+      const REAL_KEY = "REAL-KEY-123";
+      const upstream = httpCreateServer((ureq, ures) => {
+        const auth = ureq.headers["authorization"] ?? "";
+        // Echo the auth header we received + report token usage (OpenAI shape).
+        const body = JSON.stringify({
+          ok: true,
+          receivedAuth: auth,
+          usage: { prompt_tokens: 11, completion_tokens: 7 },
+        });
+        ures.writeHead(200, { "content-type": "application/json" });
+        ures.end(body);
+      });
+      await new Promise<void>((r) => upstream.listen(0, "127.0.0.1", r));
+      const upstreamPort = (upstream.address() as { port: number }).port;
+      const egressProxy = createEgressProxy({
+        config,
+        store,
+        providers: {
+          mock: {
+            baseUrl: `http://127.0.0.1:${upstreamPort}`,
+            authHeader: "authorization",
+            format: (k: string) => `Bearer ${k}`,
+            apiKey: REAL_KEY,
+          },
+        },
+      });
+      const egressPort = config.port + 5;
+      await new Promise<void>((r) => egressProxy.listen(egressPort, "127.0.0.1", r));
+      try {
+        // Mint a per-sandbox egress token via REST.
+        const mint = (await (
+          await fetch(`${endpoint}/sandboxes/${id}/egress-tokens`, { method: "POST" })
+        ).json()) as { token: string };
+        if (!mint.token) throw new Error("egress mint returned no token");
+
+        // Call the gateway with the token in place of the real provider key.
+        const call = (await (
+          await fetch(`http://127.0.0.1:${egressPort}/mock/v1/chat`, {
+            method: "POST",
+            headers: { "content-type": "application/json", "x-sbx-egress": mint.token },
+            body: JSON.stringify({ hello: "world" }),
+          })
+        ).json()) as { receivedAuth: string };
+        if (call.receivedAuth !== `Bearer ${REAL_KEY}`) {
+          throw new Error(`expected injected key, upstream saw: ${call.receivedAuth}`);
+        }
+
+        // An invalid token is rejected before reaching the provider.
+        const bad = await fetch(`http://127.0.0.1:${egressPort}/mock/v1/chat`, {
+          method: "POST",
+          headers: { "x-sbx-egress": "nope" },
+          body: "{}",
+        });
+        if (bad.status !== 403) throw new Error(`invalid token should 403, got ${bad.status}`);
+
+        // Metering reflects the call + parsed prompt/completion tokens.
+        const mu = (await (
+          await fetch(`${endpoint}/sandboxes/${id}/metrics?live=0`)
+        ).json()) as {
+          usage: { providerCalls: number; providerTokensIn: number; providerTokensOut: number };
+        };
+        if (mu.usage.providerCalls !== 1) {
+          throw new Error(`expected 1 provider call, got ${mu.usage.providerCalls}`);
+        }
+        if (mu.usage.providerTokensIn !== 11 || mu.usage.providerTokensOut !== 7) {
+          throw new Error(
+            `expected 11/7 tokens, got ${mu.usage.providerTokensIn}/${mu.usage.providerTokensOut}`,
+          );
+        }
+      } finally {
+        await new Promise<void>((r) => egressProxy.close(() => r()));
+        await new Promise<void>((r) => upstream.close(() => r()));
+      }
+      console.error("[smoke] egress proxy injects provider key + meters calls/tokens");
+    }
 
     // Interactive terminal over WebSocket: open a PTY shell, type a command, and
     // read its output back. 6*7 is evaluated by the shell, so seeing the result

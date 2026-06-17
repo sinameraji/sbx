@@ -307,6 +307,11 @@ function renderDetail() {
       h += statCard("Mem total", (m.usage.memByteSeconds / 1e9).toFixed(1) + " GB-s");
       h += statCard("Egress", mb(m.usage.egressBytes || 0));
       h += statCard("Cost", money(m.cost.total));
+      if (m.usage.providerCalls) {
+        h += statCard("LLM calls", m.usage.providerCalls);
+        h += statCard("LLM tokens",
+          (m.usage.providerTokensIn || 0) + " in / " + (m.usage.providerTokensOut || 0) + " out");
+      }
       h += "</div>";
       if (ex.length) {
         h += "<div class=\"ports\" style=\"margin-top:12px\"><b>Preview:</b> ";

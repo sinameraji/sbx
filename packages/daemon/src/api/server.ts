@@ -9,6 +9,7 @@ import { computeCost } from "../cost.js";
 import { log } from "../logger.js";
 import type { MetricsHistory } from "../metrics.js";
 import { recentSpans, startSpan } from "../tracing.js";
+import { buildProviders } from "../proxy/egress.js";
 import { emptyUsage, SandboxStore } from "../store.js";
 import { acceptWebSocket } from "./ws.js";
 import { DASHBOARD_HTML } from "../web/dashboard.js";
@@ -57,6 +58,9 @@ interface Deps {
  *   GET    /sandboxes/:id/watch            -> stream file-change events (SSE)
  *   GET    /sandboxes/:id/terminal         -> interactive PTY shell (WebSocket upgrade)
  *   GET    /sandboxes/:id/metrics/history  -> recent live-metrics samples (sparklines)
+ *   POST   /sandboxes/:id/egress-tokens         -> mint an egress (LLM gateway) token
+ *   GET    /sandboxes/:id/egress-tokens         -> list egress tokens + provider URLs
+ *   DELETE /sandboxes/:id/egress-tokens/:token  -> revoke an egress token
  *   GET    /traces                         -> recent finished trace spans
  *   POST   /sandboxes/:id/processes              -> start background process
  *   GET    /sandboxes/:id/processes              -> list processes
@@ -205,6 +209,27 @@ async function handleTerminalUpgrade(
   });
 }
 
+/**
+ * Build the egress-gateway client config for a token: per-provider base URLs the
+ * sandbox points its SDK at, plus suggested env vars. The token is used in place
+ * of each provider's real API key (the daemon swaps it for the real one).
+ */
+function egressConfig(config: Config) {
+  const base = `http://${config.egressAdvertiseHost}:${config.egressPort}`;
+  const names = Object.keys(buildProviders(config));
+  const ENV_HINT: Record<string, { baseUrlEnv: string; keyEnv: string }> = {
+    openai: { baseUrlEnv: "OPENAI_BASE_URL", keyEnv: "OPENAI_API_KEY" },
+    anthropic: { baseUrlEnv: "ANTHROPIC_BASE_URL", keyEnv: "ANTHROPIC_API_KEY" },
+    openrouter: { baseUrlEnv: "OPENROUTER_BASE_URL", keyEnv: "OPENROUTER_API_KEY" },
+  };
+  const providers = names.map((name) => ({
+    name,
+    baseUrl: `${base}/${name}`,
+    ...ENV_HINT[name],
+  }));
+  return { providers };
+}
+
 /** Collapse high-cardinality id segments so span/route names stay bounded. */
 function normalizeRoute(path: string): string {
   return path
@@ -272,7 +297,36 @@ async function handle(
       defaultSleepAfterMs: config.defaultSleepAfterMs,
       auth: config.apiKey.length > 0,
       otlp: config.otlpEndpoint.length > 0,
+      egressPort: config.egressPort,
+      egressProviders: Object.keys(buildProviders(config)),
     });
+  }
+
+  const egressTokenIdMatch = path.match(
+    /^\/sandboxes\/([^/]+)\/egress-tokens\/([^/]+)$/,
+  );
+  if (method === "DELETE" && egressTokenIdMatch) {
+    if (!store.get(egressTokenIdMatch[1])) return sendJson(res, 404, { error: "not found" });
+    const removed = store.removeEgressToken(egressTokenIdMatch[2]);
+    if (!removed) return sendJson(res, 404, { error: "token not found" });
+    return sendJson(res, 200, { token: egressTokenIdMatch[2], revoked: true });
+  }
+
+  const egressTokensMatch = path.match(/^\/sandboxes\/([^/]+)\/egress-tokens$/);
+  if (egressTokensMatch) {
+    const id = egressTokensMatch[1];
+    if (!store.get(id)) return sendJson(res, 404, { error: "not found" });
+    if (method === "POST") {
+      const token = SandboxStore.newEgressToken();
+      store.addEgressToken(token, id);
+      return sendJson(res, 201, { token, providers: egressConfig(config).providers });
+    }
+    if (method === "GET") {
+      return sendJson(res, 200, {
+        tokens: store.listEgressTokens(id),
+        providers: egressConfig(config).providers,
+      });
+    }
   }
 
   // Recent finished spans, for debugging and the trace view. Newest first.

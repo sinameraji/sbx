@@ -35,6 +35,11 @@ export async function statsCommand(
     console.log(
       `  Usage: ${m.usage.cpuSeconds.toFixed(1)} vCPU-s, ${(m.usage.memByteSeconds / 1e9).toFixed(1)} GB-s, ${(m.usage.egressBytes / 1e6).toFixed(2)} MB egress`,
     );
+    if (m.usage.providerCalls > 0) {
+      console.log(
+        `  LLM:   ${m.usage.providerCalls} calls, ${m.usage.providerTokensIn} in + ${m.usage.providerTokensOut} out tokens`,
+      );
+    }
     console.log(
       `  Cost:  ${m.cost.total.toFixed(6)} (cpu ${m.cost.cpu.toFixed(6)} + mem ${m.cost.mem.toFixed(6)} + egress ${m.cost.egress.toFixed(6)})`,
     );

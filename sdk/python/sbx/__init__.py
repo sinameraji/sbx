@@ -153,6 +153,10 @@ class SandboxUsage:
     cpu_seconds: float
     mem_byte_seconds: float
     egress_bytes: int
+    provider_calls: int = 0
+    provider_bytes: int = 0
+    provider_tokens_in: int = 0
+    provider_tokens_out: int = 0
 
     @classmethod
     def from_dict(cls, d: Dict[str, Any]) -> "SandboxUsage":
@@ -160,6 +164,10 @@ class SandboxUsage:
             cpu_seconds=d.get("cpuSeconds", 0.0),
             mem_byte_seconds=d.get("memByteSeconds", 0.0),
             egress_bytes=d.get("egressBytes", 0),
+            provider_calls=d.get("providerCalls", 0),
+            provider_bytes=d.get("providerBytes", 0),
+            provider_tokens_in=d.get("providerTokensIn", 0),
+            provider_tokens_out=d.get("providerTokensOut", 0),
         )
 
 
@@ -502,6 +510,21 @@ class Sandbox:
         """Recent live-metrics samples (oldest->newest) for sparklines/history."""
         data = self._client.request("GET", f"/sandboxes/{self.id}/metrics/history")
         return data.get("samples", [])
+
+    # -- egress credential proxy (LLM gateway) ------------------------------
+
+    def create_egress_token(self) -> Dict[str, Any]:
+        """Mint an egress token; returns {token, providers}. Point the sandbox's
+        LLM SDK at a provider baseUrl and use the token in place of the real key."""
+        return self._client.request("POST", f"/sandboxes/{self.id}/egress-tokens")
+
+    def list_egress_tokens(self) -> Dict[str, Any]:
+        """List this sandbox's egress tokens and available provider routes."""
+        return self._client.request("GET", f"/sandboxes/{self.id}/egress-tokens")
+
+    def revoke_egress_token(self, token: str) -> None:
+        """Revoke a previously minted egress token."""
+        self._client.request("DELETE", f"/sandboxes/{self.id}/egress-tokens/{token}")
 
     # -- files --------------------------------------------------------------
 

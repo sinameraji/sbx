@@ -137,6 +137,13 @@ export interface CreateOptions {
    * `SBX_SLEEP_AFTER_MS`.
    */
   sleepAfter?: number;
+  /**
+   * Wire the sandbox to the egress credential proxy: the daemon mints an egress
+   * token and injects provider base-URL + key env vars (e.g. `OPENAI_BASE_URL`,
+   * `OPENAI_API_KEY`) so LLM SDKs inside route through the gateway with no real
+   * keys. Only providers configured on the daemon are wired. Defaults to false.
+   */
+  egress?: boolean;
 }
 
 export interface WriteFileOptions {

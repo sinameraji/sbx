@@ -230,6 +230,20 @@ function egressConfig(config: Config) {
   return { providers };
 }
 
+/**
+ * Env vars that point a sandbox's LLM SDKs at the egress gateway, with `token`
+ * standing in for each provider's real key. Injected at create time when a
+ * sandbox opts into egress, so the gateway is drop-in (no in-sandbox config).
+ */
+function egressEnv(config: Config, token: string): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const p of egressConfig(config).providers) {
+    if (p.baseUrlEnv) env[p.baseUrlEnv] = p.baseUrl;
+    if (p.keyEnv) env[p.keyEnv] = token;
+  }
+  return env;
+}
+
 /** Collapse high-cardinality id segments so span/route names stay bounded. */
 function normalizeRoute(path: string): string {
   return path
@@ -596,11 +610,19 @@ async function createSandbox(
 ): Promise<void> {
   const id = SandboxStore.newId();
   const image = typeof body.image === "string" ? body.image : config.defaultImage;
-  const env = (body.env as Record<string, string>) ?? {};
   const labels = (body.labels as Record<string, string>) ?? {};
   const persist = body.persist !== false;
   const sleepAfterMs =
     typeof body.sleepAfter === "number" ? body.sleepAfter : config.defaultSleepAfterMs;
+
+  // Opt-in egress wiring: mint a token and inject the provider base-URL + key env
+  // vars so any LLM SDK in the sandbox routes through the gateway with no config.
+  let egressToken: string | undefined;
+  let env = (body.env as Record<string, string>) ?? {};
+  if (body.egress === true) {
+    egressToken = SandboxStore.newEgressToken();
+    env = { ...env, ...egressEnv(config, egressToken) };
+  }
 
   await driver.create({ id, image, env, labels, persist });
 
@@ -618,6 +640,7 @@ async function createSandbox(
     usage: emptyUsage(),
   };
   store.add(record);
+  if (egressToken) store.addEgressToken(egressToken, id);
   sendJson(res, 201, record);
 }
 

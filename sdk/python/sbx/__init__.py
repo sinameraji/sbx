@@ -335,6 +335,7 @@ class SbxClient:
         labels: Optional[Dict[str, str]] = None,
         persist: Optional[bool] = None,
         sleep_after: Optional[int] = None,
+        egress: Optional[bool] = None,
     ) -> "Sandbox":
         """Attach to a sandbox by id, or (id omitted) provision a fresh one."""
         if id:
@@ -351,6 +352,8 @@ class SbxClient:
             body["persist"] = persist
         if sleep_after is not None:
             body["sleepAfter"] = sleep_after
+        if egress is not None:
+            body["egress"] = egress
         info = self.request("POST", "/sandboxes", body)
         return Sandbox(self, SandboxInfo.from_dict(info))
 

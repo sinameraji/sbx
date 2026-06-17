@@ -10,6 +10,7 @@ import { log } from "../logger.js";
 import type { MetricsHistory } from "../metrics.js";
 import { recentSpans, startSpan } from "../tracing.js";
 import { buildProviders } from "../proxy/egress.js";
+import { DRIVER_NAMES } from "../driver/index.js";
 import { emptyUsage, SandboxStore } from "../store.js";
 import { acceptWebSocket } from "./ws.js";
 import { DASHBOARD_HTML } from "../web/dashboard.js";
@@ -303,6 +304,7 @@ async function handle(
   if (method === "GET" && path === "/info") {
     return sendJson(res, 200, {
       driver: driver.name,
+      drivers: DRIVER_NAMES,
       defaultImage: config.defaultImage,
       proxyPort: config.proxyPort,
       costCpuPerHour: config.costCpuPerHour,

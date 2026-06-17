@@ -12,6 +12,12 @@ export interface Config {
    * for the richer toolset (Node 20, git, ripgrep, …).
    */
   defaultImage: string;
+  /**
+   * Runtime driver to use: `container` (Docker, the only built impl),
+   * `firecracker` (Linux microVM, Phase 3), or `applevz` (macOS microVM, Phase 3).
+   * Selects the isolation tier; the daemon/SDK/CLI are unchanged across drivers.
+   */
+  driver: string;
   /** Bind host for the preview-URL reverse proxy. */
   proxyHost: string;
   /** Port for the preview-URL reverse proxy (separate from the REST API). */
@@ -86,6 +92,7 @@ export function loadConfig(): Config {
     host: process.env.SBX_HOST ?? "127.0.0.1",
     port: Number(process.env.SBX_PORT ?? 4750),
     defaultImage: process.env.SBX_IMAGE ?? "python:3.11-slim-bookworm",
+    driver: process.env.SBX_DRIVER ?? "container",
     proxyHost: process.env.SBX_PROXY_HOST ?? "127.0.0.1",
     proxyPort: Number(process.env.SBX_PROXY_PORT ?? 4751),
     egressHost: process.env.SBX_EGRESS_HOST ?? "127.0.0.1",

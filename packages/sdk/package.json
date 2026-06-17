@@ -6,7 +6,23 @@
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
-  "files": ["dist"],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist", "README.md"],
+  "keywords": ["sandbox", "ai-agents", "sbx", "code-execution", "self-hosted"],
+  "homepage": "https://github.com/sinameraji/sbx#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sinameraji/sbx.git",
+    "directory": "packages/sdk"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json"
   },

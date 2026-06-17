@@ -1,4 +1,5 @@
 import { runCommand } from "./run.js";
+import { createCommand } from "./create.js";
 import { listCommand } from "./list.js";
 import { removeCommand } from "./remove.js";
 import { filesCommand } from "./files.js";
@@ -38,6 +39,8 @@ export async function cli(args: string[]): Promise<number> {
   switch (command) {
     case "run":
       return runCommand(positional, globals, flags);
+    case "create":
+      return createCommand(positional, globals, flags);
     case "exec":
       return execCommand(positional, globals, flags);
     case "env":
@@ -102,6 +105,9 @@ Commands:
   sb run "<command>" [--image <image>] [--keep] [--sleep-after <ms>] [--egress] [--endpoint <url>]
     Create a sandbox, run a command, stream output, then destroy it.
     --egress wires the sandbox to the LLM gateway (provider keys injected by the daemon).
+
+  sb create [--image I] [--env K=V,…] [--sleep-after MS] [--egress] [--label K=V,…]
+    Provision a standalone persistent sandbox and print its id.
 
   sb terminal <id>
     Attach an interactive shell (PTY) to a sandbox in your local terminal.

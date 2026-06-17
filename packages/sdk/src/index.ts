@@ -238,6 +238,22 @@ export interface BackupInfo {
   bytes: number;
 }
 
+/** Daemon metadata from `GET /info`. */
+export interface DaemonInfo {
+  driver: string;
+  drivers: string[];
+  defaultImage: string;
+  proxyPort: number;
+  egressPort: number;
+  egressProviders: string[];
+  costCpuPerHour: number;
+  costMemGbPerHour: number;
+  costEgressPerGb: number;
+  defaultSleepAfterMs: number;
+  auth: boolean;
+  otlp: boolean;
+}
+
 export interface SbxClientOptions {
   endpoint?: string;
   /**
@@ -297,6 +313,11 @@ export class SbxClient {
   /** Daemon health + active runtime driver. */
   async health(): Promise<{ ok: boolean; driver: string }> {
     return this.request("GET", "/healthz");
+  }
+
+  /** Daemon info: active/available drivers, default image, ports, providers, cost rates. */
+  async info(): Promise<DaemonInfo> {
+    return this.request<DaemonInfo>("GET", "/info");
   }
 
   /** List all workspace backups across sandboxes. */

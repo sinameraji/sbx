@@ -504,6 +504,33 @@ async function main(): Promise<number> {
       console.error("[smoke] egress proxy injects provider key + meters calls/tokens");
     }
 
+    // Auto-egress wiring: a sandbox created with {egress:true} gets the provider
+    // base-URL + key env vars injected (token in place of the real key). Configure
+    // a provider on the shared config so a route exists, then assert the env.
+    config.providerKeys = { ...config.providerKeys, openai: "sk-smoke" };
+    {
+      const egCreate = (await (
+        await fetch(`${endpoint}/sandboxes`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ egress: true }),
+        })
+      ).json()) as { id: string };
+      try {
+        const baseUrl = await execAndCapture(endpoint, egCreate.id, "printenv OPENAI_BASE_URL");
+        const keyVal = await execAndCapture(endpoint, egCreate.id, "printenv OPENAI_API_KEY");
+        if (!baseUrl.endsWith("/openai")) {
+          throw new Error(`expected OPENAI_BASE_URL .../openai, got "${baseUrl}"`);
+        }
+        if (!keyVal.startsWith("sbx-")) {
+          throw new Error(`expected OPENAI_API_KEY to be an egress token, got "${keyVal}"`);
+        }
+      } finally {
+        await fetch(`${endpoint}/sandboxes/${egCreate.id}`, { method: "DELETE" });
+      }
+      console.error("[smoke] auto-egress wiring injects provider env into the sandbox");
+    }
+
     // Interactive terminal over WebSocket: open a PTY shell, type a command, and
     // read its output back. 6*7 is evaluated by the shell, so seeing the result
     // (not the literal "$((6*7))" that input-echo prints) proves real execution.

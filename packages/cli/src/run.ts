@@ -18,6 +18,7 @@ export async function runCommand(
   const client = new SbxClient({ endpoint: globals.endpoint, apiKey: globals.apiKey });
   const image = typeof flags.image === "string" ? flags.image : undefined;
   const keep = flags.keep === true;
+  const egress = flags.egress === true;
   const sleepAfter =
     typeof flags["sleep-after"] === "string"
       ? Number(flags["sleep-after"])
@@ -35,8 +36,8 @@ export async function runCommand(
   let sandbox;
   try {
     const opts =
-      image || env || sleepAfter !== undefined
-        ? { image, env, sleepAfter }
+      image || env || sleepAfter !== undefined || egress
+        ? { image, env, sleepAfter, egress }
         : undefined;
     sandbox = await client.getSandbox(undefined, opts);
   } catch (err) {

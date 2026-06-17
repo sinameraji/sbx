@@ -14,6 +14,7 @@ import { envCommand } from "./env.js";
 import { sessionCommand } from "./session.js";
 import { statsCommand } from "./stats.js";
 import { egressCommand } from "./egress.js";
+import { terminalCommand } from "./terminal.js";
 
 export interface GlobalArgs {
   endpoint?: string;
@@ -50,6 +51,8 @@ export async function cli(args: string[]): Promise<number> {
       return statsCommand(positional, globals);
     case "egress":
       return egressCommand(positional, globals, flags);
+    case "terminal":
+      return terminalCommand(positional, globals);
     case "rm":
     case "remove":
       return removeCommand(positional, globals);
@@ -96,8 +99,12 @@ function printHelp(): void {
 Usage: sb <command> [options]
 
 Commands:
-  sb run "<command>" [--image <image>] [--keep] [--sleep-after <ms>] [--endpoint <url>]
+  sb run "<command>" [--image <image>] [--keep] [--sleep-after <ms>] [--egress] [--endpoint <url>]
     Create a sandbox, run a command, stream output, then destroy it.
+    --egress wires the sandbox to the LLM gateway (provider keys injected by the daemon).
+
+  sb terminal <id>
+    Attach an interactive shell (PTY) to a sandbox in your local terminal.
 
   sb exec <id> "<command>" [--session <sid>] [--cwd <dir>] [--env KEY=VAL,...]
     Run a command in an existing sandbox (optionally within a session).

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-**sbx** is self-hostable sandbox infrastructure for AI agents — spin up many isolated, observable sandboxes on your own hardware instead of a managed cloud. It's an npm-workspaces monorepo of TypeScript ES modules (Node ≥20). Currently a **Phase 0/1 vertical slice**: a Docker-backed container driver only; Firecracker/Apple VZ microVM drivers are planned but not built.
+**sbx** is self-hostable sandbox infrastructure for AI agents — spin up many isolated, observable sandboxes on your own hardware instead of a managed cloud. It's an npm-workspaces monorepo of TypeScript ES modules (the daemon needs Node ≥22 for built-in `node:sqlite` + global `WebSocket`). **Phases 0–2 are complete and Phase 3 has started**: a Docker-backed container driver with files/processes/sessions/preview-URLs/code-interpreter/backups/idle-FSM, durable SQLite state, metrics + cost meter, structured logs + OpenTelemetry traces, API-key auth, a web dashboard with a live xterm.js terminal, and an egress credential proxy (LLM gateway). Firecracker/Apple VZ microVM drivers are the remaining Phase 3 work and need a KVM-capable host, so they're not built yet.
 
 Two long-form docs already exist and are the source of truth — read them before large changes:
 - `docs/plan.md` — product spec, full target architecture, and phased roadmap (Phase 0→4).

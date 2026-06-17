@@ -13,7 +13,7 @@
 - **License:** Apache-2.0
 - **Key frameworks / libraries:** `dockerode` (Docker Engine API), `tsx` (dev runner), native `node:http` + `fetch` + `node:sqlite` (embedded state store)
 
-Current status: **Phase 0 vertical slice**. The container driver works on Linux and macOS; microVM drivers (Firecracker / Apple VZ) are planned.
+Current status: **Phases 0–2 complete; Phase 3 started.** The `container` (Docker) driver works on Linux and macOS with the full sandbox API, durable SQLite state, idle lifecycle, metrics + cost meter, structured logs + OTel traces, API-key auth, a web dashboard with a live xterm.js terminal, and an egress credential proxy (LLM gateway). The runtime driver is selectable via `SBX_DRIVER`; the `firecracker`/`applevz` microVM drivers are scaffolded (compile-checked stubs) and need a KVM/VZ host. The daemon now requires Node ≥22 (`node:sqlite` + global `WebSocket`).
 
 ---
 
@@ -153,7 +153,7 @@ npm install <pkg> --save-dev
 2. **Do not use CommonJS.** All packages are ES modules.
 3. **Do not drop the `.js` extension** from relative TypeScript imports — `NodeNext` resolution requires it.
 4. **Do not add a heavy web framework** to the daemon without discussion; the Phase 0 server is intentionally hand-rolled.
-5. **CLI exists.** `packages/cli` implements `sb run`, `sb ls`, and `sb rm`.
+5. **CLI exists.** `packages/cli` implements the full surface — `run`/`create`/`exec`/`ls`/`rm`/`stats`/`stop`/`start`/`files`/`watch`/`ps`/`kill`/`logs`/`wait-port`/`expose`/`env`/`session`/`run-code`/`backup`/`restore`/`backups`/`egress`/`terminal`.
 6. **Do not run the smoke script as a correctness check** until `packages/daemon/dist/smoke.js` (or `src/smoke.ts`) is added.
 7. **Do keep the SDK dependency-free** unless there is a strong reason to add a runtime dependency.
 8. **Do update `docs/plan.md`** when architectural decisions change; it is the source of truth for the phased roadmap.

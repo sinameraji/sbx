@@ -95,6 +95,7 @@ Inside the sandbox, point any OpenAI-compatible SDK at the printed base URL usin
 
 ```
 sb run "<cmd>" [--image I] [--keep] [--env K=V,…] [--sleep-after MS] [--egress]
+sb create [--image I] [--env K=V,…] [--sleep-after MS] [--egress]   # standalone sandbox, prints id
 sb exec <id> "<cmd>" [--session SID] [--cwd DIR] [--env K=V,…]
 sb ls | stats <id> | stop <id> | start <id> | rm <id>
 sb terminal <id>                       # interactive shell (attach)
@@ -116,6 +117,7 @@ Global: --endpoint <url> (SBX_ENDPOINT) · --api-key <key> (SBX_API_KEY)
 | Var | Default | What |
 |---|---|---|
 | `SBX_HOST` / `SBX_PORT` | `127.0.0.1` / `4750` | REST API bind |
+| `SBX_DRIVER` | `container` | Runtime driver: `container` (Docker) — `firecracker`/`applevz` are Phase 3 |
 | `SBX_IMAGE` | `python:3.11-slim-bookworm` | Default sandbox image |
 | `SBX_PROXY_PORT` | `4751` | Preview-URL proxy |
 | `SBX_EGRESS_PORT` | `4752` | Egress gateway (`0` disables) |
@@ -133,7 +135,7 @@ Global: --endpoint <url> (SBX_ENDPOINT) · --api-key <key> (SBX_API_KEY)
 ## Architecture
 
 - **`sbd`** — single control-plane daemon per host: hand-rolled `node:http` REST API + WebSocket, embedded SQLite state, idle reaper, metrics sampler, preview proxy, egress gateway, and a pluggable runtime-driver layer.
-- **Runtime drivers** — the core abstraction (`create`/`exec`/`openTerminal`/files/ports/backup/stats/…). Today: `container` (Docker) on Linux + macOS. Next: `firecracker` (Linux) and `applevz` (macOS) microVM drivers behind the same interface, so the daemon/SDKs/CLI are unchanged when you swap isolation tiers.
+- **Runtime drivers** — the core abstraction (`create`/`exec`/`openTerminal`/files/ports/backup/stats/…), selected by `SBX_DRIVER`. Today: `container` (Docker) on Linux + macOS. Next: `firecracker` (Linux) and `applevz` (macOS) microVM drivers behind the same interface (scaffolded; they need a KVM/VZ host), so the daemon/SDKs/CLI are unchanged when you swap isolation tiers.
 - **SDKs** — TypeScript + Python, mirroring the Cloudflare Sandbox surface so existing harnesses adopt with near-zero friction.
 
 See `docs/plan.md` for the full spec and phased roadmap, and `KIMI.md` for contributor/agent context.

@@ -14,6 +14,7 @@ import { execCommand } from "./exec.js";
 import { envCommand } from "./env.js";
 import { sessionCommand } from "./session.js";
 import { statsCommand } from "./stats.js";
+import { infoCommand } from "./info.js";
 import { egressCommand } from "./egress.js";
 import { terminalCommand } from "./terminal.js";
 
@@ -52,6 +53,8 @@ export async function cli(args: string[]): Promise<number> {
       return listCommand(globals);
     case "stats":
       return statsCommand(positional, globals);
+    case "info":
+      return infoCommand(positional, globals);
     case "egress":
       return egressCommand(positional, globals, flags);
     case "terminal":
@@ -125,6 +128,9 @@ Commands:
 
   sb ls [--endpoint <url>]
     List sandboxes managed by the daemon.
+
+  sb info
+    Show the daemon's driver, providers, auth, and cost configuration.
 
   sb stats <id>
     Show live CPU/mem/net usage and accumulated cost for a sandbox.

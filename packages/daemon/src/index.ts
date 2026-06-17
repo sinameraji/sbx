@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { BackupRegistry } from "./backups.js";
 import { loadConfig } from "./config.js";
-import { ContainerDriver } from "./driver/container.js";
+import { createDriver } from "./driver/index.js";
 import { startReaper } from "./lifecycle.js";
 import { configureLogger, log } from "./logger.js";
 import { MetricsHistory, startSampler } from "./metrics.js";
@@ -19,17 +19,26 @@ async function main(): Promise<void> {
     otlpEndpoint: config.otlpEndpoint,
     ringSize: config.traceRing,
   });
-  const driver = new ContainerDriver();
+  let driver;
+  try {
+    driver = createDriver(config);
+  } catch (err) {
+    log.error("driver selection failed", { driver: config.driver, error: String(err) });
+    process.exit(1);
+  }
   const store = new SandboxStore(config.dbPath);
   const backups = new BackupRegistry(config.backupDir);
   const history = new MetricsHistory(config.metricsHistory);
 
-  // Fail fast with a friendly message if the runtime backend is unreachable.
+  // Fail fast with a friendly message if the selected driver isn't available
+  // (Docker not running, or a microVM driver requested without host support).
   try {
     await driver.ping();
   } catch (err) {
-    log.error("container runtime (Docker) is not reachable", { error: String(err) });
-    log.error("start Docker (or colima / Apple 'container') and retry");
+    log.error(`driver "${driver.name}" is not available`, { error: String(err) });
+    if (driver.name === "container") {
+      log.error("start Docker (or colima / Apple 'container') and retry");
+    }
     process.exit(1);
   }
 

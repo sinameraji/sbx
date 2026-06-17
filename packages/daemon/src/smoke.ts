@@ -13,7 +13,7 @@ import { setTimeout } from "node:timers/promises";
 import { BackupRegistry } from "./backups.js";
 import { createEgressProxy } from "./proxy/egress.js";
 import { loadConfig } from "./config.js";
-import { ContainerDriver } from "./driver/container.js";
+import { createDriver } from "./driver/index.js";
 import { createApiServer } from "./api/server.js";
 import { reapIdle } from "./lifecycle.js";
 import { MetricsHistory, sampleUsage } from "./metrics.js";
@@ -26,7 +26,7 @@ async function main(): Promise<number> {
   config.backupDir = await mkdtemp(join(tmpdir(), "sbx-smoke-backups-"));
   const dbDir = await mkdtemp(join(tmpdir(), "sbx-smoke-db-"));
   config.dbPath = join(dbDir, "state.db");
-  const driver = new ContainerDriver();
+  const driver = createDriver(config);
   const store = new SandboxStore(config.dbPath);
   const backups = new BackupRegistry(config.backupDir);
   const history = new MetricsHistory(config.metricsHistory);

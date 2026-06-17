@@ -78,6 +78,31 @@ export interface SandboxUsage {
   cpuSeconds: number;
   memByteSeconds: number;
   egressBytes: number;
+  /** LLM-provider calls made through the egress credential proxy. */
+  providerCalls: number;
+  /** Bytes exchanged with providers through the egress proxy. */
+  providerBytes: number;
+  /** Prompt/input tokens billed across provider calls. */
+  providerTokensIn: number;
+  /** Completion/output tokens billed across provider calls. */
+  providerTokensOut: number;
+}
+
+/** A provider reachable through the egress credential proxy (LLM gateway). */
+export interface EgressProvider {
+  name: string;
+  /** Base URL to point the provider SDK at (sandbox uses the token as the key). */
+  baseUrl: string;
+  /** Conventional env var for the base URL (e.g. OPENAI_BASE_URL). */
+  baseUrlEnv?: string;
+  /** Conventional env var for the API key (set it to the egress token). */
+  keyEnv?: string;
+}
+
+/** A minted egress token plus the provider base URLs it unlocks. */
+export interface EgressToken {
+  token: string;
+  providers: EgressProvider[];
 }
 
 /** Per-resource cost breakdown in the daemon's configured currency. */
@@ -465,6 +490,32 @@ export class Sandbox {
         language: options.language,
         timeoutMs: options.timeoutMs,
       },
+    );
+  }
+
+  /**
+   * Mint an egress token for this sandbox. Configure the sandbox's LLM SDK with
+   * the returned `providers[].baseUrl` and use the token in place of the real API
+   * key — the daemon injects the real provider key and meters the call, so keys
+   * never live inside the sandbox.
+   */
+  async createEgressToken(): Promise<EgressToken> {
+    return this.client.request<EgressToken>(
+      "POST",
+      `/sandboxes/${this.info.id}/egress-tokens`,
+    );
+  }
+
+  /** List this sandbox's egress tokens and the available provider routes. */
+  async listEgressTokens(): Promise<{ tokens: string[]; providers: EgressProvider[] }> {
+    return this.client.request("GET", `/sandboxes/${this.info.id}/egress-tokens`);
+  }
+
+  /** Revoke a previously minted egress token. */
+  async revokeEgressToken(token: string): Promise<void> {
+    await this.client.request(
+      "DELETE",
+      `/sandboxes/${this.info.id}/egress-tokens/${token}`,
     );
   }
 

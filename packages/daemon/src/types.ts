@@ -53,6 +53,14 @@ export interface SandboxUsage {
   memByteSeconds: number;
   /** Total bytes the sandbox has sent out through the preview proxy. */
   egressBytes: number;
+  /** Number of LLM-provider calls made through the egress credential proxy. */
+  providerCalls: number;
+  /** Total bytes exchanged with providers through the egress proxy (both ways). */
+  providerBytes: number;
+  /** Prompt/input tokens billed across provider calls (parsed from responses). */
+  providerTokensIn: number;
+  /** Completion/output tokens billed across provider calls. */
+  providerTokensOut: number;
   /** Last observed cumulative CPU ns, to compute the next delta (reset-safe). */
   lastCpuTotalNs: number;
   /** ISO timestamp of the last sample, to integrate memory over wall-clock. */

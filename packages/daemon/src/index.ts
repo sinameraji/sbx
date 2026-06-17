@@ -9,6 +9,7 @@ import { configureTracing, stopTracing } from "./tracing.js";
 import { SandboxStore } from "./store.js";
 import { createApiServer } from "./api/server.js";
 import { createProxyServer } from "./proxy/server.js";
+import { buildProviders, createEgressProxy } from "./proxy/egress.js";
 
 async function main(): Promise<void> {
   const config = loadConfig();
@@ -51,6 +52,19 @@ async function main(): Promise<void> {
     });
   });
 
+  // Egress credential proxy (LLM gateway): injects provider keys into outbound
+  // calls and meters them. Runs whenever a port is configured; routes 404 until
+  // provider keys (SBX_PROVIDER_KEY_*) are set.
+  const providers = buildProviders(config);
+  const egress =
+    config.egressPort > 0 ? createEgressProxy({ config, store, providers }) : undefined;
+  egress?.listen(config.egressPort, config.egressHost, () => {
+    log.info("egress proxy listening", {
+      url: `http://${config.egressHost}:${config.egressPort}`,
+      providers: Object.keys(providers).length ? Object.keys(providers).join(",") : "none configured",
+    });
+  });
+
   // Idle reaper: auto-pause sandboxes left idle past their sleepAfterMs.
   const reaper =
     config.reapIntervalMs > 0
@@ -68,6 +82,7 @@ async function main(): Promise<void> {
     if (reaper) clearInterval(reaper);
     if (sampler) clearInterval(sampler);
     stopTracing();
+    egress?.close();
     proxy.close();
     server.close(() => {
       store.close();

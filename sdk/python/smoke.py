@@ -111,6 +111,17 @@ def main() -> int:
         assert m.cost.total >= 0
         log("metrics + cost reachable")
 
+        # egress credential proxy: mint + list + revoke a token (no providers
+        # configured here, so the providers list is empty — the SDK surface is
+        # what we exercise; the daemon smoke covers key injection + metering).
+        minted = sb.create_egress_token()
+        assert minted.get("token"), "egress mint returned no token"
+        listed = sb.list_egress_tokens()
+        assert minted["token"] in listed.get("tokens", []), "minted token not listed"
+        sb.revoke_egress_token(minted["token"])
+        assert minted["token"] not in sb.list_egress_tokens().get("tokens", [])
+        log("egress token mint/list/revoke works")
+
         # backup / restore rollback
         sb.write_file("/workspace/keep.txt", "v1")
         backup = sb.create_backup()

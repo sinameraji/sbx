@@ -1,4 +1,5 @@
 import { SbxClient } from "@sbx/sdk";
+import { formatError } from "./util.js";
 import type { GlobalArgs } from "./cli.js";
 import { parseEnvPairs } from "./env.js";
 
@@ -91,8 +92,4 @@ export async function killCommand(
 
 function padRight(value: string, width: number): string {
   return value.length >= width ? value : value + " ".repeat(width - value.length);
-}
-
-function formatError(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
 }

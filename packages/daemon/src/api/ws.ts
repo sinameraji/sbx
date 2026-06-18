@@ -51,10 +51,16 @@ const OP_CLOSE = 0x8;
 const OP_PING = 0x9;
 const OP_PONG = 0xa;
 
+// Inbound messages are terminal keystrokes + resize JSON — tiny. Cap any single
+// frame and any reassembled fragmented message so a client can't stream
+// unbounded data into the daemon's buffers (memory DoS).
+const MAX_MESSAGE_BYTES = 1024 * 1024;
+
 class Conn implements WebSocketConnection {
   private buf = Buffer.alloc(0);
   private fragments: Buffer[] = [];
   private fragOpcode = 0;
+  private fragBytes = 0;
   private closed = false;
   private messageCb?: (data: Buffer, isBinary: boolean) => void;
   private closeCb?: () => void;
@@ -105,6 +111,11 @@ class Conn implements WebSocketConnection {
         len = Number(this.buf.readBigUInt64BE(2));
         offset = 10;
       }
+      // Reject an oversized frame before waiting to buffer its payload.
+      if (len > MAX_MESSAGE_BYTES) {
+        this.close();
+        return;
+      }
       let maskKey: Buffer | undefined;
       if (masked) {
         if (this.buf.length < offset + 4) return;
@@ -135,12 +146,18 @@ class Conn implements WebSocketConnection {
       case OP_PONG:
         return;
       case OP_CONT:
+        this.fragBytes += payload.length;
+        if (this.fragBytes > MAX_MESSAGE_BYTES) {
+          this.close();
+          return;
+        }
         this.fragments.push(payload);
         if (fin) {
           const full = Buffer.concat(this.fragments);
           const op = this.fragOpcode;
           this.fragments = [];
           this.fragOpcode = 0;
+          this.fragBytes = 0;
           this.emitMessage(full, op === OP_BINARY);
         }
         return;
@@ -149,6 +166,7 @@ class Conn implements WebSocketConnection {
         if (!fin) {
           this.fragOpcode = opcode;
           this.fragments = [payload];
+          this.fragBytes = payload.length;
           return;
         }
         this.emitMessage(payload, opcode === OP_BINARY);

@@ -1,4 +1,5 @@
 import { SbxClient } from "@sbx/sdk";
+import { formatError } from "./util.js";
 import type { GlobalArgs } from "./cli.js";
 
 export async function stopCommand(
@@ -43,8 +44,4 @@ export async function startSandboxCommand(
     console.error(`Failed to start sandbox: ${formatError(err)}`);
     return 1;
   }
-}
-
-function formatError(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
 }

@@ -2,6 +2,7 @@ import { createServer, type Server, type Socket } from "node:net";
 import type { Config } from "../config.js";
 import type { Driver } from "../driver/types.js";
 import type { RouteTarget, SandboxStore } from "../store.js";
+import { safeEqual } from "../util.js";
 
 interface Deps {
   config: Config;
@@ -169,12 +170,31 @@ function rewriteFirstLine(buffer: Buffer, from: string, _to: string): Buffer {
   ]);
 }
 
+/**
+ * Check the per-port preview token, supplied as a `?token=` query param or an
+ * `Authorization: Bearer <token>` header. Extracts the actual value and compares
+ * it exactly in constant time (the old lowercased-substring match was both
+ * case-insensitive and loose).
+ */
 function hasToken(headerText: string, token: string): boolean {
-  const lower = headerText.toLowerCase();
-  return (
-    lower.includes(`token=${token.toLowerCase()}`) ||
-    lower.includes(`authorization: bearer ${token.toLowerCase()}`)
-  );
+  const lines = headerText.split("\r\n");
+
+  // 1) token= query param on the request line.
+  const target = (lines[0] ?? "").split(" ")[1] ?? "";
+  const q = target.indexOf("?");
+  if (q !== -1) {
+    const provided = new URLSearchParams(target.slice(q + 1)).get("token");
+    if (provided && safeEqual(provided, token)) return true;
+  }
+
+  // 2) Authorization: Bearer <token>.
+  const authLine = lines.find((l) => /^authorization:/i.test(l));
+  if (authLine) {
+    const m = /^bearer\s+(.+)$/i.exec(authLine.slice(authLine.indexOf(":") + 1).trim());
+    if (m && safeEqual(m[1], token)) return true;
+  }
+
+  return false;
 }
 
 function respond(socket: Socket, status: number, message: string): void {

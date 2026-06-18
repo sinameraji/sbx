@@ -3,6 +3,7 @@ import type { Config } from "../config.js";
 import { log } from "../logger.js";
 import type { SandboxStore } from "../store.js";
 import { startSpan } from "../tracing.js";
+import { BodyTooLargeError, readBodyCapped, sendJson, sendText } from "../util.js";
 
 /**
  * Egress credential proxy — an LLM gateway, not a TLS-MITM forward proxy.
@@ -124,7 +125,16 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: Deps): Pr
   headers.set(provider.authHeader, provider.format(provider.apiKey));
 
   const method = req.method ?? "GET";
-  const reqBody = method === "GET" || method === "HEAD" ? undefined : await readRaw(req);
+  let reqBody: Buffer | undefined;
+  try {
+    reqBody =
+      method === "GET" || method === "HEAD"
+        ? undefined
+        : await readBodyCapped(req, deps.config.maxBodyBytes);
+  } catch (err) {
+    if (err instanceof BodyTooLargeError) return sendText(res, 413, "request body too large");
+    throw err;
+  }
   let bytes = reqBody?.length ?? 0;
 
   let upstream: Response;
@@ -226,26 +236,3 @@ function parseUsage(buf: Buffer): { tokensIn: number; tokensOut: number } {
   return best ?? { tokensIn: 0, tokensOut: 0 };
 }
 
-async function readRaw(req: IncomingMessage): Promise<Buffer | undefined> {
-  const chunks: Buffer[] = [];
-  for await (const chunk of req) chunks.push(chunk as Buffer);
-  return chunks.length ? Buffer.concat(chunks) : undefined;
-}
-
-function sendJson(res: ServerResponse, status: number, body: unknown): void {
-  const payload = JSON.stringify(body);
-  res.writeHead(status, {
-    "Content-Type": "application/json",
-    "Content-Length": Buffer.byteLength(payload),
-  });
-  res.end(payload);
-}
-
-function sendText(res: ServerResponse, status: number, message: string): void {
-  const body = message + "\n";
-  res.writeHead(status, {
-    "Content-Type": "text/plain; charset=utf-8",
-    "Content-Length": Buffer.byteLength(body),
-  });
-  res.end(body);
-}

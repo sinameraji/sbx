@@ -1,4 +1,5 @@
 import { SbxClient } from "@sbx/sdk";
+import { formatError } from "./util.js";
 import type { GlobalArgs } from "./cli.js";
 import { parseEnvPairs } from "./env.js";
 
@@ -74,8 +75,4 @@ export async function runCommand(
   }
 
   return exitCode;
-}
-
-function formatError(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
 }

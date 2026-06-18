@@ -82,6 +82,18 @@ export interface Config {
   metricsHistory: number;
   /** How many of the most recent finished spans to retain in memory for `/traces`. */
   traceRing: number;
+  /**
+   * Maximum accepted request body size in bytes (REST + egress gateway). Caps
+   * memory use from a single request. Must stay large enough for base64-encoded
+   * file writes. `SBX_MAX_BODY_BYTES`, default 32 MiB.
+   */
+  maxBodyBytes: number;
+  /**
+   * Extra Host header values accepted by the API server, beyond the loopback
+   * names and `host`. The Host allowlist is a DNS-rebinding / localhost-CSRF
+   * guard. `SBX_ALLOWED_HOSTS` (comma-separated). Empty by default.
+   */
+  allowedHosts: string[];
 }
 
 export type LogLevel = "debug" | "info" | "warn" | "error";
@@ -113,6 +125,11 @@ export function loadConfig(): Config {
     otlpEndpoint: (process.env.SBX_OTLP_ENDPOINT ?? "").replace(/\/$/, ""),
     metricsHistory: Number(process.env.SBX_METRICS_HISTORY ?? 60),
     traceRing: Number(process.env.SBX_TRACE_RING ?? 200),
+    maxBodyBytes: Number(process.env.SBX_MAX_BODY_BYTES ?? 32 * 1024 * 1024),
+    allowedHosts: (process.env.SBX_ALLOWED_HOSTS ?? "")
+      .split(",")
+      .map((h) => h.trim())
+      .filter(Boolean),
   };
 }
 

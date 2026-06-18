@@ -100,7 +100,7 @@ Inside the sandbox, point any OpenAI-compatible SDK at the printed base URL usin
 sbx is built to *run agents*, not just containers — a sandbox can come up with a **repo cloned in** (`--repo`), **LLM access wired without keys inside** (`--egress`), **resource caps**, and **per-agent cost/observability**.
 
 - **Mastra (first-class):** [`@sbx/mastra`](packages/mastra) is a Mastra `Workspace` sandbox provider — drop `SbxSandbox` in where you'd use `E2BSandbox`/`ModalSandbox` and your agent runs on your own hardware.
-- **CLI harnesses:** run **OpenCode / Codex / Claude Code / pi.dev** (or any headless agent) with `sb create --repo <url> --egress --setup "<install the CLI>"`, then `sb exec`.
+- **CLI harnesses:** run **OpenCode / Codex / Claude Code / pi.dev** (or any headless agent) in one command — e.g. [`examples/opencode.sh <repo> "<task>"`](examples/opencode.sh) creates a sandbox, clones the repo, runs OpenCode headless via OpenRouter (your key stays on the daemon), and destroys the sandbox when done.
 
 ```ts
 import { Agent, Workspace } from "@mastra/core";

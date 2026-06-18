@@ -77,6 +77,8 @@ export interface SandboxUsage {
   providerTokensIn: number;
   /** Completion/output tokens billed across provider calls. */
   providerTokensOut: number;
+  /** Provider-reported LLM cost in USD (e.g. OpenRouter's `usage.cost`), summed across calls. */
+  providerCost: number;
   /** Last observed cumulative CPU ns, to compute the next delta (reset-safe). */
   lastCpuTotalNs: number;
   /** ISO timestamp of the last sample, to integrate memory over wall-clock. */

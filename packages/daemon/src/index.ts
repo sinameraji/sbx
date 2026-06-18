@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { BackupRegistry } from "./backups.js";
+import { Capacity } from "./capacity.js";
 import { loadConfig } from "./config.js";
 import { createDriver } from "./driver/index.js";
 import { startReaper } from "./lifecycle.js";
@@ -42,7 +43,18 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  const server = createApiServer({ config, driver, store, backups, history });
+  // Host capacity for the meter + admission control (best-effort detection).
+  const host = await driver.hostInfo().catch(() => null);
+  const capacity = new Capacity(store, config, host);
+  if (host) {
+    log.info("host capacity", {
+      memoryMb: host.memoryMb,
+      cpus: host.cpus,
+      admission: capacity.enforced ? "enforce" : "off",
+    });
+  }
+
+  const server = createApiServer({ config, driver, store, backups, history, capacity });
   server.listen(config.port, config.host, () => {
     log.info("daemon listening", {
       url: `http://${config.host}:${config.port}`,

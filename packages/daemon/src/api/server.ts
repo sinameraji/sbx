@@ -5,6 +5,7 @@ import { previewUrl, type Config } from "../config.js";
 import type { Driver, TerminalSession } from "../driver/types.js";
 import { kernelFor, type KernelLanguage } from "../kernels.js";
 import { resumeSandbox } from "../lifecycle.js";
+import type { Capacity } from "../capacity.js";
 import { computeCost } from "../cost.js";
 import { log } from "../logger.js";
 import type { MetricsHistory } from "../metrics.js";
@@ -39,6 +40,7 @@ interface Deps {
   store: SandboxStore;
   backups: BackupRegistry;
   history?: MetricsHistory;
+  capacity?: Capacity;
 }
 
 /**
@@ -427,6 +429,12 @@ async function handle(
     }
   }
 
+  // Host capacity + admission status (for the dashboard meter + `sb capacity`).
+  if (method === "GET" && path === "/capacity") {
+    if (!deps.capacity) return sendJson(res, 200, { enforced: false });
+    return sendJson(res, 200, deps.capacity.snapshot());
+  }
+
   // Recent finished spans, for debugging and the trace view. Newest first.
   if (method === "GET" && path === "/traces") {
     const limit = Number(url.searchParams.get("limit") ?? "100") || 100;
@@ -441,7 +449,7 @@ async function handle(
 
   if (method === "POST" && path === "/sandboxes") {
     const body = await readJson(req, config.maxBodyBytes);
-    return createSandbox(res, { config, driver, store }, body);
+    return createSandbox(res, { config, driver, store, capacity: deps.capacity }, body);
   }
 
   if (method === "GET" && path === "/sandboxes") {
@@ -689,7 +697,7 @@ async function handle(
 
 async function createSandbox(
   res: ServerResponse,
-  { config, driver, store }: Pick<Deps, "config" | "driver" | "store">,
+  { config, driver, store, capacity }: Pick<Deps, "config" | "driver" | "store" | "capacity">,
   body: Record<string, unknown>,
 ): Promise<void> {
   const id = SandboxStore.newId();
@@ -708,6 +716,10 @@ async function createSandbox(
   const resolved = resolveLimits(body, config);
   if ("error" in resolved) return sendJson(res, 400, { error: resolved.error });
   const limits = resolved.limits;
+
+  // Admission control: refuse to over-subscribe the host's memory budget.
+  const admitted = capacity?.admit(limits.memoryMb) ?? { ok: true };
+  if (!admitted.ok) return sendJson(res, 503, { error: admitted.reason });
 
   // Opt-in egress wiring: mint a token and inject the provider base-URL + key env
   // vars so any LLM SDK in the sandbox routes through the gateway with no config.

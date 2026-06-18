@@ -272,6 +272,18 @@ export interface BackupInfo {
   bytes: number;
 }
 
+/** Host capacity + admission status from `GET /capacity`. */
+export interface CapacitySnapshot {
+  enforced: boolean;
+  overcommit: number;
+  defaultReservationMb: number;
+  memory: { budgetMb: number; committedMb: number; availableMb: number };
+  cpu: { budget: number; committed: number; available: number };
+  running: number;
+  /** Approx. number of additional default-reservation sandboxes that still fit. */
+  fits: number;
+}
+
 /** Daemon metadata from `GET /info`. */
 export interface DaemonInfo {
   driver: string;
@@ -352,6 +364,11 @@ export class SbxClient {
   /** Daemon info: active/available drivers, default image, ports, providers, cost rates. */
   async info(): Promise<DaemonInfo> {
     return this.request<DaemonInfo>("GET", "/info");
+  }
+
+  /** Host capacity + admission status (committed vs budget memory, how many more fit). */
+  async capacity(): Promise<CapacitySnapshot> {
+    return this.request<CapacitySnapshot>("GET", "/capacity");
   }
 
   /** List all workspace backups across sandboxes. */

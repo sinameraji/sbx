@@ -250,4 +250,19 @@ export interface Driver {
 
   /** Liveness check for the underlying runtime (e.g. Docker daemon reachable). */
   ping(): Promise<void>;
+
+  /**
+   * Total host capacity available to the runtime — total memory (MiB) and CPU
+   * count. Backs the capacity meter + admission control. For the container
+   * driver this is the Docker host/VM's `MemTotal` / `NCPU`.
+   */
+  hostInfo(): Promise<HostInfo>;
+}
+
+/** Total host capacity as seen by the runtime. */
+export interface HostInfo {
+  /** Total memory available to the runtime, in MiB. */
+  memoryMb: number;
+  /** Number of CPUs available to the runtime. */
+  cpus: number;
 }

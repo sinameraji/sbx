@@ -35,17 +35,20 @@ docker build -t sbx/base:latest images/base
 examples/opencode.sh https://github.com/you/app "add a /health route and run the tests"
 ```
 
-What that runs under the hood is a single `sb run` (create → exec → auto-destroy):
+You get a clean run: a spinner with a **live token/$ ticker**, then the agent's answer, then a one-line summary — nothing else:
 
-```bash
-sb run --image sbx/base:latest --egress --repo https://github.com/you/app \
-  --setup 'npm i -g opencode-ai && mkdir -p ~/.config/opencode && printf "{\"provider\":{\"openrouter\":{\"options\":{\"baseURL\":\"%s/v1\",\"apiKey\":\"%s\"}}}}" "$OPENROUTER_BASE_URL" "$OPENROUTER_API_KEY" > ~/.config/opencode/opencode.json' \
-  "opencode run --dir /workspace/app -m openrouter/moonshotai/kimi-k2.7-code --dangerously-skip-permissions 'add a /health route and run the tests'"
+```
+⠋ app · agent working · editing files · 12.4k tokens · $0.01
+Added a /health route in src/server.js and a test in test/health.test.js. Tests pass.
+
+✓ app · done in 41s · 18.2k tokens · $0.02 · 2 files changed, 23 insertions(+)
 ```
 
-The egress gateway injects `OPENROUTER_BASE_URL` (→ `http://host.docker.internal:4752/openrouter`) and `OPENROUTER_API_KEY` (a per-sandbox token) into the sandbox; the OpenCode config points OpenRouter at that base URL. The daemon swaps the token for your real key, forwards to OpenRouter, and meters tokens + $ per sandbox (`sb stats`).
+Flags: `[model]` (3rd arg, default `openrouter/moonshotai/kimi-k2.7-code`), `--keep` (don't destroy; print `sb terminal`/`sb rm` hints), `--verbose` (show the raw OpenCode stream). The answer goes to **stdout** and all chrome to **stderr**, so `examples/opencode.sh … > out.md` captures just the answer.
 
-> Verified: `opencode-ai` installs and runs headless in the sandbox, and the egress key-injection/forwarding is covered by `npm run smoke`. The actual model call needs *your* OpenRouter key, so run it yourself with step 1 above.
+The launcher is a thin shim over [`examples/agent.mjs`](./agent.mjs), which drives the sandbox via `@sbx/sdk`. Under the hood: `--egress` injects `OPENROUTER_BASE_URL` (→ the gateway) + a per-sandbox `OPENROUTER_API_KEY` **token**; the OpenCode config points OpenRouter at that base URL; the daemon swaps the token for your real key, forwards, and meters tokens + $ (which the runner reads live from the egress meter).
+
+> Verified: `opencode-ai` installs + runs headless in the sandbox and the egress key-injection/forwarding is covered by `npm run smoke`; the runner's output filter + chrome are tested offline. The model call needs *your* OpenRouter key — run it with step 1 above. (`SBX_AGENT_CMD="<cmd>"` runs any other harness instead of OpenCode.)
 
 ### Other harnesses (same shape)
 

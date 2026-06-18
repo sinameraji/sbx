@@ -102,6 +102,15 @@ export interface CreateOptions {
    * Not re-run on resume — with persistence the workspace already has the result.
    */
   setup?: string[];
+  /**
+   * Git repository URL cloned into `/workspace` at create time (before `setup`),
+   * so an agent comes up with the code in place. Private repos: embed a token in
+   * the URL (`https://<token>@github.com/owner/repo.git`). A clone failure fails
+   * create (unlike best-effort `setup`).
+   */
+  repo?: string;
+  /** Branch/tag to check out when cloning `repo` (default: the repo's default branch). */
+  repoRef?: string;
   /** Hard CPU/memory/PID caps for the sandbox (resolved effective values). */
   limits?: ResourceLimits;
 }

@@ -24,6 +24,8 @@ export async function createCommand(
     typeof flags["sleep-after"] === "string" ? Number(flags["sleep-after"]) : undefined;
   const { memoryMb, cpus, pidsLimit } = parseLimitFlags(flags);
   const setup = typeof flags.setup === "string" ? [flags.setup] : undefined;
+  const repo = typeof flags.repo === "string" ? flags.repo : undefined;
+  const repoRef = typeof flags.ref === "string" ? flags.ref : undefined;
 
   let env: Record<string, string> | undefined;
   let labels: Record<string, string> | undefined;
@@ -43,6 +45,8 @@ export async function createCommand(
       sleepAfter,
       egress,
       setup,
+      repo,
+      repoRef,
       memoryMb,
       cpus,
       pidsLimit,

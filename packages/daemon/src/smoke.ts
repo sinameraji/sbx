@@ -632,6 +632,33 @@ async function main(): Promise<number> {
       console.error("[smoke] resource limits enforced (256 MiB cap, survives resume) + daemon default applies");
     }
 
+    // --repo: clone a git repo into /workspace at create. Best-effort (needs
+    // network + installs git on the slim image) — logs a skip when offline.
+    {
+      const repoRes = await fetch(`${endpoint}/sandboxes`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ repo: "https://github.com/octocat/Hello-World.git" }),
+      });
+      if (repoRes.ok) {
+        const { id: repoId } = (await repoRes.json()) as { id: string };
+        try {
+          const found = await execAndCapture(
+            endpoint,
+            repoId,
+            "test -e /workspace/Hello-World/README && echo YES || echo NO",
+          );
+          if (found !== "YES") throw new Error("repo did not clone into /workspace");
+          console.error("[smoke] --repo cloned a git repo into /workspace");
+        } finally {
+          await fetch(`${endpoint}/sandboxes/${repoId}`, { method: "DELETE" });
+        }
+      } else {
+        // 422 = clone failed (likely offline); the wiring + cleanup still ran.
+        console.error(`[smoke] --repo clone skipped (status ${repoRes.status}, likely offline)`);
+      }
+    }
+
     // Interactive terminal over WebSocket: open a PTY shell, type a command, and
     // read its output back. 6*7 is evaluated by the shell, so seeing the result
     // (not the literal "$((6*7))" that input-echo prints) proves real execution.

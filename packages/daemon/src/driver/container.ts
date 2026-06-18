@@ -93,7 +93,26 @@ export class ContainerDriver implements Driver {
 
   async create(opts: CreateOptions): Promise<void> {
     await this.launchContainer(opts);
+    if (opts.repo) await this.cloneRepo(opts.id, opts.repo, opts.repoRef);
     await this.runSetup(opts.id, opts.setup ?? []);
+  }
+
+  /**
+   * Clone a git repo into `/workspace` at create time so an agent comes up with
+   * the code in place. Installs git first if the image lacks it (the default
+   * slim image), then shallow-clones into a subdir named after the repo. A
+   * failure throws — unlike best-effort `setup`, the agent needs the code.
+   */
+  private async cloneRepo(id: string, repo: string, ref?: string): Promise<void> {
+    const refFlag = ref ? `--branch ${shellEscape(ref)} ` : "";
+    const script =
+      `if ! command -v git >/dev/null 2>&1; then apt-get update && apt-get install -y git >/dev/null 2>&1; fi\n` +
+      `cd /workspace && git clone --depth 1 ${refFlag}${shellEscape(repo)}`;
+    const { stdout, stderr, exitCode } = await this.execCapture(id, script);
+    if (exitCode !== 0) {
+      throw new Error(`git clone failed: ${(stderr || stdout).trim() || `exit ${exitCode}`}`);
+    }
+    log.info("repo cloned", { sandbox: id, repo });
   }
 
   /**

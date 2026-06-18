@@ -163,6 +163,15 @@ export interface CreateOptions {
    * workspace volume already holds the result.
    */
   setup?: string[];
+  /**
+   * Git repository URL cloned into `/workspace` at create time (before `setup`),
+   * so an agent comes up with the code in place. Private repos: embed a token in
+   * the URL (`https://<token>@github.com/owner/repo.git`). A clone failure fails
+   * the create.
+   */
+  repo?: string;
+  /** Branch/tag to check out when cloning `repo` (default: the repo's default branch). */
+  repoRef?: string;
   /** Hard memory cap in MiB (overrides the daemon default; 0 = unlimited). */
   memoryMb?: number;
   /** Hard CPU cap in fractional cores, e.g. 0.5 (overrides the daemon default). */

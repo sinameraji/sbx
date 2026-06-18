@@ -25,6 +25,9 @@ export async function runCommand(
       ? Number(flags["sleep-after"])
       : undefined;
   const { memoryMb, cpus, pidsLimit } = parseLimitFlags(flags);
+  const setup = typeof flags.setup === "string" ? [flags.setup] : undefined;
+  const repo = typeof flags.repo === "string" ? flags.repo : undefined;
+  const repoRef = typeof flags.ref === "string" ? flags.ref : undefined;
   let env: Record<string, string> | undefined;
   if (typeof flags.env === "string") {
     try {
@@ -39,8 +42,8 @@ export async function runCommand(
   try {
     const hasLimits = memoryMb !== undefined || cpus !== undefined || pidsLimit !== undefined;
     const opts =
-      image || env || sleepAfter !== undefined || egress || hasLimits
-        ? { image, env, sleepAfter, egress, memoryMb, cpus, pidsLimit }
+      image || env || sleepAfter !== undefined || egress || hasLimits || setup || repo
+        ? { image, env, sleepAfter, egress, setup, repo, repoRef, memoryMb, cpus, pidsLimit }
         : undefined;
     sandbox = await client.getSandbox(undefined, opts);
   } catch (err) {

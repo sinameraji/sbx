@@ -163,6 +163,30 @@ Global: --endpoint <url> (SBX_ENDPOINT) · --api-key <key> (SBX_API_KEY)
 | `SBX_LOG_LEVEL` / `SBX_LOG_FORMAT` | `info` / `pretty` | Logging (`json` for ingestion) |
 | `SBX_OTLP_ENDPOINT` | — | OTLP/HTTP traces export (e.g. `http://localhost:4318`) |
 
+## Running on a Linux server (GCP / AWS)
+
+The container driver is the same codepath on macOS and Linux — it talks to the Docker Engine API, not anything host-specific — so a Mac Mini and a GCE/EC2 Linux VM run sbx identically. On a fresh Ubuntu/Debian VM:
+
+```bash
+# 1. Docker (native dockerd — the daemon finds /var/run/docker.sock automatically)
+curl -fsSL https://get.docker.com | sh && sudo usermod -aG docker "$USER"   # re-login
+
+# 2. Node ≥22 (for node:sqlite + global WebSocket), then build
+node -v   # must be ≥ 22
+npm install && npm run build
+
+# 3. Run the daemon. For remote access, bind a real interface + require a key:
+SBX_HOST=0.0.0.0 SBX_API_KEY="$(openssl rand -hex 24)" \
+  node packages/daemon/dist/index.js
+```
+
+Two Linux-specific notes (both auto-handled on macOS Docker Desktop):
+
+- **Egress LLM gateway reachability.** Sandboxes call back to the daemon via `host.docker.internal`. The daemon now maps that name to the bridge gateway for you (`ExtraHosts: host-gateway`), but the gateway must also *bind* somewhere the bridge can reach — loopback isn't. Set **`SBX_EGRESS_HOST=0.0.0.0`** (protected by the per-sandbox egress token + your VM firewall) if you use `--egress` on Linux. Only needed for the egress feature; everything else works unchanged.
+- **Non-default Docker runtimes** (colima, remote daemon, rootless socket): export `DOCKER_HOST` (e.g. `unix://$HOME/.colima/default/docker.sock` or `tcp://…`) — docker-modem honors it. Native `dockerd` and Docker Desktop need nothing.
+
+> **Stronger isolation (microVMs):** the default container driver shares the host kernel. For VM-grade per-sandbox isolation on Linux, the **Firecracker driver** (Phase 3) needs `/dev/kvm` — i.e. a bare-metal box or a *nested-virtualization* GCE/EC2 instance (GCE N2/C3, EC2 `*.metal` or recent C8i/M8i/R8i). It's not built yet (see `docs/plan.md`).
+
 ## Security model
 
 sbx is **single-tenant** by design: the API offers arbitrary command execution *inside* sandboxes (that's the point), so anyone who can reach the API controls the sandboxes. Treat API access as you would shell access.

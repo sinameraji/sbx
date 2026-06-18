@@ -48,11 +48,11 @@ export async function statsCommand(
     );
     if (m.usage.providerCalls > 0) {
       console.log(
-        `  LLM:   ${m.usage.providerCalls} calls, ${m.usage.providerTokensIn} in + ${m.usage.providerTokensOut} out tokens`,
+        `  LLM:   ${m.usage.providerCalls} calls, ${m.usage.providerTokensIn} in + ${m.usage.providerTokensOut} out tokens, $${m.usage.providerCost.toFixed(4)}`,
       );
     }
     console.log(
-      `  Cost:  ${m.cost.total.toFixed(6)} (cpu ${m.cost.cpu.toFixed(6)} + mem ${m.cost.mem.toFixed(6)} + egress ${m.cost.egress.toFixed(6)})`,
+      `  Cost:  ${m.cost.total.toFixed(6)} (cpu ${m.cost.cpu.toFixed(6)} + mem ${m.cost.mem.toFixed(6)} + egress ${m.cost.egress.toFixed(6)} + llm ${m.cost.provider.toFixed(6)})`,
     );
     return 0;
   } catch (err) {

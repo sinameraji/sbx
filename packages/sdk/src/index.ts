@@ -98,6 +98,8 @@ export interface SandboxUsage {
   providerTokensIn: number;
   /** Completion/output tokens billed across provider calls. */
   providerTokensOut: number;
+  /** Provider-reported LLM cost in USD (e.g. OpenRouter `usage.cost`), summed. */
+  providerCost: number;
 }
 
 /** A provider reachable through the egress credential proxy (LLM gateway). */
@@ -122,6 +124,8 @@ export interface CostBreakdown {
   cpu: number;
   mem: number;
   egress: number;
+  /** LLM cost (provider-reported, e.g. OpenRouter `usage.cost`). */
+  provider: number;
   total: number;
 }
 

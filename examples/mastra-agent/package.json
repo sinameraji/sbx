@@ -1,0 +1,10 @@
+{
+  "name": "sbx-mastra-agent-example",
+  "private": true,
+  "type": "module",
+  "description": "A Mastra coding agent running inside a self-hosted sbx sandbox",
+  "dependencies": {
+    "@mastra/core": ">=1.1.0",
+    "@sbx/mastra": "^0.0.1"
+  }
+}

@@ -189,3 +189,133 @@ Multi-node scheduler (etcd/postgres), teams/auth/SSO/audit, managed cloud offeri
 4. **Density test:** script-launch N sandboxes (e.g. 200), each running a trivial agent loop; watch the dashboard's per-sandbox CPU/mem and the cost meter; confirm platform overhead stays a thin slice and the cap is host resources, not our architecture.
 5. **Real harness:** run Claude Code / OpenCode / Codex inside a sandbox end-to-end (clone a repo, edit, run tests, expose a preview), with provider keys injected via the egress proxy (phase 3) — confirming the "works with any AI provider" claim.
 6. **SDK parity:** run a snippet written against `@cloudflare/sandbox` with only the import swapped to our SDK — confirm drop-in compatibility for `getSandbox`/`exec`/`execStream`/`writeFile`/`exposePort`/`destroy`.
+
+---
+
+## Appendix A — Apple Virtualization (macOS) microVM driver
+
+Detailed implementation plan for the `applevz` driver: the macOS half of the Phase 3 isolation upgrade. This is the next buildable isolation work because it runs on the existing Apple-silicon Mac (Firecracker is blocked on a KVM Linux host), and it is the first real test of the claim that "a second driver plugs in and nothing else in the daemon/SDK/CLI changes."
+
+### A.0 Goal & scope
+
+Give each sandbox a **VM-grade isolated Linux guest** on Apple silicon, behind the existing `Driver` interface (`packages/daemon/src/driver/types.ts`), so `SBX_DRIVER=applevz` is a drop-in swap for `container`. Concretely, `AppleVzDriver` stops extending `UnsupportedDriver` and implements all ~25 `Driver` methods against a microVM backend instead of the Docker Engine API.
+
+**In scope:** boot/stop/start/destroy of per-sandbox microVMs, workspace persistence, exec/files/processes/ports/terminal/stats/backup over a vsock agent, resource caps via VM config, OCI→rootfs image conversion, and (later) snapshot save/restore for a warm pool.
+
+**Out of scope (separate items):** the Firecracker driver (Linux), multi-node placement (Phase 4), and default-deny *internet* egress (rides on the egress proxy + guest firewall, tracked separately).
+
+### A.1 Why this is non-trivial (what Docker gave us for free and now doesn't)
+
+The container driver leans on Docker-specific mechanisms that have **no equivalent** under bare `Virtualization.framework`. Each must be rebuilt on the guest agent:
+
+| Capability | Container driver mechanism (`container.ts`) | `applevz` replacement |
+|---|---|---|
+| `exec` / streaming | `docker exec` + Docker stream-frame demux | vsock RPC → agent forks the process, multiplexes stdout/stderr frames |
+| `writeFile`/`readFile`/`mkdir`/`listFiles` | `docker exec` of shell + `getArchive` | vsock RPC → agent does fs ops directly |
+| `watchFiles` | poll-based `python3` mtime differ via `exec` | agent uses `inotify` over vsock stream |
+| `startProcess`/`listProcesses`/`killProcess`/logs | `setsid` + logfile via `exec` | agent spawns detached, tracks PIDs, tails logfile over vsock |
+| `waitForPort` | bash `/dev/tcp` via `exec` | agent `connect()`s to `127.0.0.1:port` inside guest |
+| `openTcpBridge` (preview URLs) | hijacked `docker exec` TCP relay (bridge IPs unreachable on Docker Desktop) | agent opens an in-guest TCP relay over a vsock stream **or** host connects the guest's NAT IP directly (VZ NAT IPs *are* host-reachable — simpler than Docker Desktop) |
+| `openTerminal` (PTY) | `docker exec` `Tty:true` duplex | agent allocates a PTY, bridges it over a vsock stream |
+| `createBackup`/`restoreBackup` | Docker `getArchive`/`putArchive` of `/workspace` | agent `tar`s/un-`tar`s `/workspace` over a vsock stream |
+| `stats` | Docker stats API (CPU%, mem, net, pids) | agent reads `/proc/stat`, `/proc/meminfo`, cgroup files, `/proc/net/dev` |
+| `hostInfo` | Docker `MemTotal`/`NCPU` | `sysctl` (`hw.memsize`, `hw.ncpu`) via the helper |
+| persistence (`/workspace`) | named Docker volume | a dedicated raw disk image (`workspace.img`) attached as a second virtio-blk device, kept across stop/start |
+
+**The keystone is the in-sandbox agent** — the item Phase 0 explicitly deferred (`docs/plan.md` Phase 0, in-sandbox agent over unix socket). There is no `docker exec` in a microVM; *every* control-plane op becomes a vsock RPC to an agent running inside the guest. Building this agent is the bulk of the work and is shared with the future Firecracker driver (same agent, vsock transport on both).
+
+### A.2 Architecture
+
+```
+  daemon (Node)                         macOS host                       Linux guest (microVM)
+  ┌───────────────┐   spawn + JSON-RPC  ┌──────────────────┐  vsock   ┌──────────────────────┐
+  │ AppleVzDriver │◄──── over stdio ───►│  sbx-vz (Swift)  │◄────────►│ sbx-agent (PID 1)    │
+  │  (driver/     │  (lifecycle, vsock  │ Virtualization.  │  AF_VSOCK│  • spawn + stream     │
+  │   applevz.ts) │   connect brokering)│ framework wrapper│          │  • fs / watch / pty   │
+  └───────────────┘                     └──────────────────┘          │  • tcp relay / stats  │
+        │                                       │                      └──────────────────────┘
+        │ disk images + kernel under            │ one VZVirtualMachine per sandbox
+        ▼ SBX_VZ_STATE_DIR (~/.sbx/vz/<id>/)    ▼ vCPU/mem caps from VZ config
+  workspace.img · rootfs.img · vmlinuz · console.log · vm.state(snapshot)
+```
+
+Two **new build artifacts** beyond the Node driver:
+
+1. **`sbx-vz`** — a small, **code-signed** Swift/ObjC binary that links `Virtualization.framework` (Node cannot call it directly). It is the only macOS-native component. Responsibilities: construct a `VZVirtualMachineConfiguration`, start/stop/pause/save/restore the VM, and **broker host-initiated vsock connections** (`VZVirtioSocketDevice.connect(toPort:)`) — handing the resulting socket fd back to the daemon. Controlled by the daemon over a line-delimited JSON-RPC on stdio (lifecycle) plus a unix-domain socket per VM that proxies vsock streams (so the Node side gets a normal `net.Socket` per RPC channel). Ships as a prebuilt binary in the repo / release; path overridable via `SBX_VZ_HELPER_PATH`.
+   - **Entitlement:** the helper must be signed with `com.apple.security.virtualization` (and `com.apple.security.network.client` for NAT). Document the signing step; CI signs with an ad-hoc cert for local dev, a real Developer ID for releases. **This is a hard gate — an unsigned binary cannot create a VM.**
+2. **`sbx-agent`** — a **static** Linux binary (Go; `CGO_ENABLED=0`, `GOOS=linux GOARCH=arm64`), baked into the guest rootfs as **PID 1 / init**. Binds `AF_VSOCK` and serves the agent protocol (A.4). A few hundred KB, low RSS — the only per-sandbox overhead, keeping "hardware is the only limit" true. **Reused verbatim by the Firecracker driver.** Go chosen for trivial static cross-compile and a stdlib that covers vsock (`golang.org/x/sys/unix` `AF_VSOCK`), inotify, and PTY; Rust is an acceptable alternative if binary size matters later.
+
+### A.3 Guest image: kernel + rootfs (the sharpest practical edge)
+
+`VZLinuxBootLoader` needs an **uncompressed** Linux kernel + an optional initramfs + a root disk.
+
+- **Kernel:** bundle one prebuilt generic **arm64** kernel (`vmlinuz`) with the configs VZ needs — `virtio-blk`, `virtio-net`, `virtio-console`, **`vsock`/`vmw_vsock_virtio_transport`**, `ext4`, cgroup v2. Reuse a known-good config from `vfkit`/`lima`/Apple's `container` rather than rolling our own. Path overridable via `SBX_VZ_KERNEL`.
+- **Rootfs from an OCI image — two options (decision deferred to M1, default = Option A):**
+  - **Option A — convert on first use, cache by image digest.** Pull the OCI image (skopeo/containerd or `docker save`), flatten its layers to a tarball, and write it into a fresh **ext4** raw disk image. **Snag:** macOS has no native `mke2fs`. Resolve by building the ext4 image **inside a throwaway VZ guest** (bootstrap from a tiny prebuilt builder rootfs that *does* ship `mke2fs`) — no Docker/Lima dependency on the host. Cache the result at `~/.sbx/vz/images/<digest>.img` (`SBX_VZ_ROOTFS_CACHE`) and clone-on-create (APFS copy-on-write `clonefile()` → near-instant, space-shared).
+  - **Option B — ship one base rootfs**, ignore arbitrary `SBX_IMAGE`, and run `setup`/`repo` on top. Faster to ship, but breaks image parity with the container driver. Keep as a fallback if Option A's converter slips.
+- **Workspace disk:** a separate raw `workspace.img` (sparse, grown on demand) attached as a second virtio-blk device, mounted by the agent at `/workspace`. This is the persistence unit — kept on `stop`, reattached on `start`, deleted on `destroy` (mirrors the Docker named-volume semantics exactly).
+
+### A.4 vsock agent protocol
+
+A small, framed, multiplexed protocol over a **single** host↔guest vsock connection (the helper brokers it; the daemon sees a `net.Socket`). Mirrors the existing wire vocabulary so the REST/SSE layer is unchanged.
+
+- **Framing:** `[u32 length][u8 type][u32 streamId][payload]`. `type ∈ {OPEN, DATA, EOF, CLOSE, CONTROL, RESULT}`. `streamId` multiplexes concurrent exec/PTY/file/relay channels over the one connection (no per-op connection setup).
+- **Requests** (`CONTROL` JSON, one shape per `Driver` method): `exec`, `writeFile`, `readFile`, `mkdir`, `listFiles`, `watch`, `startProcess`, `listProcesses`, `kill`, `streamLogs`, `waitForPort`, `tcpConnect` (preview bridge), `openPty` + `resize`, `tarWorkspace`/`untarWorkspace` (backup/restore), `stats`. Payloads reuse the daemon's existing option types (`ExecOptions`, `WriteFileOptions`, …) so mapping is mechanical.
+- **Streaming:** exec stdout/stderr, PTY output, watch events, log tails, and tcp-bridge bytes flow as `DATA` frames on the request's `streamId`; `RESULT` carries the exit code / return value. This is a direct analogue of the SSE `ExecEvent` (`stdout`/`stderr`/`exit`) the SDK already parses — the driver just translates frames → `onEvent` callbacks, identical to how `container.ts` translates Docker frames today.
+- **Auth/trust:** vsock is host↔guest only (no network exposure); the guest agent trusts its single vsock peer. Secrets (egress tokens, provider env) are delivered over a `CONTROL` `setEnv` at boot — the "secrets-over-vsock" Phase 3 item falls out here.
+
+### A.5 `Driver` method mapping (the contract to satisfy)
+
+Every method in `driver/types.ts` maps to a helper lifecycle call or an agent RPC:
+
+- `create(opts)` → resolve rootfs (A.3) → `clonefile` rootfs + create `workspace.img` → `sbx-vz start` with a `VZVirtualMachineConfiguration` (boot loader, 2 virtio-blk, virtio-vsock, virtio-net NAT, virtio-console→`console.log`, cpu/mem from `opts.limits`) → wait for agent `hello` over vsock → run `repo` clone then `setup` over agent RPC (same ordering/semantics as `container.ts`).
+- `stop(id)` → `sbx-vz stop` (graceful `requestStop`, then hard stop); keep `workspace.img`.
+- `start(opts)` → boot a fresh VM, reattach the kept `workspace.img`, reapply `limits` (mirrors container `start`).
+- `exec`/files/`watchFiles`/process methods/`waitForPort` → agent RPCs per A.4.
+- `openTcpBridge(id,port,host)` → agent `tcpConnect` stream (or direct NAT-IP dial); returns the same `TcpBridge` duplex the preview proxy already consumes — **proxy code unchanged**.
+- `openTerminal` → agent `openPty` stream → `TerminalSession` duplex — **WebSocket terminal code unchanged**.
+- `createBackup`/`restoreBackup` → agent `tarWorkspace`/`untarWorkspace` streamed to/from the host `tarPath` — same tar layout (`workspace/…`) so **backups remain portable between the container and VZ drivers**.
+- `stats` → agent reads guest `/proc` + cgroup → the existing `SandboxStats` shape (CPU%, cumulative ns, mem, net rx/tx, pids).
+- `ping` → `sbx-vz` present + signed + VZ available (replaces the scaffold's "not built yet" throw).
+- `hostInfo` → `sysctl hw.memsize`/`hw.ncpu` via the helper → backs the existing capacity meter + admission control with **zero changes** to `capacity.ts`.
+
+**Resource limits:** `memoryMb` → `VZVirtualMachineConfiguration.memorySize`; `cpus` → `cpuCount` (ceil). These are *hard VM-level* caps — stronger than the container driver's cgroups. `pidsLimit` → enforced inside the guest by the agent (cgroup `pids.max` or `RLIMIT_NPROC`).
+
+### A.6 Milestones (each independently verifiable; `npm run smoke` is the parity gate)
+
+- **M0 — Helper skeleton + driver wiring.** `sbx-vz` builds, signs, reports VZ availability; `AppleVzDriver.ping()`/`hostInfo()` work; `SBX_DRIVER=applevz` starts the daemon. *Verify:* `sb info` shows `applevz`; `sb capacity` shows real host budget.
+- **M1 — Boot a VM (lifecycle + persistence).** Kernel + a base rootfs (Option B stand-in) boot to the agent's `hello`; `create`/`stop`/`start`/`destroy` with `workspace.img` persistence. *Verify:* create → write a file to `/workspace` via agent → stop → start → file present → destroy → image gone.
+- **M2 — vsock agent: exec + streaming.** `sbx-agent` as PID 1; `exec` over vsock with stdout/stderr/exit. **This is the milestone that replaces `docker exec`.** *Verify:* `sb run "python3 -c 'print(2+2)'"` returns `4` through the SSE path unchanged.
+- **M3 — Files + watch.** `writeFile`/`readFile`/`mkdir`/`listFiles`/`watchFiles` over the agent. *Verify:* the file/watch portion of `npm run smoke` passes against `applevz`.
+- **M4 — Processes, ports, terminal.** `startProcess`/`listProcesses`/`killProcess`/`streamProcessLogs`/`waitForPort`, `openTcpBridge` (preview proxy end-to-end), `openTerminal` (dashboard + `sb terminal`). *Verify:* start→wait-port→expose→proxy-fetch and a PTY round-trip (`echo TERMINAL_OK_$((6*7))`) pass.
+- **M5 — Stats + backup/restore.** `stats` from guest `/proc`; `createBackup`/`restoreBackup` over vsock, portable to/from container-driver backups. *Verify:* the metrics + backup→mutate→restore→rollback portions of smoke pass; cost meter shows non-zero usage.
+- **M6 — Image conversion + resource limits.** OCI→ext4 converter (A.3 Option A) honoring `SBX_IMAGE`; `memoryMb`/`cpus`/`pidsLimit` enforced via VM config + guest cgroup. *Verify:* a `python:3.11-slim` sandbox runs python; `{memoryMb:256,cpus:0.5}` reflected in guest `/proc/meminfo` + online CPUs; caps survive stop→start.
+- **M7 — Snapshot/warm-pool + per-sandbox isolation.** `VZVirtualMachine.saveMachineStateTo`/`restoreMachineStateFrom` (macOS 14+) for fast pause→resume; a warm pool of pre-booted guests for instant acquire; **per-sandbox** driver selection (container ↔ applevz) replacing the per-daemon `SBX_DRIVER`. *Verify:* resume latency measured (target ≪ cold boot); a density script launches N microVMs and the dashboard shows thin per-VM overhead.
+
+**Parity gate (every milestone):** the existing `npm run smoke` must pass with `SBX_DRIVER=applevz` for the subset of surface that milestone covers — the whole point of the driver abstraction is that the *same* end-to-end test exercises both drivers. Add a `npm run smoke:vz` that runs smoke against the VZ driver once M2 lands.
+
+### A.7 Key decisions & rationale
+
+- **Native Swift helper over shelling out to `vfkit`/Apple `container`.** A bundled, code-signed `sbx-vz` we own gives direct control of the **vsock brokering** the whole agent protocol depends on, and avoids coupling to a fast-moving external CLI's surface. Trade-off: we take on a Swift build + code-signing pipeline in a TS repo. (`vfkit` remains a viable bootstrap if signing/plumbing slips — it can boot M1 VMs while `sbx-vz` is built.)
+- **Build the in-sandbox agent now (not deferred again).** A microVM has no `docker exec`; the agent is mandatory here and is **shared with Firecracker**, so it pays for both drivers. This retires the Phase 0 deferral.
+- **Go for the agent.** Trivial static `linux/arm64` cross-compile from macOS, stdlib covers vsock/inotify/pty. Keeps it a single dependency-free binary baked into the rootfs.
+- **Workspace = a raw disk image, not a shared-folder mount.** Keeps the clean "container is cattle, volume is durable state" model and avoids `VZVirtioFileSystemDevice` (virtiofs) host-path-sharing semantics that don't match a destroyable-guest model. (virtiofs stays an option for a future host-bind-mount feature.)
+- **Reuse the existing wire types end-to-end.** The agent protocol intentionally mirrors `ExecOptions`/`ExecEvent`/`SandboxStats` so the REST → SSE → SDK layers are untouched — proving the abstraction.
+
+### A.8 Risks & mitigations
+
+- **Code-signing / entitlement friction (highest).** Unsigned helper ⇒ no VM. *Mitigate:* document ad-hoc signing for local dev early (M0), automate Developer-ID signing in release CI, fail `ping()` with an actionable message if the entitlement is missing.
+- **OCI→ext4 conversion on macOS (no native `mke2fs`).** *Mitigate:* the bootstrap-builder-VM approach (A.3); fall back to Option B (one base rootfs) so M2–M5 aren't blocked on the converter.
+- **Kernel config gaps (vsock/virtio not enabled).** *Mitigate:* start from a known-good `vfkit`/`lima` kernel rather than building one.
+- **Performance vs containers (boot time, density).** VZ microVMs boot slower and weigh more than shared-kernel containers; that's the isolation/density trade the plan already names. *Mitigate:* M7 snapshot/warm-pool; surface the overhead honestly in the dashboard's "platform overhead" line.
+- **Abstraction leaks.** If some `Driver` method can't be served without daemon changes, that's a finding about the interface — capture it; the explicit goal is that **only `applevz.ts` + the two new binaries change.**
+
+### A.9 New env / config (follows `config.ts` conventions)
+
+| Var | Default | What |
+|---|---|---|
+| `SBX_VZ_HELPER_PATH` | bundled `sbx-vz` | Path to the signed Swift helper binary |
+| `SBX_VZ_KERNEL` | bundled `vmlinuz` | Guest Linux kernel image |
+| `SBX_VZ_STATE_DIR` | `~/.sbx/vz` | Per-sandbox VM state (disks, console log, snapshots) |
+| `SBX_VZ_ROOTFS_CACHE` | `~/.sbx/vz/images` | Converted OCI→ext4 rootfs images, keyed by digest |
+| `SBX_VZ_DEFAULT_DISK_GB` | `8` | Initial sparse size of a new `workspace.img` |

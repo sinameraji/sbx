@@ -112,8 +112,10 @@ Commands:
     --memory/--cpus/--pids set hard resource caps (override the daemon defaults).
 
   sb create [--image I] [--env K=V,…] [--sleep-after MS] [--egress] [--label K=V,…]
-            [--memory <MB>] [--cpus <n>] [--pids <n>]
+            [--memory <MB>] [--cpus <n>] [--pids <n>] [--setup "cmd"]
     Provision a standalone persistent sandbox and print its id.
+    --setup runs a shell command once after the container starts (best-effort;
+    chain with && for multiple steps, e.g. --setup "npm i x && pip install y").
 
   sb terminal <id>
     Attach an interactive shell (PTY) to a sandbox in your local terminal.

@@ -698,6 +698,9 @@ async function createSandbox(
   const persist = body.persist !== false;
   const sleepAfterMs =
     typeof body.sleepAfter === "number" ? body.sleepAfter : config.defaultSleepAfterMs;
+  const setup = Array.isArray(body.setup)
+    ? body.setup.filter((s): s is string => typeof s === "string")
+    : undefined;
 
   // Resolve hard resource caps: per-create value overrides the daemon default.
   const resolved = resolveLimits(body, config);
@@ -713,7 +716,7 @@ async function createSandbox(
     env = { ...env, ...egressEnv(config, egressToken) };
   }
 
-  await driver.create({ id, image, env, labels, persist, limits });
+  await driver.create({ id, image, env, labels, persist, setup, limits });
 
   const now = new Date().toISOString();
   const record: SandboxRecord = {

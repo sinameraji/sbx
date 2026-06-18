@@ -1,0 +1,40 @@
+{
+  "name": "@sbx/mastra",
+  "version": "0.0.1",
+  "description": "Mastra Workspace sandbox provider backed by self-hosted sbx",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist", "README.md"],
+  "keywords": ["mastra", "sandbox", "ai-agents", "sbx", "workspace"],
+  "homepage": "https://github.com/sinameraji/sbx#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sinameraji/sbx.git",
+    "directory": "packages/mastra"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@sbx/sdk": "^0.0.1"
+  },
+  "peerDependencies": {
+    "@mastra/core": ">=1.1.0"
+  },
+  "devDependencies": {
+    "@mastra/core": "1.43.0",
+    "@types/node": "^22.5.0",
+    "typescript": "^5.5.0"
+  }
+}

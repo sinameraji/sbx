@@ -22,29 +22,42 @@ await agent.generate("Add a /health route and run the tests.");
 
 See [`mastra-agent/`](./mastra-agent) for a runnable example.
 
-## 2. CLI harnesses — OpenCode / Codex / Claude Code / pi.dev
+## 2. OpenCode (one command, via OpenRouter)
 
-Any headless coding-agent CLI runs in an sbx sandbox via the same three flags: **`--repo`** (clone the code), **`--setup`** (install the CLI), **`--egress`** (inject the provider base-URL + key so the harness reaches an LLM with no key baked into the sandbox). Set the daemon's provider key first, e.g. `SBX_PROVIDER_KEY_OPENAI` / `SBX_PROVIDER_KEY_ANTHROPIC`.
+Launch a sandbox, clone a repo, run a headless [OpenCode](https://opencode.ai) task through [OpenRouter](https://openrouter.ai), and destroy the sandbox when done — your real key never enters the sandbox (it's swapped in by the egress gateway):
 
 ```bash
-alias sb="node packages/cli/dist/index.js"
-
-# OpenCode
-ID=$(sb create --image sbx/base:latest --egress \
-      --repo https://github.com/you/app \
-      --setup "npm i -g opencode-ai")
-sb exec $ID "cd /workspace/app && opencode run 'add a /health route'"
-sb stats $ID         # per-agent cost (LLM calls metered by the egress gateway)
-
-# Codex CLI       --setup "npm i -g @openai/codex"     then  codex exec '<task>'
-# Claude Code     --setup "npm i -g @anthropic-ai/claude-code"  then  claude -p '<task>'
-# pi.dev          --setup "<install pi>"                then  pi '<task>'
+# 1. start the daemon with your OpenRouter key (the key lives only here):
+SBX_PROVIDER_KEY_OPENROUTER=sk-or-... node packages/daemon/dist/index.js
+# 2. build the base image once (gives the sandbox node + git):
+docker build -t sbx/base:latest images/base
+# 3. one command — create → clone → run OpenCode → destroy:
+examples/opencode.sh https://github.com/you/app "add a /health route and run the tests"
 ```
 
-The egress gateway injects, per provider configured on the daemon:
-`OPENAI_BASE_URL`/`OPENAI_API_KEY`, `ANTHROPIC_BASE_URL`/`ANTHROPIC_API_KEY`, `OPENROUTER_BASE_URL`/`OPENROUTER_API_KEY` — all pointing at `http://host.docker.internal:4752/<provider>` with a per-sandbox token. Any OpenAI/Anthropic-compatible harness picks these up automatically.
+What that runs under the hood is a single `sb run` (create → exec → auto-destroy):
 
-> The exact headless invocation differs per tool and version — treat the lines above as recipes and check each CLI's `--help`. What sbx provides is constant: the repo, the isolated environment, the LLM access, and the cost/observability.
+```bash
+sb run --image sbx/base:latest --egress --repo https://github.com/you/app \
+  --setup 'npm i -g opencode-ai && mkdir -p ~/.config/opencode && printf "{\"provider\":{\"openrouter\":{\"options\":{\"baseURL\":\"%s/v1\",\"apiKey\":\"%s\"}}}}" "$OPENROUTER_BASE_URL" "$OPENROUTER_API_KEY" > ~/.config/opencode/opencode.json' \
+  "opencode run --dir /workspace/app -m openrouter/anthropic/claude-3.5-sonnet --dangerously-skip-permissions 'add a /health route and run the tests'"
+```
+
+The egress gateway injects `OPENROUTER_BASE_URL` (→ `http://host.docker.internal:4752/openrouter`) and `OPENROUTER_API_KEY` (a per-sandbox token) into the sandbox; the OpenCode config points OpenRouter at that base URL. The daemon swaps the token for your real key, forwards to OpenRouter, and meters tokens + $ per sandbox (`sb stats`).
+
+> Verified: `opencode-ai` installs and runs headless in the sandbox, and the egress key-injection/forwarding is covered by `npm run smoke`. The actual model call needs *your* OpenRouter key, so run it yourself with step 1 above.
+
+### Other harnesses (same shape)
+
+Swap the `--setup` install + run command — same `--repo`/`--egress` flow:
+
+| Harness | install (`--setup`) | run command |
+|---|---|---|
+| **Codex CLI** | `npm i -g @openai/codex` | `codex exec '<task>'` |
+| **Claude Code** | `npm i -g @anthropic-ai/claude-code` | `claude -p '<task>'` |
+| **pi.dev** | (per its install) | `pi '<task>'` |
+
+The egress gateway also injects `OPENAI_*` / `ANTHROPIC_*` when those provider keys are set on the daemon. Exact headless flags differ per tool — check each CLI's `--help`.
 
 ## What you get that raw Docker doesn't
 - LLM reachable from the sandbox **without keys inside it** (egress gateway), with **per-agent token + $ metering**.

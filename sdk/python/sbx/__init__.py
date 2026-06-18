@@ -159,6 +159,7 @@ class SandboxUsage:
     provider_bytes: int = 0
     provider_tokens_in: int = 0
     provider_tokens_out: int = 0
+    provider_cost: float = 0.0  # provider-reported LLM cost in USD (OpenRouter usage.cost)
 
     @classmethod
     def from_dict(cls, d: Dict[str, Any]) -> "SandboxUsage":
@@ -170,6 +171,7 @@ class SandboxUsage:
             provider_bytes=d.get("providerBytes", 0),
             provider_tokens_in=d.get("providerTokensIn", 0),
             provider_tokens_out=d.get("providerTokensOut", 0),
+            provider_cost=d.get("providerCost", 0.0),
         )
 
 
@@ -178,6 +180,7 @@ class CostBreakdown:
     cpu: float
     mem: float
     egress: float
+    provider: float  # LLM cost (provider-reported, e.g. OpenRouter usage.cost)
     total: float
 
     @classmethod
@@ -186,6 +189,7 @@ class CostBreakdown:
             cpu=d.get("cpu", 0.0),
             mem=d.get("mem", 0.0),
             egress=d.get("egress", 0.0),
+            provider=d.get("provider", 0.0),
             total=d.get("total", 0.0),
         )
 

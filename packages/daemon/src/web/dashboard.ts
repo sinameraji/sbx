@@ -157,7 +157,8 @@ function computeCost(u) {
   var cpu = (u.cpuSeconds / 3600) * rates.costCpuPerHour;
   var mem = (u.memByteSeconds / 1e9 / 3600) * rates.costMemGbPerHour;
   var egress = ((u.egressBytes || 0) / 1e9) * (rates.costEgressPerGb || 0);
-  return cpu + mem + egress;
+  var provider = u.providerCost || 0; // provider-reported LLM cost (USD)
+  return cpu + mem + egress + provider;
 }
 function money(n) { return "$" + n.toFixed(6); }
 function ago(iso) {
@@ -341,6 +342,7 @@ function renderDetail() {
         h += statCard("LLM calls", m.usage.providerCalls);
         h += statCard("LLM tokens",
           (m.usage.providerTokensIn || 0) + " in / " + (m.usage.providerTokensOut || 0) + " out");
+        h += statCard("LLM cost", money(m.usage.providerCost || 0));
       }
       h += "</div>";
       if (ex.length) {

@@ -90,6 +90,8 @@ export interface CostBreakdown {
   cpu: number;
   mem: number;
   egress: number;
+  /** LLM cost (provider-reported, e.g. OpenRouter `usage.cost`). */
+  provider: number;
   total: number;
 }
 

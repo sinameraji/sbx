@@ -15,5 +15,8 @@ export function computeCost(usage: SandboxUsage, config: Config): CostBreakdown 
   const memGbSeconds = usage.memByteSeconds / BYTES_PER_GB;
   const mem = (memGbSeconds / SECONDS_PER_HOUR) * config.costMemGbPerHour;
   const egress = (usage.egressBytes / BYTES_PER_GB) * config.costEgressPerGb;
-  return { cpu, mem, egress, total: cpu + mem + egress };
+  // LLM cost is the provider's own reported figure (e.g. OpenRouter usage.cost) —
+  // the source of truth, not a rate we apply.
+  const provider = usage.providerCost ?? 0;
+  return { cpu, mem, egress, provider, total: cpu + mem + egress + provider };
 }

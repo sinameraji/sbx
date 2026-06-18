@@ -27,6 +27,7 @@ import type {
   TerminalOptions,
   TerminalSession,
 } from "./types.js";
+import { shellEscape } from "../util.js";
 
 /**
  * Container driver — backs each sandbox with a long-lived OCI container via the
@@ -234,10 +235,14 @@ export class ContainerDriver implements Driver {
   }
 
   async writeFile(id: string, opts: WriteFileOptions): Promise<void> {
+    if (opts.mode !== undefined && !/^[0-7]{3,4}$/.test(opts.mode)) {
+      throw new Error(`invalid file mode: ${opts.mode}`);
+    }
     const dir = opts.path.includes("/")
       ? opts.path.slice(0, opts.path.lastIndexOf("/"))
       : "/workspace";
     const encoded = Buffer.from(opts.content, "utf8").toString("base64");
+    // `mode` is validated above to be octal digits only, so it's safe unquoted.
     const mode = opts.mode ? `chmod ${opts.mode} ${shellEscape(opts.path)} && ` : "";
     const command = `mkdir -p ${shellEscape(dir)} && printf '%s' '${encoded}' | base64 -d > ${shellEscape(opts.path)} && ${mode}echo ok`;
     const output = await this.runAndCapture(id, command);
@@ -414,7 +419,10 @@ export class ContainerDriver implements Driver {
   }
 
   async killProcess(id: string, pid: number, signal = "TERM"): Promise<void> {
-    const sig = signal.replace(/^SIG/, "");
+    const stripped = signal.replace(/^SIG/, "");
+    // Whitelist signal names/numbers; anything else (incl. shell metacharacters)
+    // falls back to TERM so a crafted `signal` can't inject into the kill command.
+    const sig = /^[A-Z0-9]+$/.test(stripped) ? stripped : "TERM";
     // Signal the process group first (pid == pgid via setsid), then the pid.
     const cmd = `kill -${sig} -${pid} 2>/dev/null; kill -${sig} ${pid} 2>/dev/null; true`;
     await this.execCapture(id, cmd);
@@ -469,6 +477,7 @@ export class ContainerDriver implements Driver {
     opts: WaitForPortOptions,
   ): Promise<boolean> {
     const host = opts.host ?? "127.0.0.1";
+    assertHost(host);
     const timeoutMs = opts.timeoutMs ?? 30_000;
     const intervalSec = ((opts.intervalMs ?? 250) / 1000).toFixed(3);
     // bash `/dev/tcp` probe loop with a millisecond deadline.
@@ -484,6 +493,7 @@ export class ContainerDriver implements Driver {
   }
 
   async openTcpBridge(id: string, port: number, host: string): Promise<TcpBridge> {
+    assertHost(host);
     const container = this.docker.getContainer(this.containerName(id));
     // Relay raw bytes to the in-container port. socat is binary-safe and handles
     // half-close cleanly; fall back to a bash /dev/tcp bridge when socat is
@@ -689,9 +699,15 @@ function statusCode(err: unknown): number | undefined {
     : undefined;
 }
 
-function shellEscape(value: string): string {
-  // Use single quotes and escape any embedded single quotes.
-  return `'${value.replace(/'/g, "'\"'\"'")}'`;
+/**
+ * Reject a host that isn't a plain IP/hostname before it's interpolated into a
+ * `/dev/tcp/<host>/...` redirect or `socat TCP:<host>` arg, where shell quoting
+ * is awkward. Allows letters, digits, `.`, `-`, `_`, and `:` (IPv6) only.
+ */
+function assertHost(host: string): void {
+  if (!/^[A-Za-z0-9._:-]+$/.test(host)) {
+    throw new Error(`invalid host: ${host}`);
+  }
 }
 
 /**

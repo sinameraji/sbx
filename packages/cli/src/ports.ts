@@ -1,4 +1,5 @@
 import { SbxClient } from "@sbx/sdk";
+import { formatError } from "./util.js";
 import type { GlobalArgs } from "./cli.js";
 
 /** sb wait-port <id> <port> [--timeout <ms>] */
@@ -55,8 +56,4 @@ export async function exposeCommand(
     console.error(`Failed: ${formatError(err)}`);
     return 1;
   }
-}
-
-function formatError(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
 }

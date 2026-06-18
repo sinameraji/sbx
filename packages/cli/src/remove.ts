@@ -1,4 +1,5 @@
 import { SbxClient } from "@sbx/sdk";
+import { formatError } from "./util.js";
 import type { GlobalArgs } from "./cli.js";
 
 export async function removeCommand(
@@ -22,8 +23,4 @@ export async function removeCommand(
     console.error(`Failed to remove sandbox: ${formatError(err)}`);
     return 1;
   }
-}
-
-function formatError(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
 }

@@ -1,4 +1,5 @@
 import { SbxClient } from "@sbx/sdk";
+import { formatError } from "./util.js";
 import type { GlobalArgs } from "./cli.js";
 
 /** sb env <id> [KEY=VALUE ...] — set sandbox env vars, or print them if none given. */
@@ -40,8 +41,4 @@ export function parseEnvPairs(pairs: string[]): Record<string, string> {
     env[pair.slice(0, eq)] = pair.slice(eq + 1);
   }
   return env;
-}
-
-function formatError(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
 }

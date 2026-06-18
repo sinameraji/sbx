@@ -5,7 +5,7 @@
  * destroys the sandbox, and exits with the command's status.
  */
 
-import { createServer as httpCreateServer } from "node:http";
+import { createServer as httpCreateServer, request as httpRequest } from "node:http";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -147,6 +147,28 @@ async function main(): Promise<number> {
       throw new Error(`preview proxy did not serve the sandbox: ${previewBody.slice(0, 80)}`);
     }
     console.error("[smoke] preview proxy served the sandbox");
+
+    // Preview token is exact + case-sensitive: re-expose port 8000 with a token
+    // (server still alive here), then a wrong-case token is 403 and the exact
+    // token serves the sandbox. Uses node:http to avoid fetch socket pooling.
+    await fetch(`${endpoint}/sandboxes/${id}/expose`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ port: 8000, token: "AbC123" }),
+    });
+    const wrongTok = await httpGet(config.proxyHost, config.proxyPort, `/_sbx/${id}/8000/?token=abc123`);
+    if (wrongTok.status !== 403) throw new Error(`wrong-case token should 403, got ${wrongTok.status}`);
+    const rightTok = await httpGet(config.proxyHost, config.proxyPort, `/_sbx/${id}/8000/?token=AbC123`);
+    if (!rightTok.body.includes("Directory listing")) {
+      throw new Error(`exact token should pass, got ${rightTok.status}`);
+    }
+    // Drop the token again so the later (post-restart) proxy paths stay simple.
+    await fetch(`${endpoint}/sandboxes/${id}/expose`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ port: 8000 }),
+    });
+    console.error("[smoke] preview token is exact + case-sensitive (wrong case 403)");
 
     // Sandbox env vars apply to subsequent commands.
     const setEnvRes = await fetch(`${endpoint}/sandboxes/${id}/env`, {
@@ -565,6 +587,72 @@ async function main(): Promise<number> {
     }
     console.error("[smoke] interactive terminal (WebSocket PTY) round-trips a command");
 
+    // --- security hardening (audit remediation) ---------------------------
+
+    // Host-header DNS-rebinding guard: a foreign Host is rejected, loopback is fine.
+    const foreignHost = await statusWithHost(config.host, config.port, "/info", "evil.example");
+    if (foreignHost !== 403) throw new Error(`foreign Host should 403, got ${foreignHost}`);
+    const loopbackHost = await statusWithHost(config.host, config.port, "/info", "127.0.0.1");
+    if (loopbackHost !== 200) throw new Error(`loopback Host should 200, got ${loopbackHost}`);
+    console.error("[smoke] Host-header guard rejects foreign Host (403), allows loopback");
+
+    // Request-body size cap → 413. Shrink the limit on the live config (read per
+    // request), send an over-cap body, then restore it.
+    const savedMax = config.maxBodyBytes;
+    config.maxBodyBytes = 1024;
+    try {
+      const big = await fetch(`${endpoint}/sandboxes`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ labels: { blob: "x".repeat(4096) } }),
+      });
+      if (big.status !== 413) throw new Error(`oversized body should 413, got ${big.status}`);
+    } finally {
+      config.maxBodyBytes = savedMax;
+    }
+    console.error("[smoke] oversized request body rejected with 413");
+
+    // In-container injection is neutralized: a malicious chmod mode is rejected,
+    // and a malicious wait-port host is rejected — neither runs a command.
+    const badMode = await fetch(`${endpoint}/sandboxes/${id}/files/write`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        path: "/workspace/m.txt",
+        content: "x",
+        mode: "777; touch /workspace/PWNED #",
+      }),
+    });
+    if (badMode.status === 200) throw new Error("malicious file mode was accepted");
+    const badHost = await fetch(`${endpoint}/sandboxes/${id}/wait-port`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ port: 1, host: "127.0.0.1; touch /workspace/PWNED #", timeoutMs: 500 }),
+    });
+    if (badHost.status === 200) throw new Error("malicious wait-port host was accepted");
+    const pwned = await execAndCapture(
+      endpoint,
+      id,
+      "test -e /workspace/PWNED && echo YES || echo NO",
+    );
+    if (pwned !== "NO") throw new Error("injection created /workspace/PWNED — escaping failed");
+    console.error("[smoke] shell-injection via mode/host neutralized (no side effects)");
+
+    // WebSocket message cap: an over-cap inbound frame closes the socket without
+    // crashing the daemon (a follow-up request still succeeds).
+    await new Promise<void>((resolve) => {
+      const WS = (globalThis as { WebSocket?: any }).WebSocket;
+      const ws = new WS(`${endpoint.replace(/^http/, "ws")}/sandboxes/${id}/terminal`);
+      ws.binaryType = "arraybuffer";
+      const done = () => resolve();
+      ws.onopen = () => ws.send(new Uint8Array(2 * 1024 * 1024)); // 2 MiB > 1 MiB cap
+      ws.onclose = done;
+      globalThis.setTimeout(done, 4000);
+    });
+    const alive = await fetch(`${endpoint}/healthz`);
+    if (!alive.ok) throw new Error("daemon did not survive an over-cap WebSocket frame");
+    console.error("[smoke] over-cap WebSocket frame closes connection, daemon survives");
+
     // Dashboard + info endpoints.
     const infoRes = await fetch(`${endpoint}/info`);
     const info = (await infoRes.json()) as { costCpuPerHour?: number; driver?: string };
@@ -639,6 +727,40 @@ async function main(): Promise<number> {
 }
 
 /** Run a command (optionally in a session) and return trimmed stdout. */
+/**
+ * Plain node:http GET (no connection pooling, unlike global fetch — important
+ * for the splice-based preview proxy). Optionally overrides the Host header.
+ */
+function httpGet(
+  host: string,
+  port: number,
+  path: string,
+  hostHeader?: string,
+): Promise<{ status: number; body: string }> {
+  return new Promise((resolve, reject) => {
+    const headers: Record<string, string> = { connection: "close" };
+    if (hostHeader) headers.host = hostHeader;
+    const req = httpRequest({ host, port, path, method: "GET", headers }, (res) => {
+      let body = "";
+      res.setEncoding("utf8");
+      res.on("data", (c) => (body += c));
+      res.on("end", () => resolve({ status: res.statusCode ?? 0, body }));
+    });
+    req.on("error", reject);
+    req.end();
+  });
+}
+
+/** GET with a custom Host header; resolve with just the status code. */
+async function statusWithHost(
+  host: string,
+  port: number,
+  path: string,
+  hostHeader: string,
+): Promise<number> {
+  return (await httpGet(host, port, path, hostHeader)).status;
+}
+
 async function execAndCapture(
   endpoint: string,
   id: string,

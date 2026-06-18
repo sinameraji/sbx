@@ -132,8 +132,45 @@ Global: --endpoint <url> (SBX_ENDPOINT) · --api-key <key> (SBX_API_KEY)
 | `SBX_METRICS_INTERVAL_MS` / `SBX_METRICS_HISTORY` | `10000` / `60` | Sampler cadence / sparkline ring |
 | `SBX_COST_CPU_PER_HOUR` / `_MEM_GB_PER_HOUR` / `_EGRESS_PER_GB` | `0.05` / `0.005` / `0.01` | Cost rates |
 | `SBX_API_KEY` | — | Require this key on the REST API (empty = open, loopback) |
+| `SBX_ALLOWED_HOSTS` | — | Extra `Host` values accepted by the API (DNS-rebinding guard; loopback always allowed) |
+| `SBX_MAX_BODY_BYTES` | `33554432` | Max request body size before 413 (REST + egress) |
 | `SBX_LOG_LEVEL` / `SBX_LOG_FORMAT` | `info` / `pretty` | Logging (`json` for ingestion) |
 | `SBX_OTLP_ENDPOINT` | — | OTLP/HTTP traces export (e.g. `http://localhost:4318`) |
+
+## Security model
+
+sbx is **single-tenant** by design: the API offers arbitrary command execution *inside* sandboxes (that's the point), so anyone who can reach the API controls the sandboxes. Treat API access as you would shell access.
+
+- **Bind + auth.** Binds **loopback** by default with auth off. Exposing it on a network? Set `SBX_API_KEY` (constant-time checked; honored by both SDKs, the CLI, and the dashboard) and bind a real interface via `SBX_HOST`.
+- **Browser guard.** On a loopback bind, the API rejects requests whose `Host` isn't loopback / `SBX_HOST` / `SBX_ALLOWED_HOSTS` — a DNS-rebinding / localhost-CSRF guard so a website you visit can't drive the daemon.
+- **DoS bounds.** Request bodies are capped (`SBX_MAX_BODY_BYTES`) and WebSocket messages are size-limited.
+- **Isolation.** The container driver shares the host kernel and (today) runs without per-sandbox cgroup limits — fine for single-tenant. Hardware isolation + resource caps come with the Phase 3 microVM drivers.
+
+## Pre-installing packages / custom setup
+
+There is no declarative `setup`/`packages` field at create time yet (tracked in [#1](https://github.com/sinameraji/sbx/issues/1)). To have a sandbox come with extra packages, use one of:
+
+1. **Bake a custom image** — extend `images/base/Dockerfile` with your installs and point the daemon at it. Fastest cold-start; applies daemon-wide.
+   ```dockerfile
+   FROM sbx/base:latest
+   RUN pip install kimiflare && npm i -g some-tool
+   ```
+   ```bash
+   docker build images/base -t my/sbx:latest
+   SBX_IMAGE=my/sbx:latest node packages/daemon/dist/index.js
+   ```
+2. **Run setup after create** — per-sandbox, imperative:
+   ```bash
+   id=$(sb create) && sb exec "$id" "npm i kimiflare"
+   # or, for a throwaway run:
+   sb run --keep "npm i kimiflare && node app.js"
+   ```
+3. **Backup/restore templating** — provision once, snapshot, then restore into fresh sandboxes:
+   ```bash
+   sb exec <id> "npm i kimiflare"     # provision a template sandbox
+   sb backup <id>                     # -> <backupId>
+   sb restore <newId> <backupId>      # new sandbox starts pre-provisioned
+   ```
 
 ## Architecture
 

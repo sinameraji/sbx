@@ -1,4 +1,5 @@
 import { SbxClient } from "@sbx/sdk";
+import { formatError } from "./util.js";
 import type { GlobalArgs } from "./cli.js";
 
 export async function filesCommand(
@@ -90,8 +91,4 @@ Subcommands:
 
   sb files ls <id> [path]
     List files and directories (defaults to /workspace).`);
-}
-
-function formatError(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
 }

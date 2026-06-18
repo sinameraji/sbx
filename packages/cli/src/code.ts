@@ -1,4 +1,5 @@
 import { SbxClient, type CodeLanguage } from "@sbx/sdk";
+import { formatError } from "./util.js";
 import type { GlobalArgs } from "./cli.js";
 
 export async function runCodeCommand(
@@ -36,8 +37,4 @@ export async function runCodeCommand(
     console.error(`Failed to run code: ${formatError(err)}`);
     return 1;
   }
-}
-
-function formatError(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
 }

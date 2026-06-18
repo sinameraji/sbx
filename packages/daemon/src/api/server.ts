@@ -13,6 +13,14 @@ import { buildProviders } from "../proxy/egress.js";
 import { DRIVER_NAMES } from "../driver/index.js";
 import { emptyUsage, SandboxStore } from "../store.js";
 import { acceptWebSocket } from "./ws.js";
+import {
+  BodyTooLargeError,
+  errorMessage,
+  readBodyCapped,
+  safeEqual,
+  sendJson,
+  shellEscape,
+} from "../util.js";
 import { DASHBOARD_HTML } from "../web/dashboard.js";
 import type {
   CodeContextInfo,
@@ -105,6 +113,9 @@ export function createApiServer(deps: Deps) {
     });
     handle(req, res, deps).catch((err) => {
       span.setStatus("error").setAttribute("error", String(err?.message ?? err));
+      if (err instanceof BodyTooLargeError) {
+        return sendJson(res, 413, { error: "request body too large" });
+      }
       sendJson(res, 500, { error: String(err?.message ?? err) });
     });
   });
@@ -142,9 +153,14 @@ async function handleTerminalUpgrade(
     socket.destroy();
     return;
   }
+  if (!isAllowedHost(req, config)) {
+    socket.write("HTTP/1.1 403 Forbidden\r\n\r\n");
+    socket.destroy();
+    return;
+  }
   if (config.apiKey) {
     const provided = url.searchParams.get("key") ?? bearerFromHeader(req);
-    if (provided !== config.apiKey) {
+    if (!provided || !safeEqual(provided, config.apiKey)) {
       socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
       socket.destroy();
       return;
@@ -176,7 +192,7 @@ async function handleTerminalUpgrade(
   try {
     term = await driver.openTerminal(id, { cols, rows, env: record.env });
   } catch (err) {
-    ws.send(`\r\n[sbx] failed to open terminal: ${errMessage(err)}\r\n`);
+    ws.send(`\r\n[sbx] failed to open terminal: ${errorMessage(err)}\r\n`);
     ws.close();
     span.setStatus("error").end();
     return;
@@ -273,7 +289,33 @@ function isAuthorized(req: IncomingMessage, config: Config, path: string): boole
   const apiKeyHeader = req.headers["x-api-key"];
   const provided =
     bearer ?? (typeof apiKeyHeader === "string" ? apiKeyHeader : undefined);
-  return provided === config.apiKey;
+  return provided !== undefined && safeEqual(provided, config.apiKey);
+}
+
+/** A host bound to a loopback interface (the dev default). */
+function isLoopbackHost(host: string): boolean {
+  return host === "127.0.0.1" || host === "localhost" || host === "::1";
+}
+
+/**
+ * DNS-rebinding / localhost-CSRF guard: when the daemon is bound to loopback,
+ * only accept requests whose `Host` header is a loopback name, `config.host`, or
+ * an explicit `SBX_ALLOWED_HOSTS` entry — so a website the operator visits can't
+ * drive the API via a rebound DNS name. If bound to a non-loopback interface the
+ * operator has opted into network exposure, so the guard is skipped (they should
+ * set an API key). The preview/egress proxies are separate servers and unaffected.
+ */
+function isAllowedHost(req: IncomingMessage, config: Config): boolean {
+  if (!isLoopbackHost(config.host)) return true;
+  const hostHeader = req.headers["host"];
+  if (typeof hostHeader !== "string") return false;
+  const hostname = hostHeader
+    .replace(/:\d+$/, "") // strip port
+    .replace(/^\[|\]$/g, "") // strip IPv6 brackets
+    .toLowerCase();
+  if (hostname === "127.0.0.1" || hostname === "localhost" || hostname === "::1") return true;
+  if (hostname === config.host.toLowerCase()) return true;
+  return config.allowedHosts.some((h) => h.toLowerCase() === hostname);
 }
 
 async function handle(
@@ -285,6 +327,10 @@ async function handle(
   const url = new URL(req.url ?? "/", `http://${req.headers.host}`);
   const path = url.pathname;
   const method = req.method ?? "GET";
+
+  if (!isAllowedHost(req, config)) {
+    return sendJson(res, 403, { error: "host not allowed" });
+  }
 
   if (!isAuthorized(req, config, path)) {
     res.setHeader("WWW-Authenticate", "Bearer");
@@ -358,7 +404,7 @@ async function handle(
   }
 
   if (method === "POST" && path === "/sandboxes") {
-    const body = await readJson(req);
+    const body = await readJson(req, config.maxBodyBytes);
     return createSandbox(res, { config, driver, store }, body);
   }
 
@@ -368,13 +414,13 @@ async function handle(
 
   const execMatch = path.match(/^\/sandboxes\/([^/]+)\/exec$/);
   if (method === "POST" && execMatch) {
-    const body = await readJson(req);
+    const body = await readJson(req, config.maxBodyBytes);
     return execInSandbox(res, { driver, store }, execMatch[1], body);
   }
 
   const fileActionMatch = path.match(/^\/sandboxes\/([^/]+)\/files\/(write|read|mkdir|list)$/);
   if (method === "POST" && fileActionMatch) {
-    const body = await readJson(req);
+    const body = await readJson(req, config.maxBodyBytes);
     return handleFileAction(
       res,
       { driver, store },
@@ -408,14 +454,14 @@ async function handle(
 
   const procIdMatch = path.match(/^\/sandboxes\/([^/]+)\/processes\/([^/]+)$/);
   if (method === "DELETE" && procIdMatch) {
-    const body = await readJson(req);
+    const body = await readJson(req, config.maxBodyBytes);
     return killProcess(res, { driver, store }, procIdMatch[1], procIdMatch[2], body);
   }
 
   const procMatch = path.match(/^\/sandboxes\/([^/]+)\/processes$/);
   if (procMatch) {
     if (method === "POST") {
-      const body = await readJson(req);
+      const body = await readJson(req, config.maxBodyBytes);
       return startProcess(res, { driver, store }, procMatch[1], body);
     }
     if (method === "GET") {
@@ -425,7 +471,7 @@ async function handle(
 
   const waitPortMatch = path.match(/^\/sandboxes\/([^/]+)\/wait-port$/);
   if (method === "POST" && waitPortMatch) {
-    const body = await readJson(req);
+    const body = await readJson(req, config.maxBodyBytes);
     return waitForPort(res, { driver, store }, waitPortMatch[1], body);
   }
 
@@ -442,7 +488,7 @@ async function handle(
   const exposeMatch = path.match(/^\/sandboxes\/([^/]+)\/expose$/);
   if (exposeMatch) {
     if (method === "POST") {
-      const body = await readJson(req);
+      const body = await readJson(req, config.maxBodyBytes);
       return exposePort(res, { config, driver, store }, exposeMatch[1], body);
     }
     if (method === "GET") {
@@ -456,7 +502,7 @@ async function handle(
     /^\/sandboxes\/([^/]+)\/sessions\/([^/]+)\/env$/,
   );
   if (method === "POST" && sessionEnvMatch) {
-    const body = await readJson(req);
+    const body = await readJson(req, config.maxBodyBytes);
     return setSessionEnv(
       res,
       { store },
@@ -474,7 +520,7 @@ async function handle(
   const sessionsMatch = path.match(/^\/sandboxes\/([^/]+)\/sessions$/);
   if (sessionsMatch) {
     if (method === "POST") {
-      const body = await readJson(req);
+      const body = await readJson(req, config.maxBodyBytes);
       return createSession(res, { store }, sessionsMatch[1], body);
     }
     if (method === "GET") {
@@ -495,7 +541,7 @@ async function handle(
       return sendJson(res, 200, { env: record.env });
     }
     if (method === "POST") {
-      const body = await readJson(req);
+      const body = await readJson(req, config.maxBodyBytes);
       const env = (body.env as Record<string, string>) ?? {};
       record.env = { ...record.env, ...env };
       store.add(record); // write-through the env change
@@ -532,7 +578,7 @@ async function handle(
 
   const restoreMatch = path.match(/^\/sandboxes\/([^/]+)\/restore$/);
   if (method === "POST" && restoreMatch) {
-    const body = await readJson(req);
+    const body = await readJson(req, config.maxBodyBytes);
     return restoreBackup(res, deps, restoreMatch[1], body);
   }
 
@@ -544,7 +590,7 @@ async function handle(
   const ctxMatch = path.match(/^\/sandboxes\/([^/]+)\/code-contexts$/);
   if (ctxMatch) {
     if (method === "POST") {
-      const body = await readJson(req);
+      const body = await readJson(req, config.maxBodyBytes);
       return createCodeContext(res, { driver, store }, ctxMatch[1], body);
     }
     if (method === "GET") {
@@ -557,7 +603,7 @@ async function handle(
 
   const runCodeMatch = path.match(/^\/sandboxes\/([^/]+)\/run-code$/);
   if (method === "POST" && runCodeMatch) {
-    const body = await readJson(req);
+    const body = await readJson(req, config.maxBodyBytes);
     return runCode(res, { driver, store }, runCodeMatch[1], body);
   }
 
@@ -806,7 +852,7 @@ async function startKernel(
   const setup = await execCapture(
     driver,
     id,
-    `mkdir -p ${dir} && mkfifo ${dir}/in.fifo ${dir}/out.fifo`,
+    `mkdir -p ${shellEscape(dir)} && mkfifo ${shellEscape(dir)}/in.fifo ${shellEscape(dir)}/out.fifo`,
   );
   if (setup.exitCode !== 0) {
     throw new Error(`failed to set up code context: ${setup.stderr.trim()}`);
@@ -839,7 +885,7 @@ async function teardownKernel(
   } catch {
     // Kernel may already be gone; the rm below still cleans up.
   }
-  await execCapture(driver, id, `rm -rf ${ctx.dir}`);
+  await execCapture(driver, id, `rm -rf ${shellEscape(ctx.dir)}`);
 }
 
 async function createCodeContext(
@@ -1135,7 +1181,7 @@ async function startProcess(
     store.addProcess(id, proc);
     return sendJson(res, 201, proc);
   } catch (err) {
-    return sendJson(res, 500, { error: errMessage(err) });
+    return sendJson(res, 500, { error: errorMessage(err) });
   }
 }
 
@@ -1185,7 +1231,7 @@ async function killProcess(
     store.addProcess(id, proc); // write-through the exited status
     return sendJson(res, 200, { ok: true });
   } catch (err) {
-    return sendJson(res, 500, { error: errMessage(err) });
+    return sendJson(res, 500, { error: errorMessage(err) });
   }
 }
 
@@ -1218,7 +1264,7 @@ async function streamLogs(
       (data) => res.write(`data: ${JSON.stringify({ type: "log", data })}\n\n`),
     );
   } catch (err) {
-    res.write(`data: ${JSON.stringify({ type: "log", data: errMessage(err) })}\n\n`);
+    res.write(`data: ${JSON.stringify({ type: "log", data: errorMessage(err) })}\n\n`);
   } finally {
     res.write(`data: ${JSON.stringify({ type: "end" })}\n\n`);
     res.end();
@@ -1244,7 +1290,7 @@ async function waitForPort(
     });
     return sendJson(res, 200, { ready });
   } catch (err) {
-    return sendJson(res, 500, { error: errMessage(err) });
+    return sendJson(res, 500, { error: errorMessage(err) });
   }
 }
 
@@ -1336,25 +1382,14 @@ function deleteSession(
 
 // --- helpers ---------------------------------------------------------------
 
-function errMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
-}
-
-function sendJson(res: ServerResponse, status: number, body: unknown): void {
-  const payload = JSON.stringify(body);
-  res.writeHead(status, {
-    "Content-Type": "application/json",
-    "Content-Length": Buffer.byteLength(payload),
-  });
-  res.end(payload);
-}
-
-async function readJson(req: IncomingMessage): Promise<Record<string, unknown>> {
-  const chunks: Buffer[] = [];
-  for await (const chunk of req) chunks.push(chunk as Buffer);
-  if (chunks.length === 0) return {};
+async function readJson(
+  req: IncomingMessage,
+  maxBytes: number,
+): Promise<Record<string, unknown>> {
+  const body = await readBodyCapped(req, maxBytes);
+  if (body.length === 0) return {};
   try {
-    return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+    return JSON.parse(body.toString("utf8"));
   } catch {
     return {};
   }

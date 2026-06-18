@@ -1,4 +1,5 @@
 import { SbxClient } from "@sbx/sdk";
+import { formatError } from "./util.js";
 import type { GlobalArgs } from "./cli.js";
 
 export async function listCommand(globals: GlobalArgs): Promise<number> {
@@ -37,8 +38,4 @@ export async function listCommand(globals: GlobalArgs): Promise<number> {
 
 function padRight(str: string, width: number): string {
   return str.length >= width ? str : str + " ".repeat(width - str.length);
-}
-
-function formatError(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
 }

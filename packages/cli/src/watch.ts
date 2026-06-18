@@ -1,4 +1,5 @@
 import { SbxClient } from "@sbx/sdk";
+import { formatError } from "./util.js";
 import type { GlobalArgs } from "./cli.js";
 
 export async function watchCommand(
@@ -27,8 +28,4 @@ export async function watchCommand(
     console.error(`Failed to watch: ${formatError(err)}`);
     return 1;
   }
-}
-
-function formatError(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
 }

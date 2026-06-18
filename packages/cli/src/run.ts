@@ -1,5 +1,5 @@
 import { SbxClient } from "@sbx/sdk";
-import { formatError } from "./util.js";
+import { formatError, parseLimitFlags } from "./util.js";
 import type { GlobalArgs } from "./cli.js";
 import { parseEnvPairs } from "./env.js";
 
@@ -24,6 +24,7 @@ export async function runCommand(
     typeof flags["sleep-after"] === "string"
       ? Number(flags["sleep-after"])
       : undefined;
+  const { memoryMb, cpus, pidsLimit } = parseLimitFlags(flags);
   let env: Record<string, string> | undefined;
   if (typeof flags.env === "string") {
     try {
@@ -36,9 +37,10 @@ export async function runCommand(
 
   let sandbox;
   try {
+    const hasLimits = memoryMb !== undefined || cpus !== undefined || pidsLimit !== undefined;
     const opts =
-      image || env || sleepAfter !== undefined || egress
-        ? { image, env, sleepAfter, egress }
+      image || env || sleepAfter !== undefined || egress || hasLimits
+        ? { image, env, sleepAfter, egress, memoryMb, cpus, pidsLimit }
         : undefined;
     sandbox = await client.getSandbox(undefined, opts);
   } catch (err) {

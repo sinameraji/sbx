@@ -33,6 +33,16 @@ export interface ExecResult {
 
 export type SandboxStatus = "running" | "paused" | "stopped";
 
+/** Hard per-sandbox resource caps (0/absent = unlimited). */
+export interface SandboxLimits {
+  /** Memory cap in MiB. */
+  memoryMb?: number;
+  /** CPU cap in fractional cores (e.g. 0.5, 2). */
+  cpus?: number;
+  /** Max processes/threads. */
+  pidsLimit?: number;
+}
+
 export interface SandboxInfo {
   id: string;
   image: string;
@@ -50,6 +60,8 @@ export interface SandboxInfo {
   lastActivityAt: string;
   /** Idle timeout (ms) before auto-pause; 0 disables it. */
   sleepAfterMs: number;
+  /** Resolved hard resource caps applied to the sandbox ({} = unlimited). */
+  limits: SandboxLimits;
 }
 
 export interface FileInfo {
@@ -144,6 +156,12 @@ export interface CreateOptions {
    * keys. Only providers configured on the daemon are wired. Defaults to false.
    */
   egress?: boolean;
+  /** Hard memory cap in MiB (overrides the daemon default; 0 = unlimited). */
+  memoryMb?: number;
+  /** Hard CPU cap in fractional cores, e.g. 0.5 (overrides the daemon default). */
+  cpus?: number;
+  /** Hard process/thread cap (overrides the daemon default; 0 = unlimited). */
+  pidsLimit?: number;
 }
 
 export interface WriteFileOptions {
@@ -362,6 +380,11 @@ export class Sandbox {
   /** Current lifecycle status (`running`, `paused`, or `stopped`). */
   get status(): SandboxStatus {
     return this.info.status;
+  }
+
+  /** The sandbox metadata captured when this handle was created/attached. */
+  getInfo(): SandboxInfo {
+    return this.info;
   }
 
   /** Run a command to completion, returning aggregated output. */

@@ -95,7 +95,8 @@ export class SandboxStore {
         persist        INTEGER NOT NULL,
         lastActivityAt TEXT NOT NULL DEFAULT '',
         sleepAfterMs   INTEGER NOT NULL DEFAULT 0,
-        usage          TEXT NOT NULL DEFAULT '{}'
+        usage          TEXT NOT NULL DEFAULT '{}',
+        limits         TEXT NOT NULL DEFAULT '{}'
       );
       CREATE TABLE IF NOT EXISTS processes (
         sandboxId TEXT NOT NULL,
@@ -147,6 +148,7 @@ export class SandboxStore {
     this.ensureColumn("sandboxes", "lastActivityAt", "TEXT NOT NULL DEFAULT ''");
     this.ensureColumn("sandboxes", "sleepAfterMs", "INTEGER NOT NULL DEFAULT 0");
     this.ensureColumn("sandboxes", "usage", "TEXT NOT NULL DEFAULT '{}'");
+    this.ensureColumn("sandboxes", "limits", "TEXT NOT NULL DEFAULT '{}'");
   }
 
   /** Add a column to a table if it isn't already present (idempotent migration). */
@@ -219,13 +221,13 @@ export class SandboxStore {
     this.db
       .prepare(
         `INSERT INTO sandboxes
-           (id, image, status, createdAt, labels, env, persist, lastActivityAt, sleepAfterMs, usage)
+           (id, image, status, createdAt, labels, env, persist, lastActivityAt, sleepAfterMs, usage, limits)
          VALUES
-           ($id, $image, $status, $createdAt, $labels, $env, $persist, $lastActivityAt, $sleepAfterMs, $usage)
+           ($id, $image, $status, $createdAt, $labels, $env, $persist, $lastActivityAt, $sleepAfterMs, $usage, $limits)
          ON CONFLICT(id) DO UPDATE SET
            image=$image, status=$status, createdAt=$createdAt,
            labels=$labels, env=$env, persist=$persist,
-           lastActivityAt=$lastActivityAt, sleepAfterMs=$sleepAfterMs, usage=$usage`,
+           lastActivityAt=$lastActivityAt, sleepAfterMs=$sleepAfterMs, usage=$usage, limits=$limits`,
       )
       .run({
         id: record.id,
@@ -238,6 +240,7 @@ export class SandboxStore {
         lastActivityAt: record.lastActivityAt,
         sleepAfterMs: record.sleepAfterMs,
         usage: JSON.stringify(record.usage),
+        limits: JSON.stringify(record.limits ?? {}),
       });
   }
 
@@ -558,11 +561,17 @@ function rowToSandbox(row: any): SandboxRecord {
     persist: row.persist === 1,
     lastActivityAt: row.lastActivityAt || row.createdAt,
     sleepAfterMs: row.sleepAfterMs ?? 0,
+    limits: parseJsonObject(row.limits),
     usage: { ...emptyUsage(), ...parseUsage(row.usage) },
   };
 }
 
 function parseUsage(raw: unknown): Partial<SandboxUsage> {
+  return parseJsonObject(raw);
+}
+
+/** Parse a JSON-object column, tolerating null/empty/malformed values. */
+function parseJsonObject(raw: unknown): any {
   if (typeof raw !== "string" || !raw) return {};
   try {
     return JSON.parse(raw);

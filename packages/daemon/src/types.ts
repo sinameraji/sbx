@@ -8,6 +8,20 @@
  */
 export type SandboxStatus = "running" | "paused" | "stopped";
 
+/**
+ * Hard per-sandbox resource caps, enforced by the driver (cgroups via Docker).
+ * Each field `0`/undefined means "unlimited" (omitted from the container config).
+ * Units stay ergonomic for callers; the driver translates to its backend.
+ */
+export interface ResourceLimits {
+  /** Memory cap in MiB. */
+  memoryMb?: number;
+  /** CPU cap in fractional cores (e.g. 0.5 = half a core, 2 = two cores). */
+  cpus?: number;
+  /** Max number of processes/threads (fork-bomb guard). */
+  pidsLimit?: number;
+}
+
 export interface SandboxRecord {
   id: string;
   image: string;
@@ -37,6 +51,8 @@ export interface SandboxRecord {
    * volume persists). `0` disables auto-pause. Set at create time.
    */
   sleepAfterMs: number;
+  /** Resolved hard resource caps (per-create override merged over daemon defaults). */
+  limits: ResourceLimits;
   /** Cumulative resource usage, integrated by the metrics sampler. */
   usage: SandboxUsage;
 }

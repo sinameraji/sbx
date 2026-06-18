@@ -6,11 +6,14 @@ import type {
   ListFilesOptions,
   MkdirOptions,
   ReadFileOptions,
+  ResourceLimits,
   StartProcessOptions,
   WaitForPortOptions,
   WatchOptions,
   WriteFileOptions,
 } from "../types.js";
+
+export type { ResourceLimits } from "../types.js";
 
 /** A live bidirectional byte stream bridged to a port inside a sandbox. */
 export interface TcpBridge {
@@ -93,6 +96,8 @@ export interface CreateOptions {
    * and the workspace survives. Defaults to true.
    */
   persist?: boolean;
+  /** Hard CPU/memory/PID caps for the sandbox (resolved effective values). */
+  limits?: ResourceLimits;
 }
 
 /**

@@ -28,6 +28,7 @@ import type {
   ExecEvent,
   ExposedPort,
   ProcessInfo,
+  ResourceLimits,
   SandboxRecord,
   SessionInfo,
 } from "../types.js";
@@ -261,6 +262,38 @@ function egressEnv(config: Config, token: string): Record<string, string> {
   return env;
 }
 
+/**
+ * Resolve hard resource caps for a new sandbox: each of `memoryMb`/`cpus`/
+ * `pidsLimit` is the per-create body value if given, else the daemon default.
+ * Only active (>0) caps are kept, so an unlimited sandbox has `limits: {}`.
+ * Returns `{ error }` (→ 400) on an invalid value.
+ */
+function resolveLimits(
+  body: Record<string, unknown>,
+  config: Config,
+): { limits: ResourceLimits } | { error: string } {
+  const read = (key: string): number | undefined => {
+    const v = body[key];
+    if (v === undefined) return undefined;
+    if (typeof v !== "number" || !Number.isFinite(v) || v < 0) return Number.NaN;
+    return v;
+  };
+  for (const key of ["memoryMb", "cpus", "pidsLimit"]) {
+    if (Number.isNaN(read(key))) return { error: `${key} must be a non-negative number` };
+  }
+  const memoryMb = read("memoryMb") ?? config.defaultMemoryMb;
+  const cpus = read("cpus") ?? config.defaultCpus;
+  const pidsLimit = read("pidsLimit") ?? config.defaultPidsLimit;
+  if (memoryMb > 0 && memoryMb < 6) {
+    return { error: "memoryMb must be at least 6 (Docker minimum)" };
+  }
+  const limits: ResourceLimits = {};
+  if (memoryMb > 0) limits.memoryMb = memoryMb;
+  if (cpus > 0) limits.cpus = cpus;
+  if (pidsLimit > 0) limits.pidsLimit = pidsLimit;
+  return { limits };
+}
+
 /** Collapse high-cardinality id segments so span/route names stay bounded. */
 function normalizeRoute(path: string): string {
   return path
@@ -361,6 +394,9 @@ async function handle(
       otlp: config.otlpEndpoint.length > 0,
       egressPort: config.egressPort,
       egressProviders: Object.keys(buildProviders(config)),
+      defaultMemoryMb: config.defaultMemoryMb,
+      defaultCpus: config.defaultCpus,
+      defaultPidsLimit: config.defaultPidsLimit,
     });
   }
 
@@ -663,6 +699,11 @@ async function createSandbox(
   const sleepAfterMs =
     typeof body.sleepAfter === "number" ? body.sleepAfter : config.defaultSleepAfterMs;
 
+  // Resolve hard resource caps: per-create value overrides the daemon default.
+  const resolved = resolveLimits(body, config);
+  if ("error" in resolved) return sendJson(res, 400, { error: resolved.error });
+  const limits = resolved.limits;
+
   // Opt-in egress wiring: mint a token and inject the provider base-URL + key env
   // vars so any LLM SDK in the sandbox routes through the gateway with no config.
   let egressToken: string | undefined;
@@ -672,7 +713,7 @@ async function createSandbox(
     env = { ...env, ...egressEnv(config, egressToken) };
   }
 
-  await driver.create({ id, image, env, labels, persist });
+  await driver.create({ id, image, env, labels, persist, limits });
 
   const now = new Date().toISOString();
   const record: SandboxRecord = {
@@ -685,6 +726,7 @@ async function createSandbox(
     persist,
     lastActivityAt: now,
     sleepAfterMs,
+    limits,
     usage: emptyUsage(),
   };
   store.add(record);

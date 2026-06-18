@@ -1,6 +1,7 @@
 import { SbxClient } from "@sbx/sdk";
 import type { GlobalArgs } from "./cli.js";
 import { parseEnvPairs } from "./env.js";
+import { parseLimitFlags } from "./util.js";
 
 /**
  * sb create [--image I] [--env K=V,…] [--sleep-after MS] [--egress] [--label K=V,…]
@@ -20,6 +21,7 @@ export async function createCommand(
   const egress = flags.egress === true;
   const sleepAfter =
     typeof flags["sleep-after"] === "string" ? Number(flags["sleep-after"]) : undefined;
+  const { memoryMb, cpus, pidsLimit } = parseLimitFlags(flags);
 
   let env: Record<string, string> | undefined;
   let labels: Record<string, string> | undefined;
@@ -38,6 +40,9 @@ export async function createCommand(
       labels,
       sleepAfter,
       egress,
+      memoryMb,
+      cpus,
+      pidsLimit,
     });
     console.log(sandbox.id);
     if (egress) {

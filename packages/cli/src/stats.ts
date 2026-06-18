@@ -15,8 +15,19 @@ export async function statsCommand(
   const client = new SbxClient({ endpoint: globals.endpoint, apiKey: globals.apiKey });
   try {
     const sandbox = await client.getSandbox(id);
+    const info = sandbox.getInfo();
     const m = await sandbox.metrics();
     console.log(`Sandbox ${id} (${m.status})`);
+    const lim = info.limits ?? {};
+    if (lim.memoryMb || lim.cpus || lim.pidsLimit) {
+      const parts: string[] = [];
+      if (lim.cpus) parts.push(`${lim.cpus} cpu`);
+      if (lim.memoryMb) parts.push(`${lim.memoryMb} MB`);
+      if (lim.pidsLimit) parts.push(`${lim.pidsLimit} pids`);
+      console.log(`  Limits: ${parts.join(", ")}`);
+    } else {
+      console.log("  Limits: none (unlimited)");
+    }
     if (m.live) {
       const memMb = (m.live.memBytes / 1e6).toFixed(1);
       const limitMb =

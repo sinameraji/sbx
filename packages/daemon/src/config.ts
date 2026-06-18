@@ -18,6 +18,12 @@ export interface Config {
    * Selects the isolation tier; the daemon/SDK/CLI are unchanged across drivers.
    */
   driver: string;
+  /** Default per-sandbox memory cap in MiB for new sandboxes (`0` = unlimited). */
+  defaultMemoryMb: number;
+  /** Default per-sandbox CPU cap in fractional cores (`0` = unlimited). */
+  defaultCpus: number;
+  /** Default per-sandbox process/thread cap for new sandboxes (`0` = unlimited). */
+  defaultPidsLimit: number;
   /** Bind host for the preview-URL reverse proxy. */
   proxyHost: string;
   /** Port for the preview-URL reverse proxy (separate from the REST API). */
@@ -105,6 +111,9 @@ export function loadConfig(): Config {
     port: Number(process.env.SBX_PORT ?? 4750),
     defaultImage: process.env.SBX_IMAGE ?? "python:3.11-slim-bookworm",
     driver: process.env.SBX_DRIVER ?? "container",
+    defaultMemoryMb: Number(process.env.SBX_DEFAULT_MEMORY_MB ?? 0),
+    defaultCpus: Number(process.env.SBX_DEFAULT_CPUS ?? 0),
+    defaultPidsLimit: Number(process.env.SBX_DEFAULT_PIDS ?? 0),
     proxyHost: process.env.SBX_PROXY_HOST ?? "127.0.0.1",
     proxyPort: Number(process.env.SBX_PROXY_PORT ?? 4751),
     egressHost: process.env.SBX_EGRESS_HOST ?? "127.0.0.1",

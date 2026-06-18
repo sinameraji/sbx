@@ -46,6 +46,7 @@ export async function resumeSandbox(
     env: record.env,
     labels: record.labels,
     persist: record.persist,
+    limits: record.limits,
   });
   record.status = "running";
   record.lastActivityAt = new Date().toISOString();

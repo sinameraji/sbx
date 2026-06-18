@@ -21,6 +21,7 @@ import type {
   CreateOptions,
   Driver,
   ProcessLiveness,
+  ResourceLimits,
   SandboxStats,
   StartProcessResult,
   TcpBridge,
@@ -129,11 +130,11 @@ export class ContainerDriver implements Driver {
       Labels: { "sbx.managed": "true", "sbx.id": opts.id, ...opts.labels },
       WorkingDir: "/workspace",
       HostConfig: {
-        // Phase 0 single-tenant defaults. Per-sandbox cgroup limits and egress
-        // controls land alongside the scheduler in Phase 1/3.
         AutoRemove: false,
         // Back /workspace with the named volume so it outlives the container.
         ...(persist ? { Binds: [`${this.volumeName(opts.id)}:/workspace`] } : {}),
+        // Hard per-sandbox resource caps (cgroups). Each is omitted when 0/unset.
+        ...resourceHostConfig(opts.limits),
       },
     });
     await container.start();
@@ -697,6 +698,29 @@ function statusCode(err: unknown): number | undefined {
   return typeof err === "object" && err !== null && "statusCode" in err
     ? (err as { statusCode?: number }).statusCode
     : undefined;
+}
+
+/**
+ * Translate sandbox resource limits into Docker `HostConfig` cgroup fields.
+ * Omits any limit that's 0/undefined so it stays unlimited. `cpus` → `NanoCpus`
+ * (1 core = 1e9), `memoryMb` → `Memory` bytes, `pidsLimit` → `PidsLimit`.
+ */
+function resourceHostConfig(limits?: ResourceLimits): {
+  Memory?: number;
+  NanoCpus?: number;
+  PidsLimit?: number;
+} {
+  const cfg: { Memory?: number; NanoCpus?: number; PidsLimit?: number } = {};
+  if (limits?.memoryMb && limits.memoryMb > 0) {
+    cfg.Memory = Math.round(limits.memoryMb * 1024 * 1024);
+  }
+  if (limits?.cpus && limits.cpus > 0) {
+    cfg.NanoCpus = Math.round(limits.cpus * 1e9);
+  }
+  if (limits?.pidsLimit && limits.pidsLimit > 0) {
+    cfg.PidsLimit = Math.round(limits.pidsLimit);
+  }
+  return cfg;
 }
 
 /**

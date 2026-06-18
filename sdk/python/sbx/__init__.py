@@ -87,6 +87,7 @@ class SandboxInfo:
     persist: bool
     last_activity_at: str
     sleep_after_ms: int
+    limits: Dict[str, Any]  # {memoryMb?, cpus?, pidsLimit?}; {} = unlimited
 
     @classmethod
     def from_dict(cls, d: Dict[str, Any]) -> "SandboxInfo":
@@ -99,6 +100,7 @@ class SandboxInfo:
             persist=d.get("persist", True),
             last_activity_at=d.get("lastActivityAt", ""),
             sleep_after_ms=d.get("sleepAfterMs", 0),
+            limits=d.get("limits", {}),
         )
 
 
@@ -336,6 +338,9 @@ class SbxClient:
         persist: Optional[bool] = None,
         sleep_after: Optional[int] = None,
         egress: Optional[bool] = None,
+        memory_mb: Optional[float] = None,
+        cpus: Optional[float] = None,
+        pids_limit: Optional[int] = None,
     ) -> "Sandbox":
         """Attach to a sandbox by id, or (id omitted) provision a fresh one."""
         if id:
@@ -354,6 +359,12 @@ class SbxClient:
             body["sleepAfter"] = sleep_after
         if egress is not None:
             body["egress"] = egress
+        if memory_mb is not None:
+            body["memoryMb"] = memory_mb
+        if cpus is not None:
+            body["cpus"] = cpus
+        if pids_limit is not None:
+            body["pidsLimit"] = pids_limit
         info = self.request("POST", "/sandboxes", body)
         return Sandbox(self, SandboxInfo.from_dict(info))
 

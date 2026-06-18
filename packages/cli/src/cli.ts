@@ -105,11 +105,14 @@ function printHelp(): void {
 Usage: sb <command> [options]
 
 Commands:
-  sb run "<command>" [--image <image>] [--keep] [--sleep-after <ms>] [--egress] [--endpoint <url>]
+  sb run "<command>" [--image <image>] [--keep] [--sleep-after <ms>] [--egress]
+         [--memory <MB>] [--cpus <n>] [--pids <n>] [--endpoint <url>]
     Create a sandbox, run a command, stream output, then destroy it.
     --egress wires the sandbox to the LLM gateway (provider keys injected by the daemon).
+    --memory/--cpus/--pids set hard resource caps (override the daemon defaults).
 
   sb create [--image I] [--env K=V,…] [--sleep-after MS] [--egress] [--label K=V,…]
+            [--memory <MB>] [--cpus <n>] [--pids <n>]
     Provision a standalone persistent sandbox and print its id.
 
   sb terminal <id>

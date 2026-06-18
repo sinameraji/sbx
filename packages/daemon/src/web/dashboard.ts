@@ -97,8 +97,11 @@ export const DASHBOARD_HTML = String.raw`<!doctype html>
 </header>
 <main>
   <div class="bar">
-    <input id="newImage" placeholder="image (optional)" size="28" />
-    <input id="newSleep" placeholder="sleepAfter ms (optional)" size="20" />
+    <input id="newImage" placeholder="image (optional)" size="22" />
+    <input id="newSleep" placeholder="sleepAfter ms" size="13" />
+    <input id="newMem" placeholder="mem MB" size="8" />
+    <input id="newCpus" placeholder="cpus" size="6" />
+    <input id="newPids" placeholder="pids" size="6" />
     <button id="newBtn">New sandbox</button>
     <span class="spacer" style="flex:1"></span>
     <button class="secondary" id="refreshBtn">Refresh</button>
@@ -198,6 +201,10 @@ function applyInfo(i) {
     "driver=" + i.driver + " · image=" + i.defaultImage + " · proxy=:" + i.proxyPort +
     (i.auth ? " · auth=on" : "") + (i.otlp ? " · otlp=on" : "");
   document.getElementById("newImage").placeholder = "image (default " + i.defaultImage + ")";
+  // Show the daemon defaults as placeholders so blank inputs are understood.
+  document.getElementById("newMem").placeholder = "mem MB" + (i.defaultMemoryMb ? " (" + i.defaultMemoryMb + ")" : "");
+  document.getElementById("newCpus").placeholder = "cpus" + (i.defaultCpus ? " (" + i.defaultCpus + ")" : "");
+  document.getElementById("newPids").placeholder = "pids" + (i.defaultPidsLimit ? " (" + i.defaultPidsLimit + ")" : "");
 }
 
 function refresh() {
@@ -253,14 +260,21 @@ function createSandbox() {
   var body = {};
   var img = document.getElementById("newImage").value.trim();
   var sleep = document.getElementById("newSleep").value.trim();
+  var memv = document.getElementById("newMem").value.trim();
+  var cpusv = document.getElementById("newCpus").value.trim();
+  var pidsv = document.getElementById("newPids").value.trim();
   if (img) body.image = img;
   if (sleep) body.sleepAfter = Number(sleep);
+  if (memv) body.memoryMb = Number(memv);
+  if (cpusv) body.cpus = Number(cpusv);
+  if (pidsv) body.pidsLimit = Number(pidsv);
   api("/sandboxes", {
     method: "POST", headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
   }).then(function () {
-    document.getElementById("newImage").value = "";
-    document.getElementById("newSleep").value = "";
+    ["newImage", "newSleep", "newMem", "newCpus", "newPids"].forEach(function (k) {
+      document.getElementById(k).value = "";
+    });
     refresh();
   }).catch(showErr);
 }
@@ -281,9 +295,11 @@ function renderDetail() {
       api("/sandboxes/" + id + "/metrics"),
       api("/sandboxes/" + id + "/expose").catch(function () { return { exposed: [] }; }),
       api("/sandboxes/" + id + "/metrics/history").catch(function () { return { samples: [] }; }),
+      api("/sandboxes/" + id).catch(function () { return { limits: {} }; }),
     ]).then(function (res) {
       if (selected !== id) return;
       var m = res[0], ex = res[1].exposed || [], hist = res[2].samples || [];
+      var limits = (res[3] && res[3].limits) || {};
       var live = m.live;
       var h = "<div class=\"detail\"><h2>" + esc(id) +
         " <span class=\"badge " + m.status + "\">" + m.status + "</span>" +
@@ -298,11 +314,13 @@ function renderDetail() {
       }
       h += "<div class=\"grid\">";
       h += statCard("CPU", live ? live.cpuPercent.toFixed(1) + "%" : "—");
+      h += statCard("CPU limit", limits.cpus ? limits.cpus + " cpu" : "∞");
       h += statCard("Memory", live ? mb(live.memBytes) : "—");
-      h += statCard("Mem limit", live && live.memLimitBytes ? mb(live.memLimitBytes) : "∞");
+      h += statCard("Mem limit", limits.memoryMb ? limits.memoryMb + " MB" : "∞");
+      h += statCard("PIDs", live ? String(live.pids) : "—");
+      h += statCard("PID limit", limits.pidsLimit ? String(limits.pidsLimit) : "∞");
       h += statCard("Net in", live ? mb(live.netRxBytes) : "—");
       h += statCard("Net out", live ? mb(live.netTxBytes) : "—");
-      h += statCard("PIDs", live ? String(live.pids) : "—");
       h += statCard("CPU total", m.usage.cpuSeconds.toFixed(1) + " vCPU-s");
       h += statCard("Mem total", (m.usage.memByteSeconds / 1e9).toFixed(1) + " GB-s");
       h += statCard("Egress", mb(m.usage.egressBytes || 0));

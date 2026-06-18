@@ -24,6 +24,7 @@ Design constraint #1: you should be able to launch *as many* agents/sandboxes as
 - **Backups** — snapshot/restore `/workspace` to durable host tarballs (portable across sandboxes).
 - **Lifecycle** — idle sandboxes auto-pause after `sleepAfter`; the next operation transparently auto-resumes them (workspace intact).
 - **Metrics + cost** — per-sandbox CPU/mem/net/pids, integrated CPU-seconds / mem-byte-seconds / egress, and a configurable `$` cost meter. History sparklines in the dashboard.
+- **Resource limits** — hard per-sandbox **memory / CPU / PID** caps (cgroups), set per create (`--memory`/`--cpus`/`--pids`, SDK `memoryMb`/`cpus`/`pidsLimit`, or dashboard) or as daemon-wide defaults — so launching many sandboxes bounds them all and one can't starve the rest.
 - **Observability** — structured JSON/pretty logs and OpenTelemetry traces (one span per request; optional OTLP/HTTP export, or read recent spans at `GET /traces`).
 - **Live terminal** — a real interactive shell (xterm.js) per sandbox in the dashboard, or `sb terminal <id>` from the CLI, over a hand-rolled WebSocket PTY.
 - **Egress credential proxy** — an LLM gateway: sandboxes reach OpenAI/Anthropic/OpenRouter with a per-sandbox token instead of a real key; the daemon injects the real key (held host-side), forwards, and meters calls + tokens. Opt-in auto-wiring sets the provider env vars for you.
@@ -97,8 +98,8 @@ Inside the sandbox, point any OpenAI-compatible SDK at the printed base URL usin
 ## CLI
 
 ```
-sb run "<cmd>" [--image I] [--keep] [--env K=V,…] [--sleep-after MS] [--egress]
-sb create [--image I] [--env K=V,…] [--sleep-after MS] [--egress]   # standalone sandbox, prints id
+sb run "<cmd>" [--image I] [--keep] [--env K=V,…] [--sleep-after MS] [--egress] [--memory MB] [--cpus N] [--pids N]
+sb create [--image I] [--env K=V,…] [--sleep-after MS] [--egress] [--memory MB] [--cpus N] [--pids N]   # standalone sandbox, prints id
 sb exec <id> "<cmd>" [--session SID] [--cwd DIR] [--env K=V,…]
 sb ls | stats <id> | stop <id> | start <id> | rm <id>
 sb terminal <id>                       # interactive shell (attach)
@@ -122,6 +123,7 @@ Global: --endpoint <url> (SBX_ENDPOINT) · --api-key <key> (SBX_API_KEY)
 | `SBX_HOST` / `SBX_PORT` | `127.0.0.1` / `4750` | REST API bind |
 | `SBX_DRIVER` | `container` | Runtime driver: `container` (Docker) — `firecracker`/`applevz` are Phase 3 |
 | `SBX_IMAGE` | `python:3.11-slim-bookworm` | Default sandbox image |
+| `SBX_DEFAULT_MEMORY_MB` / `SBX_DEFAULT_CPUS` / `SBX_DEFAULT_PIDS` | `0` (unlimited) | Default per-sandbox hard caps (RAM MiB / fractional cores / process count) |
 | `SBX_PROXY_PORT` | `4751` | Preview-URL proxy |
 | `SBX_EGRESS_PORT` | `4752` | Egress gateway (`0` disables) |
 | `SBX_PROVIDER_KEY_*` | — | Provider keys (`_OPENAI`, `_ANTHROPIC`, `_OPENROUTER`) |
@@ -144,7 +146,7 @@ sbx is **single-tenant** by design: the API offers arbitrary command execution *
 - **Bind + auth.** Binds **loopback** by default with auth off. Exposing it on a network? Set `SBX_API_KEY` (constant-time checked; honored by both SDKs, the CLI, and the dashboard) and bind a real interface via `SBX_HOST`.
 - **Browser guard.** On a loopback bind, the API rejects requests whose `Host` isn't loopback / `SBX_HOST` / `SBX_ALLOWED_HOSTS` — a DNS-rebinding / localhost-CSRF guard so a website you visit can't drive the daemon.
 - **DoS bounds.** Request bodies are capped (`SBX_MAX_BODY_BYTES`) and WebSocket messages are size-limited.
-- **Isolation.** The container driver shares the host kernel and (today) runs without per-sandbox cgroup limits — fine for single-tenant. Hardware isolation + resource caps come with the Phase 3 microVM drivers.
+- **Isolation.** The container driver shares the host kernel; per-sandbox CPU/memory/PID caps are available (above) but **hardware** isolation comes with the Phase 3 microVM drivers.
 
 ## Pre-installing packages / custom setup
 

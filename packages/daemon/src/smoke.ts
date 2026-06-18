@@ -553,6 +553,67 @@ async function main(): Promise<number> {
       console.error("[smoke] auto-egress wiring injects provider env into the sandbox");
     }
 
+    // Per-sandbox resource limits: hard caps are applied + persisted, the cgroup
+    // reflects them, and they survive resume; daemon defaults apply when omitted.
+    {
+      const MIB = 1024 * 1024;
+      const created = (await (
+        await fetch(`${endpoint}/sandboxes`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ memoryMb: 256, cpus: 0.5, pidsLimit: 128 }),
+        })
+      ).json()) as { id: string; limits: { memoryMb?: number; cpus?: number; pidsLimit?: number } };
+      const limId = created.id;
+      try {
+        if (
+          created.limits.memoryMb !== 256 ||
+          created.limits.cpus !== 0.5 ||
+          created.limits.pidsLimit !== 128
+        ) {
+          throw new Error(`limits not persisted on record: ${JSON.stringify(created.limits)}`);
+        }
+        const mem = await memLimitBytes(endpoint, limId);
+        if (mem !== 256 * MIB) throw new Error(`expected 256 MiB cap, got ${mem}`);
+        // cgroup v2 reflects the caps (best-effort — tolerate v1 / missing files).
+        const pidsMax = await execAndCapture(endpoint, limId, "cat /sys/fs/cgroup/pids.max 2>/dev/null || echo NA");
+        if (pidsMax !== "NA" && pidsMax !== "128") throw new Error(`pids.max expected 128, got ${pidsMax}`);
+        const cpuMax = await execAndCapture(endpoint, limId, "cat /sys/fs/cgroup/cpu.max 2>/dev/null || echo NA");
+        if (cpuMax !== "NA" && cpuMax !== "50000 100000") {
+          throw new Error(`cpu.max expected '50000 100000', got '${cpuMax}'`);
+        }
+        // Caps survive a stop/start (container recreate).
+        await fetch(`${endpoint}/sandboxes/${limId}/stop`, { method: "POST" });
+        await fetch(`${endpoint}/sandboxes/${limId}/start`, { method: "POST" });
+        const memAfter = await memLimitBytes(endpoint, limId);
+        if (memAfter !== 256 * MIB) throw new Error(`cap lost after resume, got ${memAfter}`);
+      } finally {
+        await fetch(`${endpoint}/sandboxes/${limId}`, { method: "DELETE" });
+      }
+
+      // Daemon default applies when no per-create value is given.
+      const savedDefault = config.defaultMemoryMb;
+      config.defaultMemoryMb = 128;
+      try {
+        const def = (await (
+          await fetch(`${endpoint}/sandboxes`, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: "{}",
+          })
+        ).json()) as { id: string };
+        try {
+          const mem = await memLimitBytes(endpoint, def.id);
+          if (mem !== 128 * MIB) throw new Error(`daemon-default cap not applied, got ${mem}`);
+        } finally {
+          await fetch(`${endpoint}/sandboxes/${def.id}`, { method: "DELETE" });
+        }
+      } finally {
+        config.defaultMemoryMb = savedDefault;
+      }
+      console.error("[smoke] resource limits enforced (256 MiB cap, survives resume) + daemon default applies");
+    }
+
     // Interactive terminal over WebSocket: open a PTY shell, type a command, and
     // read its output back. 6*7 is evaluated by the shell, so seeing the result
     // (not the literal "$((6*7))" that input-echo prints) proves real execution.
@@ -759,6 +820,14 @@ async function statusWithHost(
   hostHeader: string,
 ): Promise<number> {
   return (await httpGet(host, port, path, hostHeader)).status;
+}
+
+/** Read a running sandbox's current memory cap (Docker stats `memory_stats.limit`). */
+async function memLimitBytes(endpoint: string, id: string): Promise<number> {
+  const m = (await (await fetch(`${endpoint}/sandboxes/${id}/metrics`)).json()) as {
+    live: { memLimitBytes: number } | null;
+  };
+  return m.live?.memLimitBytes ?? 0;
 }
 
 async function execAndCapture(

@@ -1,6 +1,9 @@
 import type { Config } from "./config.js";
 import type { HostInfo } from "./driver/types.js";
+import type { MetricsHistory } from "./metrics.js";
 import type { SandboxStore } from "./store.js";
+
+const MIB = 1024 * 1024;
 
 /** Host capacity + what's currently committed by running sandboxes. */
 export interface CapacitySnapshot {
@@ -16,11 +19,16 @@ export interface CapacitySnapshot {
 }
 
 /**
- * Capacity meter + admission control. Each running sandbox reserves its memory
- * cap (or `defaultReservationMb` when uncapped); a new sandbox is admitted only
- * if it fits within the host's memory budget × overcommit. This is what keeps
- * "launch many sandboxes" from over-subscribing the host into OOM. Memory is the
- * hard gate (OOM kills); CPU is reported but not gated (it's throttled, not fatal).
+ * Capacity meter + admission control — **usage-based**, so light and heavy
+ * sandboxes size themselves without anyone declaring a tier:
+ *   - a **capped** sandbox reserves its hard cap (exact, kernel-enforced ceiling);
+ *   - an **uncapped** sandbox reserves `max(its most-recent sampled RSS, floor)` —
+ *     measured, not guessed, so an idle box packs many while a busy box admits few.
+ * The `floor` (`SBX_DEFAULT_RESERVATION_MB`) covers a just-started sandbox that
+ * hasn't grown (or been sampled) yet. A new sandbox is admitted only if it fits
+ * within the host memory budget × overcommit. Memory is the hard gate (OOM kills);
+ * CPU is reported but not gated (throttled, not fatal). Without a metrics history
+ * (e.g. tests) it falls back to floor-only accounting.
  */
 export class Capacity {
   /** Effective memory budget (MiB) after overcommit; 0 = unknown → admission off. */
@@ -31,6 +39,7 @@ export class Capacity {
     private readonly store: SandboxStore,
     private readonly config: Config,
     host: HostInfo | null,
+    private readonly history?: MetricsHistory,
   ) {
     const baseMem = config.hostMemoryMb > 0 ? config.hostMemoryMb : (host?.memoryMb ?? 0);
     this.budgetMemMb = Math.floor(baseMem * (config.overcommit || 1));
@@ -42,9 +51,19 @@ export class Capacity {
     return this.config.admission === "enforce" && this.budgetMemMb > 0;
   }
 
-  /** Memory a sandbox reserves: its cap if set, else the default reservation. */
-  private reservationMb(memoryMb?: number): number {
-    return memoryMb && memoryMb > 0 ? memoryMb : this.config.defaultReservationMb;
+  /** The floor counted for an uncapped/just-started sandbox. */
+  private get floorMb(): number {
+    return this.config.defaultReservationMb;
+  }
+
+  /**
+   * Memory an existing running sandbox is charged: its hard cap when set
+   * (the guaranteed ceiling), else `max(measured RSS, floor)`.
+   */
+  private reservationFor(id: string, memoryCapMb?: number): number {
+    if (memoryCapMb && memoryCapMb > 0) return memoryCapMb;
+    const rssBytes = this.history?.latestMemBytes(id) ?? 0;
+    return Math.max(Math.round(rssBytes / MIB), this.floorMb);
   }
 
   private committed(): { mem: number; cpu: number } {
@@ -52,7 +71,7 @@ export class Capacity {
     let cpu = 0;
     for (const r of this.store.list()) {
       if (r.status !== "running") continue; // paused/stopped free their compute
-      mem += this.reservationMb(r.limits.memoryMb);
+      mem += this.reservationFor(r.id, r.limits.memoryMb);
       cpu += r.limits.cpus && r.limits.cpus > 0 ? r.limits.cpus : 0;
     }
     return { mem, cpu };
@@ -62,7 +81,8 @@ export class Capacity {
   admit(requestMemoryMb?: number): { ok: true } | { ok: false; reason: string } {
     if (!this.enforced) return { ok: true };
     const { mem } = this.committed();
-    const req = this.reservationMb(requestMemoryMb);
+    // A new sandbox hasn't run yet: charge its cap if set, else the floor.
+    const req = requestMemoryMb && requestMemoryMb > 0 ? requestMemoryMb : this.floorMb;
     if (mem + req > this.budgetMemMb) {
       return {
         ok: false,

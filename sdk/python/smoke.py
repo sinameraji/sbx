@@ -70,6 +70,14 @@ def main() -> int:
         log(f"daemon up at {ENDPOINT}")
         client = SbxClient(endpoint=ENDPOINT)
 
+        # create-time `setup` provisioning (parity with the TS smoke)
+        provisioned = client.get_sandbox(
+            setup=["echo provisioned > /workspace/py-setup.txt"]
+        )
+        assert provisioned.read_file("/workspace/py-setup.txt").strip() == "provisioned"
+        provisioned.destroy()
+        log("setup provisioning works")
+
         sb = client.get_sandbox()
         log(f"created sandbox {sb.id}")
 

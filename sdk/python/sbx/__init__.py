@@ -338,6 +338,9 @@ class SbxClient:
         persist: Optional[bool] = None,
         sleep_after: Optional[int] = None,
         egress: Optional[bool] = None,
+        setup: Optional[List[str]] = None,
+        repo: Optional[str] = None,
+        repo_ref: Optional[str] = None,
         memory_mb: Optional[float] = None,
         cpus: Optional[float] = None,
         pids_limit: Optional[int] = None,
@@ -359,6 +362,12 @@ class SbxClient:
             body["sleepAfter"] = sleep_after
         if egress is not None:
             body["egress"] = egress
+        if setup is not None:
+            body["setup"] = setup
+        if repo is not None:
+            body["repo"] = repo
+        if repo_ref is not None:
+            body["repoRef"] = repo_ref
         if memory_mb is not None:
             body["memoryMb"] = memory_mb
         if cpus is not None:

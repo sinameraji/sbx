@@ -701,6 +701,8 @@ async function createSandbox(
   const setup = Array.isArray(body.setup)
     ? body.setup.filter((s): s is string => typeof s === "string")
     : undefined;
+  const repo = typeof body.repo === "string" && body.repo ? body.repo : undefined;
+  const repoRef = typeof body.repoRef === "string" && body.repoRef ? body.repoRef : undefined;
 
   // Resolve hard resource caps: per-create value overrides the daemon default.
   const resolved = resolveLimits(body, config);
@@ -716,7 +718,14 @@ async function createSandbox(
     env = { ...env, ...egressEnv(config, egressToken) };
   }
 
-  await driver.create({ id, image, env, labels, persist, setup, limits });
+  try {
+    await driver.create({ id, image, env, labels, persist, setup, repo, repoRef, limits });
+  } catch (err) {
+    // Provisioning failed (e.g. repo clone) — tear down the half-built container
+    // so it doesn't orphan, and report the failure instead of leaking it.
+    await driver.destroy(id).catch(() => {});
+    return sendJson(res, 422, { error: `sandbox provisioning failed: ${errorMessage(err)}` });
+  }
 
   const now = new Date().toISOString();
   const record: SandboxRecord = {

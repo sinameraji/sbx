@@ -106,14 +106,17 @@ Usage: sb <command> [options]
 
 Commands:
   sb run "<command>" [--image <image>] [--keep] [--sleep-after <ms>] [--egress]
+         [--repo <git-url>] [--ref <branch>] [--setup "cmd"]
          [--memory <MB>] [--cpus <n>] [--pids <n>] [--endpoint <url>]
     Create a sandbox, run a command, stream output, then destroy it.
     --egress wires the sandbox to the LLM gateway (provider keys injected by the daemon).
     --memory/--cpus/--pids set hard resource caps (override the daemon defaults).
 
   sb create [--image I] [--env K=V,…] [--sleep-after MS] [--egress] [--label K=V,…]
-            [--memory <MB>] [--cpus <n>] [--pids <n>] [--setup "cmd"]
+            [--repo <git-url>] [--ref <branch>] [--setup "cmd"]
+            [--memory <MB>] [--cpus <n>] [--pids <n>]
     Provision a standalone persistent sandbox and print its id.
+    --repo clones a git repo into /workspace at create (great for agents).
     --setup runs a shell command once after the container starts (best-effort;
     chain with && for multiple steps, e.g. --setup "npm i x && pip install y").
 

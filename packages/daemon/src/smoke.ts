@@ -19,7 +19,7 @@ import { createApiServer } from "./api/server.js";
 import { reapIdle } from "./lifecycle.js";
 import { MetricsHistory, sampleUsage } from "./metrics.js";
 import { createProxyServer } from "./proxy/server.js";
-import { SandboxStore } from "./store.js";
+import { emptyUsage, SandboxStore } from "./store.js";
 
 async function main(): Promise<number> {
   const config = loadConfig();
@@ -706,6 +706,36 @@ async function main(): Promise<number> {
         capStore.close();
       }
       console.error("[smoke] capacity admission: 1 fits a 700 MiB budget, 2nd rejected (503)");
+    }
+
+    // Usage-based admission (deterministic, no containers): two uncapped sandboxes
+    // are charged the 256 MiB floor while idle, but when one's measured RSS grows
+    // it's charged its actual usage — so a busy box commits more than an idle one.
+    {
+      const us = new SandboxStore(":memory:");
+      const uh = new MetricsHistory(10);
+      const rec = (id: string) =>
+        us.add({
+          id, image: "x", status: "running", createdAt: new Date().toISOString(),
+          labels: {}, env: {}, persist: true, lastActivityAt: "", sleepAfterMs: 0,
+          limits: {}, usage: emptyUsage(),
+        });
+      const sample = (id: string, mb: number) =>
+        uh.record(id, { at: "", cpuPercent: 0, memBytes: mb * 1024 * 1024, netRxBytes: 0, netTxBytes: 0, pids: 1 });
+      rec("aa"); rec("bb");
+      sample("aa", 40); sample("bb", 40);
+      const uCfg = { ...config, admission: "enforce" as const, hostMemoryMb: 4000, defaultReservationMb: 256, overcommit: 1 };
+      const ucap = new Capacity(us, uCfg, null, uh);
+      try {
+        const idle = ucap.snapshot().memory.committedMb;
+        if (idle !== 512) throw new Error(`idle committed should be 2×floor=512, got ${idle}`);
+        sample("bb", 900); // bb gets busy
+        const busy = ucap.snapshot().memory.committedMb;
+        if (busy !== 256 + 900) throw new Error(`busy committed should be 1156, got ${busy}`);
+      } finally {
+        us.close();
+      }
+      console.error("[smoke] usage-based admission: idle charges the floor, busy charges measured RSS");
     }
 
     // Interactive terminal over WebSocket: open a PTY shell, type a command, and

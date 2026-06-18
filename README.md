@@ -25,7 +25,7 @@ Design constraint #1: you should be able to launch *as many* agents/sandboxes as
 - **Lifecycle** — idle sandboxes auto-pause after `sleepAfter`; the next operation transparently auto-resumes them (workspace intact).
 - **Metrics + cost** — per-sandbox CPU/mem/net/pids, integrated CPU-seconds / mem-byte-seconds / egress, and a configurable `$` cost meter. History sparklines in the dashboard.
 - **Resource limits** — hard per-sandbox **memory / CPU / PID** caps (cgroups), set per create (`--memory`/`--cpus`/`--pids`, SDK `memoryMb`/`cpus`/`pidsLimit`, or dashboard) or as daemon-wide defaults — so launching many sandboxes bounds them all and one can't starve the rest.
-- **Capacity + admission control** — the daemon tracks committed memory against the host budget (auto-detected) and **refuses to over-subscribe** (`create` → 503 when full), so launching 100 sandboxes can't OOM the box. `sb capacity` / the dashboard show committed vs budget and how many more fit.
+- **Capacity + admission control** — the daemon tracks committed memory against the host budget (auto-detected) and **refuses to over-subscribe** (`create` → 503 when full), so launching 100 sandboxes can't OOM the box. It's **usage-based**: an uncapped sandbox is charged its *measured* RSS (or a small floor while it warms up), and a capped one its cap — so idle agents pack densely and busy ones reserve what they actually use, no manual tiers. `sb capacity` / the dashboard show committed vs budget and how many more fit.
 - **Observability** — structured JSON/pretty logs and OpenTelemetry traces (one span per request; optional OTLP/HTTP export, or read recent spans at `GET /traces`).
 - **Live terminal** — a real interactive shell (xterm.js) per sandbox in the dashboard, or `sb terminal <id>` from the CLI, over a hand-rolled WebSocket PTY.
 - **Egress credential proxy** — an LLM gateway: sandboxes reach OpenAI/Anthropic/OpenRouter with a per-sandbox token instead of a real key; the daemon injects the real key (held host-side), forwards, and meters calls + tokens. Opt-in auto-wiring sets the provider env vars for you.
@@ -147,7 +147,7 @@ Global: --endpoint <url> (SBX_ENDPOINT) · --api-key <key> (SBX_API_KEY)
 | `SBX_DEFAULT_MEMORY_MB` / `SBX_DEFAULT_CPUS` / `SBX_DEFAULT_PIDS` | `0` (unlimited) | Default per-sandbox hard caps (RAM MiB / fractional cores / process count) |
 | `SBX_ADMISSION` | `enforce` | Reject `create` when the host memory budget is exhausted (`off` to only report) |
 | `SBX_HOST_MEMORY_MB` / `SBX_HOST_CPUS` | auto-detect | Host capacity budget for admission (defaults to the Docker host's MemTotal/NCPU) |
-| `SBX_OVERCOMMIT` / `SBX_DEFAULT_RESERVATION_MB` | `1` / `512` | Memory overcommit factor / reservation assumed for an uncapped sandbox |
+| `SBX_OVERCOMMIT` / `SBX_DEFAULT_RESERVATION_MB` | `1` / `256` | Memory overcommit factor / admission floor for an uncapped, not-yet-sampled sandbox |
 | `SBX_PROXY_PORT` | `4751` | Preview-URL proxy |
 | `SBX_EGRESS_PORT` | `4752` | Egress gateway (`0` disables) |
 | `SBX_PROVIDER_KEY_*` | — | Provider keys (`_OPENAI`, `_ANTHROPIC`, `_OPENROUTER`) |

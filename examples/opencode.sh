@@ -32,5 +32,12 @@ SETUP='npm i -g opencode-ai >/dev/null 2>&1 \
   && printf "{\"provider\":{\"openrouter\":{\"options\":{\"baseURL\":\"%s/v1\",\"apiKey\":\"%s\"}}}}" \
        "$OPENROUTER_BASE_URL" "$OPENROUTER_API_KEY" > ~/.config/opencode/opencode.json'
 
-exec $SB run --image sbx/base:latest --egress --repo "$REPO" --setup "$SETUP" \
+echo "▶ sbx: creating sandbox → cloning $REPO → installing OpenCode → running ($MODEL via OpenRouter)…" >&2
+echo "  (lines below starting with → ✱ ✗ are OpenCode's own output, not sbx; the agent's answer prints last)" >&2
+echo >&2
+
+$SB run --image sbx/base:latest --egress --repo "$REPO" --setup "$SETUP" \
   "opencode run --dir '$DIR' -m '$MODEL' --dangerously-skip-permissions '$TASK'"
+
+echo >&2
+echo "✓ sbx: done — sandbox destroyed (no key ever entered it; LLM calls metered by the egress gateway)." >&2

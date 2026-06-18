@@ -95,6 +95,26 @@ sb egress <id>
 
 Inside the sandbox, point any OpenAI-compatible SDK at the printed base URL using the **egress token** as the API key. The daemon swaps in the real key, forwards the call, and records per-sandbox provider calls + prompt/completion tokens (visible in `sb stats` and the dashboard). It's an LLM gateway (base-URL rewrite), not a TLS-MITM proxy — no CA to install.
 
+## Run AI agents on sbx
+
+sbx is built to *run agents*, not just containers — a sandbox can come up with a **repo cloned in** (`--repo`), **LLM access wired without keys inside** (`--egress`), **resource caps**, and **per-agent cost/observability**.
+
+- **Mastra (first-class):** [`@sbx/mastra`](packages/mastra) is a Mastra `Workspace` sandbox provider — drop `SbxSandbox` in where you'd use `E2BSandbox`/`ModalSandbox` and your agent runs on your own hardware.
+- **CLI harnesses:** run **OpenCode / Codex / Claude Code / pi.dev** (or any headless agent) with `sb create --repo <url> --egress --setup "<install the CLI>"`, then `sb exec`.
+
+```ts
+import { Agent, Workspace } from "@mastra/core";
+import { SbxSandbox } from "@sbx/mastra";
+
+const agent = new Agent({
+  name: "coder", model: "openai/gpt-5",
+  workspace: new Workspace({ sandbox: new SbxSandbox({ repo: "https://github.com/me/app" }) }),
+});
+await agent.generate("Add a /health route and run the tests.");
+```
+
+See [`examples/`](examples) for runnable agent examples + harness recipes.
+
 ## CLI
 
 ```
@@ -201,6 +221,7 @@ See `docs/plan.md` for the full spec and phased roadmap, and `KIMI.md` for contr
 | `packages/daemon` (`@sbx/daemon`, bin `sbd`) | The control-plane daemon |
 | `packages/sdk` (`@sbx/sdk`) | TypeScript client SDK (zero runtime deps) |
 | `packages/cli` (`@sbx/cli`, bin `sb`) | Command-line interface |
+| `packages/mastra` (`@sbx/mastra`) | Mastra `Workspace` sandbox provider (run Mastra agents on sbx) |
 | `sdk/python` (`sbx-sdk`) | Python client SDK (stdlib-only, mirrors the TS SDK) |
 | `images/base` | Base sandbox OCI image (Python 3.11 + Node 20 + git/bash) |
 

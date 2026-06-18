@@ -184,6 +184,12 @@ export class ContainerDriver implements Driver {
         AutoRemove: false,
         // Back /workspace with the named volume so it outlives the container.
         ...(persist ? { Binds: [`${this.volumeName(opts.id)}:/workspace`] } : {}),
+        // Make `host.docker.internal` resolve to the daemon host from inside the
+        // sandbox so the egress LLM gateway is reachable. Docker Desktop (macOS)
+        // injects this name automatically; native Linux dockerd does not, so we
+        // map it to the bridge gateway explicitly (Docker ≥20.10). Harmless on
+        // Desktop, which already defines it — keeps one codepath across hosts.
+        ExtraHosts: ["host.docker.internal:host-gateway"],
         // Hard per-sandbox resource caps (cgroups). Each is omitted when 0/unset.
         ...resourceHostConfig(opts.limits),
       },

@@ -46,7 +46,14 @@ export interface Config {
   proxyHost: string;
   /** Port for the preview-URL reverse proxy (separate from the REST API). */
   proxyPort: number;
-  /** Bind host for the egress credential proxy (LLM gateway). */
+  /**
+   * Bind host for the egress credential proxy (LLM gateway). Defaults to
+   * loopback (single-tenant safe). On **native Linux** dockerd, sandboxes reach
+   * the daemon via the bridge gateway (`host.docker.internal` → ~172.17.0.1), so
+   * a loopback-only bind is unreachable from sandboxes — set `SBX_EGRESS_HOST`
+   * to `0.0.0.0` (or the bridge IP) there, relying on the per-sandbox egress
+   * token + host firewall. Docker Desktop (macOS) reaches loopback as-is.
+   */
   egressHost: string;
   /** Port for the egress credential proxy. `0` disables it. */
   egressPort: number;

@@ -36,7 +36,11 @@ export interface Config {
   hostCpus: number;
   /** Memory over-commit factor applied to the host budget (e.g. `1.5` to oversubscribe). */
   overcommit: number;
-  /** Memory reservation (MiB) assumed for a sandbox with no explicit memory cap. */
+  /**
+   * Admission **floor** (MiB) charged for an uncapped sandbox that's just started
+   * or not yet sampled. Once the metrics sampler sees it, admission uses its
+   * measured RSS instead (usage-based). Capped sandboxes use their cap.
+   */
   defaultReservationMb: number;
   /** Bind host for the preview-URL reverse proxy. */
   proxyHost: string;
@@ -132,7 +136,7 @@ export function loadConfig(): Config {
     hostMemoryMb: Number(process.env.SBX_HOST_MEMORY_MB ?? 0),
     hostCpus: Number(process.env.SBX_HOST_CPUS ?? 0),
     overcommit: Number(process.env.SBX_OVERCOMMIT ?? 1),
-    defaultReservationMb: Number(process.env.SBX_DEFAULT_RESERVATION_MB ?? 512),
+    defaultReservationMb: Number(process.env.SBX_DEFAULT_RESERVATION_MB ?? 256),
     proxyHost: process.env.SBX_PROXY_HOST ?? "127.0.0.1",
     proxyPort: Number(process.env.SBX_PROXY_PORT ?? 4751),
     egressHost: process.env.SBX_EGRESS_HOST ?? "127.0.0.1",

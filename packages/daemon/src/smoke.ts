@@ -476,7 +476,7 @@ async function main(): Promise<number> {
         const body = JSON.stringify({
           ok: true,
           receivedAuth: auth,
-          usage: { prompt_tokens: 11, completion_tokens: 7 },
+          usage: { prompt_tokens: 11, completion_tokens: 7, cost: 0.0123 },
         });
         ures.writeHead(200, { "content-type": "application/json" });
         ures.end(body);
@@ -528,7 +528,13 @@ async function main(): Promise<number> {
         const mu = (await (
           await fetch(`${endpoint}/sandboxes/${id}/metrics?live=0`)
         ).json()) as {
-          usage: { providerCalls: number; providerTokensIn: number; providerTokensOut: number };
+          usage: {
+            providerCalls: number;
+            providerTokensIn: number;
+            providerTokensOut: number;
+            providerCost: number;
+          };
+          cost: { provider: number; total: number };
         };
         if (mu.usage.providerCalls !== 1) {
           throw new Error(`expected 1 provider call, got ${mu.usage.providerCalls}`);
@@ -538,11 +544,18 @@ async function main(): Promise<number> {
             `expected 11/7 tokens, got ${mu.usage.providerTokensIn}/${mu.usage.providerTokensOut}`,
           );
         }
+        // The provider-reported USD cost flows through to usage + the breakdown.
+        if (Math.abs(mu.usage.providerCost - 0.0123) > 1e-9) {
+          throw new Error(`expected providerCost 0.0123, got ${mu.usage.providerCost}`);
+        }
+        if (Math.abs(mu.cost.provider - 0.0123) > 1e-9) {
+          throw new Error(`expected cost.provider 0.0123, got ${mu.cost.provider}`);
+        }
       } finally {
         await new Promise<void>((r) => egressProxy.close(() => r()));
         await new Promise<void>((r) => upstream.close(() => r()));
       }
-      console.error("[smoke] egress proxy injects provider key + meters calls/tokens");
+      console.error("[smoke] egress proxy injects provider key + meters calls/tokens/cost");
     }
 
     // Auto-egress wiring: a sandbox created with {egress:true} gets the provider

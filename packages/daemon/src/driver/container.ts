@@ -21,6 +21,7 @@ import type {
   CreateOptions,
   Driver,
   ProcessLiveness,
+  HostInfo,
   ResourceLimits,
   SandboxStats,
   StartProcessResult,
@@ -61,6 +62,14 @@ export class ContainerDriver implements Driver {
 
   async ping(): Promise<void> {
     await this.docker.ping();
+  }
+
+  async hostInfo(): Promise<HostInfo> {
+    const info = (await this.docker.info()) as { MemTotal?: number; NCPU?: number };
+    return {
+      memoryMb: Math.floor((info.MemTotal ?? 0) / (1024 * 1024)),
+      cpus: info.NCPU ?? 0,
+    };
   }
 
   /** Create the workspace volume if it does not already exist (idempotent). */

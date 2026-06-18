@@ -24,6 +24,20 @@ export interface Config {
   defaultCpus: number;
   /** Default per-sandbox process/thread cap for new sandboxes (`0` = unlimited). */
   defaultPidsLimit: number;
+  /**
+   * Admission control: `enforce` rejects `create` when the host's memory budget
+   * is exhausted (prevents over-subscription / OOM when launching many
+   * sandboxes); `off` only reports capacity. Default `enforce`.
+   */
+  admission: "enforce" | "off";
+  /** Host memory budget in MiB for admission (`0` = auto-detect from the runtime). */
+  hostMemoryMb: number;
+  /** Host CPU budget for the capacity view (`0` = auto-detect from the runtime). */
+  hostCpus: number;
+  /** Memory over-commit factor applied to the host budget (e.g. `1.5` to oversubscribe). */
+  overcommit: number;
+  /** Memory reservation (MiB) assumed for a sandbox with no explicit memory cap. */
+  defaultReservationMb: number;
   /** Bind host for the preview-URL reverse proxy. */
   proxyHost: string;
   /** Port for the preview-URL reverse proxy (separate from the REST API). */
@@ -114,6 +128,11 @@ export function loadConfig(): Config {
     defaultMemoryMb: Number(process.env.SBX_DEFAULT_MEMORY_MB ?? 0),
     defaultCpus: Number(process.env.SBX_DEFAULT_CPUS ?? 0),
     defaultPidsLimit: Number(process.env.SBX_DEFAULT_PIDS ?? 0),
+    admission: process.env.SBX_ADMISSION === "off" ? "off" : "enforce",
+    hostMemoryMb: Number(process.env.SBX_HOST_MEMORY_MB ?? 0),
+    hostCpus: Number(process.env.SBX_HOST_CPUS ?? 0),
+    overcommit: Number(process.env.SBX_OVERCOMMIT ?? 1),
+    defaultReservationMb: Number(process.env.SBX_DEFAULT_RESERVATION_MB ?? 512),
     proxyHost: process.env.SBX_PROXY_HOST ?? "127.0.0.1",
     proxyPort: Number(process.env.SBX_PROXY_PORT ?? 4751),
     egressHost: process.env.SBX_EGRESS_HOST ?? "127.0.0.1",

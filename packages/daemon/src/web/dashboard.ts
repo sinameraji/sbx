@@ -93,6 +93,7 @@ export const DASHBOARD_HTML = String.raw`<!doctype html>
   <h1>sbx</h1>
   <span class="meta" id="info">connecting…</span>
   <span class="spacer"></span>
+  <span class="cost" id="cap" title="host memory committed / budget"></span>
   <span class="cost">total cost: <b id="totalCost">$0.000000</b></span>
 </header>
 <main>
@@ -207,7 +208,18 @@ function applyInfo(i) {
   document.getElementById("newPids").placeholder = "pids" + (i.defaultPidsLimit ? " (" + i.defaultPidsLimit + ")" : "");
 }
 
+function loadCapacity() {
+  api("/capacity").then(function (c) {
+    var el = document.getElementById("cap");
+    if (!c || !c.memory || !c.memory.budgetMb) { el.textContent = ""; return; }
+    var gb = function (mb) { return (mb / 1024).toFixed(1); };
+    el.innerHTML = "mem <b>" + gb(c.memory.committedMb) + "/" + gb(c.memory.budgetMb) +
+      " GB</b> · ~" + c.fits + " more" + (c.enforced ? "" : " (admission off)");
+  }).catch(function () {});
+}
+
 function refresh() {
+  loadCapacity();
   api("/sandboxes").then(function (data) {
     clearErr();
     var list = data.sandboxes || [];

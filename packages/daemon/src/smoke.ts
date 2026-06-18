@@ -11,6 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout } from "node:timers/promises";
 import { BackupRegistry } from "./backups.js";
+import { Capacity } from "./capacity.js";
 import { createEgressProxy } from "./proxy/egress.js";
 import { loadConfig } from "./config.js";
 import { createDriver } from "./driver/index.js";
@@ -657,6 +658,54 @@ async function main(): Promise<number> {
         // 422 = clone failed (likely offline); the wiring + cleanup still ran.
         console.error(`[smoke] --repo clone skipped (status ${repoRes.status}, likely offline)`);
       }
+    }
+
+    // Capacity / admission control: with a 700 MiB budget and a 512 MiB default
+    // reservation, exactly one uncapped sandbox fits and the second is rejected
+    // (503) before any container is created. Uses an isolated store so it doesn't
+    // see the main smoke's sandboxes.
+    {
+      const capConfig = {
+        ...config,
+        admission: "enforce" as const,
+        hostMemoryMb: 700,
+        defaultReservationMb: 512,
+        overcommit: 1,
+      };
+      const capStore = new SandboxStore(":memory:");
+      const capacity = new Capacity(capStore, capConfig, null);
+      const capServer = createApiServer({
+        config: capConfig,
+        driver,
+        store: capStore,
+        backups,
+        history,
+        capacity,
+      });
+      const capPort = config.port + 6;
+      await new Promise<void>((r) => capServer.listen(capPort, config.host, r));
+      const capBase = `http://${config.host}:${capPort}`;
+      let firstId: string | undefined;
+      try {
+        const r1 = await fetch(`${capBase}/sandboxes`, { method: "POST" });
+        if (!r1.ok) throw new Error(`first create should fit, got ${r1.status}`);
+        firstId = ((await r1.json()) as { id: string }).id;
+        const r2 = await fetch(`${capBase}/sandboxes`, { method: "POST" });
+        if (r2.status !== 503) throw new Error(`over-budget create should 503, got ${r2.status}`);
+        const snap = (await (await fetch(`${capBase}/capacity`)).json()) as {
+          enforced: boolean;
+          memory: { budgetMb: number; committedMb: number };
+          fits: number;
+        };
+        if (!snap.enforced || snap.memory.budgetMb !== 700 || snap.memory.committedMb !== 512 || snap.fits !== 0) {
+          throw new Error(`unexpected capacity snapshot: ${JSON.stringify(snap)}`);
+        }
+      } finally {
+        if (firstId) await fetch(`${capBase}/sandboxes/${firstId}`, { method: "DELETE" });
+        await new Promise<void>((r) => capServer.close(() => r()));
+        capStore.close();
+      }
+      console.error("[smoke] capacity admission: 1 fits a 700 MiB budget, 2nd rejected (503)");
     }
 
     // Interactive terminal over WebSocket: open a PTY shell, type a command, and

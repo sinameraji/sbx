@@ -93,4 +93,7 @@ export abstract class UnsupportedDriver implements Driver {
   async stats(): Promise<SandboxStats> {
     this.fail("stats");
   }
+  async hostInfo(): Promise<never> {
+    this.fail("hostInfo");
+  }
 }

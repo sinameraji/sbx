@@ -15,6 +15,7 @@ import { envCommand } from "./env.js";
 import { sessionCommand } from "./session.js";
 import { statsCommand } from "./stats.js";
 import { infoCommand } from "./info.js";
+import { capacityCommand } from "./capacity.js";
 import { egressCommand } from "./egress.js";
 import { terminalCommand } from "./terminal.js";
 
@@ -55,6 +56,8 @@ export async function cli(args: string[]): Promise<number> {
       return statsCommand(positional, globals);
     case "info":
       return infoCommand(positional, globals);
+    case "capacity":
+      return capacityCommand(positional, globals);
     case "egress":
       return egressCommand(positional, globals, flags);
     case "terminal":
@@ -139,6 +142,9 @@ Commands:
 
   sb info
     Show the daemon's driver, providers, auth, and cost configuration.
+
+  sb capacity
+    Show host memory budget, what's committed, and how many more sandboxes fit.
 
   sb stats <id>
     Show live CPU/mem/net usage and accumulated cost for a sandbox.

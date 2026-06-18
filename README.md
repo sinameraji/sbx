@@ -2,6 +2,9 @@
 
 **Self-hostable sandbox infrastructure for AI agents.** Spin up many secure, persistent, observable sandboxes for coding agents (Claude Code, Codex, OpenCode, …) on *your own* hardware — a Mac, an EC2/GCE VM, or bare-metal Linux. No vendor lock-in. CLI-first, with a web dashboard, TypeScript + Python SDKs, and an LLM egress gateway.
 
+<img width="1512" height="862" alt="Screenshot 2026-06-18 at 11 42 07" src="https://github.com/user-attachments/assets/621b645e-6305-4287-a7ed-300a5a927df1" />
+<img width="726" height="643" alt="Screenshot 2026-06-18 at 11 42 42" src="https://github.com/user-attachments/assets/a0612cc2-8a35-4af7-9633-a09b1262edf3" />
+
 > **Status:** Phases 0–2 complete; Phase 3 started. The Docker container driver works on Linux + macOS with durable state, idle auto-pause/resume, files/processes/sessions, a stateful code interpreter, preview URLs, backups, per-sandbox metrics + cost meter, structured logs + OpenTelemetry traces, API-key auth, a web dashboard with a **live terminal**, and an **egress credential proxy** (LLM gateway). Firecracker (Linux) / Apple Virtualization (macOS) microVM drivers are next and need a KVM-capable host.
 
 ## Why

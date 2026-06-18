@@ -37,6 +37,12 @@ export class MetricsHistory {
     return this.byId.get(id) ?? [];
   }
 
+  /** Most-recently-sampled resident memory (bytes) for a sandbox, if any. */
+  latestMemBytes(id: string): number | undefined {
+    const arr = this.byId.get(id);
+    return arr && arr.length ? arr[arr.length - 1].memBytes : undefined;
+  }
+
   clear(id: string): void {
     this.byId.delete(id);
   }

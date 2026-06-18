@@ -20,7 +20,7 @@ set -euo pipefail
 
 REPO="${1:?usage: opencode.sh <repo-url> \"<task>\" [openrouter/model]}"
 TASK="${2:?usage: opencode.sh <repo-url> \"<task>\" [openrouter/model]}"
-MODEL="${3:-openrouter/anthropic/claude-3.5-sonnet}"
+MODEL="${3:-openrouter/moonshotai/kimi-k2.7-code}"
 DIR="/workspace/$(basename "$REPO" .git)"
 SB="${SBX_CLI:-node $(cd "$(dirname "$0")/.." && pwd)/packages/cli/dist/index.js}"
 

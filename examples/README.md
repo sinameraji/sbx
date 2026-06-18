@@ -40,7 +40,7 @@ What that runs under the hood is a single `sb run` (create → exec → auto-des
 ```bash
 sb run --image sbx/base:latest --egress --repo https://github.com/you/app \
   --setup 'npm i -g opencode-ai && mkdir -p ~/.config/opencode && printf "{\"provider\":{\"openrouter\":{\"options\":{\"baseURL\":\"%s/v1\",\"apiKey\":\"%s\"}}}}" "$OPENROUTER_BASE_URL" "$OPENROUTER_API_KEY" > ~/.config/opencode/opencode.json' \
-  "opencode run --dir /workspace/app -m openrouter/anthropic/claude-3.5-sonnet --dangerously-skip-permissions 'add a /health route and run the tests'"
+  "opencode run --dir /workspace/app -m openrouter/moonshotai/kimi-k2.7-code --dangerously-skip-permissions 'add a /health route and run the tests'"
 ```
 
 The egress gateway injects `OPENROUTER_BASE_URL` (→ `http://host.docker.internal:4752/openrouter`) and `OPENROUTER_API_KEY` (a per-sandbox token) into the sandbox; the OpenCode config points OpenRouter at that base URL. The daemon swaps the token for your real key, forwards to OpenRouter, and meters tokens + $ per sandbox (`sb stats`).

@@ -152,9 +152,12 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: Deps): Pr
   res.writeHead(upstream.status, respHeaders);
 
   // Stream the response through to the sandbox (so token-by-token streaming still
-  // works) while accumulating a capped copy to parse usage from at the end.
-  const sample: Buffer[] = [];
-  let sampleBytes = 0;
+  // works) while keeping a rolling TAIL copy to parse usage from — token counts
+  // and the OpenRouter `usage.cost` live in the final chunk (the last SSE frame
+  // for streaming, the end of the body for a JSON response), so the tail, not the
+  // head, is what we need.
+  const tail: Buffer[] = [];
+  let tailBytes = 0;
   if (upstream.body) {
     const reader = upstream.body.getReader();
     for (;;) {
@@ -163,20 +166,23 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: Deps): Pr
       const buf = Buffer.from(value);
       res.write(buf);
       bytes += buf.length;
-      if (sampleBytes < USAGE_PARSE_CAP) {
-        sample.push(buf);
-        sampleBytes += buf.length;
+      tail.push(buf);
+      tailBytes += buf.length;
+      while (tail.length > 1 && tailBytes - (tail[0]?.length ?? 0) >= USAGE_PARSE_CAP) {
+        const dropped = tail.shift();
+        tailBytes -= dropped?.length ?? 0;
       }
     }
   }
   res.end();
 
-  const { tokensIn, tokensOut } = parseUsage(Buffer.concat(sample));
-  store.addProviderUsage(sandboxId, { bytes, tokensIn, tokensOut });
+  const { tokensIn, tokensOut, cost } = parseUsage(Buffer.concat(tail));
+  store.addProviderUsage(sandboxId, { bytes, tokensIn, tokensOut, cost });
   span
     .setAttribute("http.status_code", upstream.status)
     .setAttribute("egress.tokens_in", tokensIn)
-    .setAttribute("egress.tokens_out", tokensOut);
+    .setAttribute("egress.tokens_out", tokensOut)
+    .setAttribute("egress.cost", cost);
   if (upstream.status >= 500) span.setStatus("error");
   span.end();
   log.info("egress call", {
@@ -186,6 +192,7 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: Deps): Pr
     bytes,
     tokensIn,
     tokensOut,
+    cost,
     traceId: span.traceId,
   });
 }
@@ -199,20 +206,29 @@ function extractToken(req: IncomingMessage): string | undefined {
   return undefined;
 }
 
+interface ParsedUsage {
+  tokensIn: number;
+  tokensOut: number;
+  /** Provider-reported cost in USD (OpenRouter `usage.cost`); 0 if not reported. */
+  cost: number;
+}
+
 /**
- * Best-effort token accounting. Reads a `usage` object from a JSON body
- * (OpenAI `prompt_tokens`/`completion_tokens` or Anthropic
- * `input_tokens`/`output_tokens`), or scans SSE `data:` frames for the last one.
+ * Best-effort usage accounting from the provider's response. Reads the `usage`
+ * object — token counts (OpenAI `prompt_tokens`/`completion_tokens` or Anthropic
+ * `input_tokens`/`output_tokens`) and the **authoritative USD cost** OpenRouter
+ * reports as `usage.cost` — from a JSON body or the last SSE `data:` frame.
  */
-function parseUsage(buf: Buffer): { tokensIn: number; tokensOut: number } {
+function parseUsage(buf: Buffer): ParsedUsage {
   const text = buf.toString("utf8");
-  const fromObj = (o: any): { tokensIn: number; tokensOut: number } | null => {
+  const fromObj = (o: any): ParsedUsage | null => {
     const u = o?.usage;
     if (!u) return null;
     const inn = u.prompt_tokens ?? u.input_tokens;
     const out = u.completion_tokens ?? u.output_tokens;
-    if (inn == null && out == null) return null;
-    return { tokensIn: Number(inn || 0), tokensOut: Number(out || 0) };
+    const cost = u.cost; // OpenRouter: real USD cost, inline in every response
+    if (inn == null && out == null && cost == null) return null;
+    return { tokensIn: Number(inn || 0), tokensOut: Number(out || 0), cost: Number(cost || 0) };
   };
   try {
     const whole = fromObj(JSON.parse(text));
@@ -220,7 +236,7 @@ function parseUsage(buf: Buffer): { tokensIn: number; tokensOut: number } {
   } catch {
     // not a single JSON object; fall through to SSE scan
   }
-  let best: { tokensIn: number; tokensOut: number } | null = null;
+  let best: ParsedUsage | null = null;
   for (const line of text.split(/\r?\n/)) {
     const t = line.trim();
     if (!t.startsWith("data:")) continue;
@@ -233,6 +249,6 @@ function parseUsage(buf: Buffer): { tokensIn: number; tokensOut: number } {
       // skip non-JSON frames
     }
   }
-  return best ?? { tokensIn: 0, tokensOut: 0 };
+  return best ?? { tokensIn: 0, tokensOut: 0, cost: 0 };
 }
 

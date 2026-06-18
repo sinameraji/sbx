@@ -21,6 +21,7 @@ export function emptyUsage(): SandboxUsage {
     providerBytes: 0,
     providerTokensIn: 0,
     providerTokensOut: 0,
+    providerCost: 0,
     lastCpuTotalNs: 0,
     lastSampledAt: "",
   };
@@ -31,6 +32,8 @@ export interface ProviderUsageDelta {
   bytes: number;
   tokensIn: number;
   tokensOut: number;
+  /** Provider-reported cost in USD for this call (0 if not reported). */
+  cost: number;
 }
 
 /** Where a preview route points, resolved by the proxy on each request. */
@@ -281,6 +284,7 @@ export class SandboxStore {
     rec.usage.providerBytes += Math.max(0, delta.bytes);
     rec.usage.providerTokensIn += Math.max(0, delta.tokensIn);
     rec.usage.providerTokensOut += Math.max(0, delta.tokensOut);
+    rec.usage.providerCost += Math.max(0, delta.cost);
     this.db
       .prepare("UPDATE sandboxes SET usage = ? WHERE id = ?")
       .run(JSON.stringify(rec.usage), id);

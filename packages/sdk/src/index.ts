@@ -156,6 +156,13 @@ export interface CreateOptions {
    * keys. Only providers configured on the daemon are wired. Defaults to false.
    */
   egress?: boolean;
+  /**
+   * Ordered shell commands run once, after the container starts at create time
+   * (e.g. `["npm i kimiflare"]`). Best-effort: a non-zero exit is logged on the
+   * daemon, not fatal. Not re-run on resume — with persistence (the default) the
+   * workspace volume already holds the result.
+   */
+  setup?: string[];
   /** Hard memory cap in MiB (overrides the daemon default; 0 = unlimited). */
   memoryMb?: number;
   /** Hard CPU cap in fractional cores, e.g. 0.5 (overrides the daemon default). */

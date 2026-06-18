@@ -42,11 +42,29 @@ async function main(): Promise<number> {
   console.error(`[smoke] daemon up at ${endpoint}`);
 
   try {
-    // Create sandbox.
-    const createRes = await fetch(`${endpoint}/sandboxes`, { method: "POST" });
+    // Create sandbox with a declarative setup command that provisions a marker
+    // file (asserted below) — exercises the create-time `setup` path end-to-end.
+    const createRes = await fetch(`${endpoint}/sandboxes`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ setup: ["echo provisioned > /workspace/setup-marker.txt"] }),
+    });
     if (!createRes.ok) throw new Error(`create failed: ${createRes.status}`);
     const { id } = (await createRes.json()) as { id: string };
     console.error(`[smoke] created sandbox ${id}`);
+
+    // Verify the setup command ran (best-effort, but should have succeeded here).
+    const markerRes = await fetch(`${endpoint}/sandboxes/${id}/files/read`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ path: "/workspace/setup-marker.txt" }),
+    });
+    if (!markerRes.ok) throw new Error(`setup marker read failed: ${markerRes.status}`);
+    const { content: marker } = (await markerRes.json()) as { content: string };
+    if (marker.trim() !== "provisioned") {
+      throw new Error(`setup command did not run: marker="${marker}"`);
+    }
+    console.error("[smoke] setup command ran");
 
     // Run command.
     const execRes = await fetch(`${endpoint}/sandboxes/${id}/exec`, {

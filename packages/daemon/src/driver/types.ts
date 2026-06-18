@@ -96,6 +96,12 @@ export interface CreateOptions {
    * and the workspace survives. Defaults to true.
    */
   persist?: boolean;
+  /**
+   * Ordered shell commands run once, after the container starts at create time
+   * (e.g. `npm i kimiflare`). Best-effort: a non-zero exit is logged, not fatal.
+   * Not re-run on resume — with persistence the workspace already has the result.
+   */
+  setup?: string[];
   /** Hard CPU/memory/PID caps for the sandbox (resolved effective values). */
   limits?: ResourceLimits;
 }

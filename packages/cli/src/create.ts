@@ -5,6 +5,7 @@ import { parseLimitFlags } from "./util.js";
 
 /**
  * sb create [--image I] [--env K=V,…] [--sleep-after MS] [--egress] [--label K=V,…]
+ *           [--setup "cmd"]
  *
  * Provision a standalone, persistent sandbox and print its id (unlike `sb run`,
  * which runs a command and destroys the sandbox). With `--egress`, also prints the
@@ -22,6 +23,7 @@ export async function createCommand(
   const sleepAfter =
     typeof flags["sleep-after"] === "string" ? Number(flags["sleep-after"]) : undefined;
   const { memoryMb, cpus, pidsLimit } = parseLimitFlags(flags);
+  const setup = typeof flags.setup === "string" ? [flags.setup] : undefined;
 
   let env: Record<string, string> | undefined;
   let labels: Record<string, string> | undefined;
@@ -40,6 +42,7 @@ export async function createCommand(
       labels,
       sleepAfter,
       egress,
+      setup,
       memoryMb,
       cpus,
       pidsLimit,

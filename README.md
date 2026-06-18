@@ -150,7 +150,19 @@ sbx is **single-tenant** by design: the API offers arbitrary command execution *
 
 ## Pre-installing packages / custom setup
 
-There is no declarative `setup`/`packages` field at create time yet (tracked in [#1](https://github.com/sinameraji/sbx/issues/1)). To have a sandbox come with extra packages, use one of:
+The simplest way is the declarative `setup` field — shell commands run once, in order, right after the container starts at create time:
+
+```bash
+sb create --setup "npm i kimiflare && pip install ruff"
+```
+```ts
+// SDK: pass an ordered array (each entry runs in sequence)
+await client.getSandbox(undefined, { setup: ["npm i kimiflare", "pip install ruff"] });
+```
+
+Setup is **best-effort**: a non-zero exit is logged on the daemon but does **not** fail create. It runs once at create — with persistence (the default) the installed deps live in the workspace volume and survive idle-pause/resume, so they are not re-run. Prefer baking a custom image when the same setup applies to every sandbox (faster cold-start, no per-create cost).
+
+Other approaches:
 
 1. **Bake a custom image** — extend `images/base/Dockerfile` with your installs and point the daemon at it. Fastest cold-start; applies daemon-wide.
    ```dockerfile

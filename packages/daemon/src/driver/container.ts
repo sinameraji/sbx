@@ -29,6 +29,7 @@ import type {
   TerminalSession,
 } from "./types.js";
 import { shellEscape } from "../util.js";
+import { log } from "../logger.js";
 
 /**
  * Container driver — backs each sandbox with a long-lived OCI container via the
@@ -92,6 +93,28 @@ export class ContainerDriver implements Driver {
 
   async create(opts: CreateOptions): Promise<void> {
     await this.launchContainer(opts);
+    await this.runSetup(opts.id, opts.setup ?? []);
+  }
+
+  /**
+   * Run declarative setup commands in order, once, after the container starts.
+   * Best-effort: a non-zero exit is logged but does not fail create. Kept out of
+   * `launchContainer` on purpose so it does not re-fire on `start()`/resume.
+   */
+  private async runSetup(id: string, commands: string[]): Promise<void> {
+    for (const command of commands) {
+      const { stderr, exitCode } = await this.execCapture(id, command);
+      if (exitCode === 0) {
+        log.info("setup command ok", { sandbox: id, command });
+      } else {
+        log.warn("setup command failed (continuing)", {
+          sandbox: id,
+          command,
+          exitCode,
+          stderr: stderr.trim(),
+        });
+      }
+    }
   }
 
   async start(opts: CreateOptions): Promise<void> {

@@ -163,6 +163,25 @@ Multi-node scheduler (etcd/postgres), teams/auth/SSO/audit, managed cloud offeri
 
 ---
 
+## Definition of done (what "finished" means for *this* repo)
+
+This repo is the **open-source, single-node, self-hostable core** (Apache-2.0): the thing anyone clones and runs on their own Mac or Linux box to operate sandboxes for agents. Its "done" is a **v1.0** that serves that use case at *any* trust level. It is explicitly **not** a managed multi-tenant service — that's a separate product above the line (Phase 4).
+
+**Core v1.0 — done when all of these are true:**
+
+- [x] **Container driver** (Linux + macOS): full sandbox surface — exec/files/processes/sessions/preview-URLs/code-interpreter/backups — durable state, idle lifecycle, resource caps, capacity/admission. (Phases 0–1.)
+- [x] **Observability + cost + DX:** per-sandbox metrics + `$` cost meter, structured logs + OTel traces, web dashboard + live terminal, TS + Python SDKs, `sb` CLI. (Phase 2.)
+- [x] **Egress control plane:** provider keys never in the sandbox, per-token + per-sandbox policy/caps/rate-limits/model+provider scope, accurate cost, config-driven providers, domain-allowlist forward proxy, and **default-deny egress (hard on Linux)**. (Phase 3.)
+- [ ] **microVM isolation on both OSes** — VM-grade per-sandbox isolation so *untrusted* code is safe to run: **Apple VZ** (Appendix A) and **Firecracker** (Appendix B), behind the unchanged `Driver` interface. This is the **last core capability**; with it, the trusted *and* untrusted self-host stories are both complete, hard egress lockdown becomes available on macOS too, and the "swap the isolation tier, change nothing else" claim is proven.
+- [ ] **Published + installable:** `@sbx/sdk` / `@sbx/cli` / `@sbx/mastra` on npm, `sbx-sdk` on PyPI, and a one-command install (`curl | sh` / Homebrew).
+- [ ] **Polish (non-blocking):** remote preview-URL TLS + wildcard domains, and real-harness / multi-OS CI.
+
+**When those land, the open-source core is done (v1.0):** a complete, self-hostable agent-sandbox platform for one host — container *or* microVM, trusted *or* untrusted workloads — with the credential/egress story as its differentiator.
+
+**Directly answering "are we done after the two microVM drivers?":** for the **open-source repo, essentially yes** — microVM isolation (plus publishing) is the last core gap; after it, single-node self-hosting is feature-complete at any trust level. Everything beyond is the **managed/commercial layer** (Phase 4: multi-node scheduler, teams/SSO/audit, hosted cloud, supply-chain scanning) — a *business* decision, not a missing feature. **Someone cloning the repo for their own box never needs Phase 4.**
+
+---
+
 ## Key Technology Choices (grounded in research)
 
 | Concern | Choice | Why |
@@ -327,3 +346,79 @@ Every method in `driver/types.ts` maps to a helper lifecycle call or an agent RP
 | `SBX_VZ_STATE_DIR` | `~/.sbx/vz` | Per-sandbox VM state (disks, console log, snapshots) |
 | `SBX_VZ_ROOTFS_CACHE` | `~/.sbx/vz/images` | Converted OCI→ext4 rootfs images, keyed by digest |
 | `SBX_VZ_DEFAULT_DISK_GB` | `8` | Initial sparse size of a new `workspace.img` |
+
+---
+
+## Appendix B — Firecracker (Linux) microVM driver
+
+Detailed plan for the `firecracker` driver: the **Linux** half of the Phase 3 isolation upgrade. Built **after** Appendix A on purpose — Apple VZ runs on hardware we already own and forces the shared `sbx-agent` + vsock protocol end-to-end, so Firecracker reduces to a Linux-specific VMM-lifecycle layer on top of an already-proven agent. Same `Driver` interface, same wire types; `SBX_DRIVER=firecracker` is a drop-in swap.
+
+### B.0 Goal & scope
+
+Give each sandbox a **VM-grade isolated Linux guest** via [Firecracker](https://firecracker-microvm.github.io/) + KVM, behind the existing `Driver` interface. `FirecrackerDriver` stops extending `UnsupportedDriver` and implements all ~25 methods against a microVM backend. **In scope:** boot/stop/start/destroy, workspace persistence, the full agent-served surface (exec/files/processes/ports/terminal/stats/backup), resource caps via machine config, OCI→rootfs conversion, default-deny egress via the per-VM NIC, and Firecracker-native snapshots for a warm pool. **Out of scope:** multi-node placement (Phase 4).
+
+### B.1 What's shared with Appendix A vs new here
+
+The expensive, host-agnostic pieces are **shared and already (mostly) built** — building VZ first means most of Firecracker is assembly, not invention:
+
+| Shared (reused verbatim from the agent / VZ work) | New, Firecracker-specific |
+|---|---|
+| **`sbx-agent`** (Go, PID 1, vsock) + the **A.4 wire protocol** — already built & unit-tested in `agent/` | `FirecrackerDriver`: spawn `firecracker` (under **`jailer`** for VMM hardening), drive its **HTTP API over a unix socket** (`PUT /boot-source`, `/drives`, `/machine-config`, `/vsock`, `/network-interfaces`, `/actions`) |
+| The `Driver`-method → agent-RPC mapping (A.5) — identical | **Host networking:** a **TAP** device per VM + routing; default-deny egress = route the VM's NIC through the egress gateway (the VM has its own NIC, so this is the *clean* version of the container iptables hack) |
+| OCI→rootfs *concept* (A.3) | OCI→ext4 is **native and easy** here: `mke2fs` exists on Linux, so no bootstrap-builder-VM (the sharpest VZ edge disappears) |
+| The parity-gate test approach (`npm run smoke` against the driver) | **vsock** via Firecracker's virtio-vsock (host side is a unix socket the daemon connects to; agent unchanged) |
+| Workspace = a raw disk image (`workspace.img`) as a second drive | **amd64 + arm64** kernel/rootfs matrix (Graviton + x86); **snapshots** via Firecracker's native save/restore (~ms) |
+
+**Easier than VZ:** no code-signing/entitlements (Linux), native `mke2fs`, kernels readily available. **Harder than VZ:** requires `/dev/kvm`, TAP/NAT networking, and `jailer` chroot/cgroup/seccomp hardening of the VMM process.
+
+### B.2 Architecture
+
+```
+  daemon (Node)                         Linux host (KVM)                   Linux guest (microVM)
+  ┌────────────────┐  HTTP over UDS    ┌──────────────────────┐  vsock   ┌──────────────────────┐
+  │ Firecracker    │◄─── API socket ──►│ firecracker + jailer │◄────────►│ sbx-agent (PID 1)    │
+  │ Driver         │  (boot/drives/    │  one process per     │  AF_VSOCK│  (identical to the    │
+  │ (firecracker.ts)│  net/vsock/actions)│ sandbox; KVM-isolated│          │   Apple VZ guest)     │
+  └────────────────┘                   └──────────────────────┘          └──────────────────────┘
+        │ disk images + kernel under          │ TAP NIC ──► egress gateway (default-deny)
+        ▼ SBX_FC_STATE_DIR (~/.sbx/fc/<id>/)  ▼ vCPU/mem from machine-config
+  workspace.img · rootfs.img · vmlinux · firecracker.sock · vsock.sock · snapshot/
+```
+
+### B.3 Networking + egress (the Firecracker-specific win)
+
+Each microVM gets its **own virtual NIC** (a host TAP device). Under `SBX_EGRESS_ENFORCE`, the host routes that TAP through the egress gateway and drops everything else — so the guest's *only* path out is the gateway, enforced at the host routing/firewall layer the VM can't touch. This is the **airtight version** of what the container driver approximates with `DOCKER-USER` iptables: a real NIC per sandbox makes "all egress flows through the gateway" structural rather than rule-based. The fail-closed proof (raw socket to the internet times out; gateway reachable) is re-run here as a gate.
+
+### B.4 Milestones (mirror Appendix A; lighter because the agent + converter logic + driver patterns are proven by VZ)
+
+- **B0 — Driver wiring + `ping`.** `firecracker` + `jailer` located, `/dev/kvm` present; `FirecrackerDriver.ping()`/`hostInfo()` (from `/proc/meminfo` + `nproc`) work; `SBX_DRIVER=firecracker` starts the daemon. *Verify:* `sb info` shows `firecracker`; `sb capacity` shows the real host budget.
+- **B1 — Boot a VM (lifecycle + persistence).** Kernel + base rootfs boot to the agent's `hello`; `create`/`stop`/`start`/`destroy` with `workspace.img` persistence. *Verify:* create → write `/workspace` file via agent → stop → start → file present → destroy → images gone.
+- **B2 — exec + streaming over the shared agent.** Should be **near-free** — the agent + protocol are already proven by VZ; this is wiring the Firecracker vsock socket to the existing frame translator. *Verify:* `sb run "python3 -c 'print(2+2)'"` returns `4` through the unchanged SSE path.
+- **B3 — Files + watch.** *Verify:* the file/watch portion of `npm run smoke` passes against `firecracker`.
+- **B4 — Processes, ports, terminal.** `startProcess`/logs/`waitForPort`, `openTcpBridge` (preview proxy — the guest NAT IP is host-reachable on Linux, simpler than Docker Desktop), `openTerminal`. *Verify:* start→wait-port→expose→proxy-fetch and a PTY round-trip pass.
+- **B5 — Stats + backup/restore.** *Verify:* metrics + backup→mutate→restore→rollback portions pass; backups are **portable to/from the container and VZ drivers** (same tar layout); cost meter non-zero.
+- **B6 — Image conversion + resource limits.** OCI→ext4 via native `mke2fs` honoring `SBX_IMAGE`; `memoryMb`/`cpus` → Firecracker `machine-config` (`mem_size_mib`/`vcpu_count`), `pidsLimit` → guest cgroup. *Verify:* a `python:3.11-slim` sandbox runs python; caps reflected in guest `/proc` and survive stop→start.
+- **B7 — Snapshots/warm-pool + default-deny egress + per-sandbox isolation.** Firecracker snapshot save/restore (~ms pause→resume) + a warm pool of pre-booted guests; the B.3 default-deny egress; **per-sandbox** driver selection (container ↔ firecracker). *Verify:* resume latency ≪ cold boot; a density script launches N microVMs with thin per-VM overhead on the dashboard; the fail-closed egress proof passes.
+
+**Parity gate:** `npm run smoke` passes with `SBX_DRIVER=firecracker` on a KVM host (a new `npm run smoke:fc`), per milestone — the same end-to-end test that exercises the container and VZ drivers.
+
+### B.5 Hardware (the one hard prerequisite)
+
+Firecracker needs **`/dev/kvm`** — a bare-metal Linux box or a **nested-virtualization** cloud VM. **Not** any instance type: GCE **N2/C3** (with nested virt enabled), EC2 `*.metal` or recent **C8i/M8i/R8i**. The current `e2-standard-2` test box **cannot** run it (e2 has no nested virt) — provision an N2/C3 nested-virt VM (the $65k GCP credits cover it) for `smoke:fc` and density benchmarks. Everything except the live-boot milestones (the driver code, OCI converter, config generation, vsock frame wiring) compiles and unit-tests on any host, including the Mac.
+
+### B.6 Risks & mitigations
+
+- **KVM / nested-virt availability** (highest) — *mitigate:* gate all boot tests behind `smoke:fc`; the non-boot code is host-agnostic and CI-able anywhere; document the exact instance types.
+- **TAP/NAT networking + `jailer` hardening complexity** — *mitigate:* start from Firecracker's documented network + jailer setup; the egress-gateway routing reuses the Phase 3 firewall module.
+- **arch matrix (amd64 + arm64)** — *mitigate:* build both kernels/rootfs from known-good Firecracker CI configs; the `sbx-agent` already cross-compiles to both.
+- **Abstraction leaks** — same as VZ: any `Driver` method that needs daemon changes is a finding about the interface; the goal is **only `firecracker.ts` + the (shared) agent change**.
+
+### B.7 New env / config
+
+| Var | Default | What |
+|---|---|---|
+| `SBX_FC_BIN` / `SBX_FC_JAILER_BIN` | `firecracker` / `jailer` | Paths to the Firecracker + jailer binaries |
+| `SBX_FC_KERNEL` | bundled `vmlinux` | Guest Linux kernel (uncompressed, per-arch) |
+| `SBX_FC_STATE_DIR` | `~/.sbx/fc` | Per-sandbox VM state (disks, sockets, snapshots) |
+| `SBX_FC_ROOTFS_CACHE` | `~/.sbx/fc/images` | Converted OCI→ext4 rootfs images, keyed by digest |
+| `SBX_FC_DEFAULT_DISK_GB` | `8` | Initial sparse size of a new `workspace.img` |

@@ -149,6 +149,12 @@ export interface Config {
    * not report one. Empty = built-in defaults only.
    */
   modelPricesPath: string;
+  /**
+   * Path to the signed `sbx-vz` Swift helper for the Apple VZ driver (`SBX_DRIVER=applevz`).
+   * Built by `npm run build:vz`. Defaults to its in-repo build output; set
+   * `SBX_VZ_HELPER_PATH` to a bundled/installed location. `SBX_DRIVER=container` ignores it.
+   */
+  vzHelperPath: string;
   /** Minimum level emitted by the structured logger. */
   logLevel: LogLevel;
   /** Log encoding: `json` (one JSON object per line) or `pretty` (human). */
@@ -235,6 +241,7 @@ export function loadConfig(): Config {
     costMemGbPerHour: Number(process.env.SBX_COST_MEM_GB_PER_HOUR ?? 0.005),
     costEgressPerGb: Number(process.env.SBX_COST_EGRESS_PER_GB ?? 0.01),
     modelPricesPath: process.env.SBX_MODEL_PRICES ?? "",
+    vzHelperPath: process.env.SBX_VZ_HELPER_PATH ?? "helpers/sbx-vz/dist/sbx-vz",
     logLevel: parseLogLevel(process.env.SBX_LOG_LEVEL),
     logFormat: process.env.SBX_LOG_FORMAT === "json" ? "json" : "pretty",
     apiKey: process.env.SBX_API_KEY ?? "",

@@ -25,7 +25,7 @@ export function createDriver(config: Config): Driver {
     case "firecracker":
       return new FirecrackerDriver();
     case "applevz":
-      return new AppleVzDriver();
+      return new AppleVzDriver(config.vzHelperPath);
     default:
       throw new Error(
         `unknown SBX_DRIVER "${config.driver}" (expected: ${DRIVER_NAMES.join(" | ")})`,

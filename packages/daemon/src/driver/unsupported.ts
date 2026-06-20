@@ -1,6 +1,7 @@
 import type {
   CreateOptions,
   Driver,
+  HostInfo,
   ProcessLiveness,
   SandboxStats,
   StartProcessResult,
@@ -93,7 +94,7 @@ export abstract class UnsupportedDriver implements Driver {
   async stats(): Promise<SandboxStats> {
     this.fail("stats");
   }
-  async hostInfo(): Promise<never> {
+  async hostInfo(): Promise<HostInfo> {
     this.fail("hostInfo");
   }
 }

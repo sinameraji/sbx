@@ -1,9 +1,13 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import { connect as netConnect, type Socket } from "node:net";
 import type { Config } from "../config.js";
 import { log } from "../logger.js";
+import { computeModelCost, type ModelPrices } from "../pricing.js";
 import type { SandboxStore } from "../store.js";
 import { startSpan } from "../tracing.js";
 import { BodyTooLargeError, readBodyCapped, sendJson, sendText } from "../util.js";
+import { Allowlist, loadAllowlist, normalizeHost } from "./allowlist.js";
+import { RateLimiter } from "./ratelimit.js";
 
 /**
  * Egress credential proxy — an LLM gateway, not a TLS-MITM forward proxy.
@@ -29,7 +33,23 @@ export interface ResolvedProvider {
   apiKey: string;
 }
 
-/** Built-in providers: base URL + auth header shape. Keyed by lower-case name. */
+/**
+ * Built-in providers: base URL + auth header shape, keyed by lower-case name.
+ * Providers with a fixed public base URL live here; ones whose base URL is
+ * deployment-specific (Azure OpenAI, a Cloudflare AI Gateway prefix, a self-hosted
+ * endpoint) are added by the operator as **custom providers** via
+ * `SBX_PROVIDER_<NAME>_BASEURL` / `_AUTHHEADER` / `_FORMAT` + `SBX_PROVIDER_KEY_<NAME>`.
+ *
+ * Cloudflare AI Gateway is just a base-URL prefix in front of a real provider, so
+ * it needs no special mechanism — point a custom provider's base URL at it and
+ * reuse the upstream's auth shape, e.g.:
+ *   SBX_PROVIDER_CFOPENAI_BASEURL=https://gateway.ai.cloudflare.com/v1/<acct>/<gw>/openai
+ *   SBX_PROVIDER_CFOPENAI_AUTHHEADER=authorization
+ *   SBX_PROVIDER_CFOPENAI_FORMAT="Bearer {key}"
+ *   SBX_PROVIDER_KEY_CFOPENAI=<the OpenAI key>
+ * The sandbox then calls `http://<egress>/cfopenai/...` and the gateway injects the
+ * key + meters the call, same as any built-in.
+ */
 const PROVIDER_DEFAULTS: Record<string, Omit<ResolvedProvider, "apiKey">> = {
   openai: {
     baseUrl: "https://api.openai.com",
@@ -46,14 +66,45 @@ const PROVIDER_DEFAULTS: Record<string, Omit<ResolvedProvider, "apiKey">> = {
     authHeader: "authorization",
     format: (k) => `Bearer ${k}`,
   },
+  google: {
+    baseUrl: "https://generativelanguage.googleapis.com",
+    authHeader: "x-goog-api-key",
+    format: (k) => k,
+  },
+  // Alias of `google` so either provider name works in the route + key env.
+  gemini: {
+    baseUrl: "https://generativelanguage.googleapis.com",
+    authHeader: "x-goog-api-key",
+    format: (k) => k,
+  },
 };
 
-/** Build the provider registry from configured keys (only keyed providers exist). */
+/**
+ * Build the provider registry from configured keys. A provider exists only when a
+ * key (`SBX_PROVIDER_KEY_<NAME>`) is set AND a shape is known — either a built-in
+ * default or an operator-supplied `providerConfigs` entry. Custom config fields
+ * override the built-in, so an operator can repoint a built-in (e.g. route
+ * `openai` through a Cloudflare AI Gateway prefix) without code.
+ */
 export function buildProviders(config: Config): Record<string, ResolvedProvider> {
   const providers: Record<string, ResolvedProvider> = {};
   for (const [name, apiKey] of Object.entries(config.providerKeys)) {
-    const def = PROVIDER_DEFAULTS[name];
-    if (def && apiKey) providers[name] = { ...def, apiKey };
+    if (!apiKey) continue;
+    const def: Omit<ResolvedProvider, "apiKey"> | undefined = PROVIDER_DEFAULTS[name];
+    const custom = config.providerConfigs[name];
+    const baseUrl = custom?.baseUrl ?? def?.baseUrl;
+    const authHeader = custom?.authHeader ?? def?.authHeader;
+    let format: ((k: string) => string) | undefined = def?.format;
+    if (custom?.formatTemplate) {
+      const tmpl = custom.formatTemplate;
+      format = (k) => tmpl.replace("{key}", k);
+    } else if (format === undefined && custom) {
+      // Custom provider without a format template → send the raw key.
+      format = (k) => k;
+    }
+    if (baseUrl && authHeader && format !== undefined) {
+      providers[name] = { baseUrl, authHeader, format, apiKey };
+    }
   }
   return providers;
 }
@@ -62,14 +113,69 @@ interface Deps {
   config: Config;
   store: SandboxStore;
   providers: Record<string, ResolvedProvider>;
+  /** Model→price table for computing cost when a provider doesn't report one. */
+  prices?: ModelPrices;
+  /** Shared per-token rate limiter (created here if not supplied). */
+  limiter?: RateLimiter;
+  /** Forward-proxy domain allowlist (loaded from config here if not supplied). */
+  allowlist?: Allowlist;
+}
+
+/** Resolved deps with the always-present pieces filled in. */
+interface ResolvedDeps extends Deps {
+  limiter: RateLimiter;
+  allowlist: Allowlist;
+  /** Hostnames of known LLM providers — denied on the forward/CONNECT path. */
+  providerHosts: Set<string>;
 }
 
 export function createEgressProxy(deps: Deps): Server {
-  return createServer((req, res) => {
-    handle(req, res, deps).catch((err) => {
+  const resolved: ResolvedDeps = {
+    ...deps,
+    limiter: deps.limiter ?? new RateLimiter(),
+    allowlist: deps.allowlist ?? loadAllowlist(deps.config),
+    providerHosts: computeProviderHosts(deps.providers),
+  };
+  const server = createServer((req, res) => {
+    handle(req, res, resolved).catch((err) => {
       sendText(res, 500, `egress proxy error: ${String(err?.message ?? err)}`);
     });
   });
+  // HTTPS forward-proxy: clients (pip/npm/git via HTTPS_PROXY) open a CONNECT
+  // tunnel, which Node surfaces as the `connect` event rather than a request.
+  server.on("connect", (req, socket, head) => {
+    handleConnect(req, socket as Socket, head, resolved).catch(() => {
+      try {
+        socket.write("HTTP/1.1 502 Bad Gateway\r\n\r\n");
+      } catch {
+        /* socket already gone */
+      }
+      socket.destroy();
+    });
+  });
+  return server;
+}
+
+/**
+ * Hostnames of every known LLM provider — both configured and the built-in
+ * defaults — so the forward/CONNECT path can DENY a direct tunnel to them. LLM
+ * traffic must go through the base-URL-rewrite path (where the real key is
+ * injected and the call metered); a direct tunnel would bypass both. The sandbox
+ * holds no real provider key, so a tunnel is useless to it — we deny+log to make
+ * any bypass attempt visible.
+ */
+function computeProviderHosts(providers: Record<string, ResolvedProvider>): Set<string> {
+  const hosts = new Set<string>();
+  const add = (baseUrl: string) => {
+    try {
+      hosts.add(new URL(baseUrl).hostname.toLowerCase());
+    } catch {
+      /* ignore malformed */
+    }
+  };
+  for (const def of Object.values(PROVIDER_DEFAULTS)) add(def.baseUrl);
+  for (const p of Object.values(providers)) add(p.baseUrl);
+  return hosts;
 }
 
 const HOP_REQUEST = new Set([
@@ -88,8 +194,16 @@ const HOP_RESPONSE = new Set([
 ]);
 const USAGE_PARSE_CAP = 256 * 1024;
 
-async function handle(req: IncomingMessage, res: ServerResponse, deps: Deps): Promise<void> {
+async function handle(req: IncomingMessage, res: ServerResponse, deps: ResolvedDeps): Promise<void> {
   const { store, providers } = deps;
+
+  // Forward-proxy (plaintext HTTP via HTTP_PROXY): the request target is an
+  // absolute URL (`GET http://host/path`) rather than an origin-form path. This is
+  // the non-LLM allowlist path — no key injection.
+  if (req.url && /^https?:\/\//i.test(req.url)) {
+    return handleForwardHttp(req, res, deps);
+  }
+
   const url = new URL(req.url ?? "/", "http://egress.local");
 
   if (url.pathname === "/healthz") {
@@ -104,11 +218,62 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: Deps): Pr
 
   const token = extractToken(req);
   if (!token) return sendText(res, 401, "missing egress token");
-  const sandboxId = store.resolveEgressToken(token);
-  if (!sandboxId) return sendText(res, 403, "invalid egress token");
+  const record = store.resolveEgressTokenFull(token);
+  if (!record) return sendText(res, 403, "invalid egress token");
+  const sandboxId = record.sandboxId;
+  const policy = record.policy;
 
   const provider = providers[providerName];
   if (!provider) return sendText(res, 404, `unknown provider: ${providerName}`);
+
+  const now = Date.now();
+
+  // --- policy enforcement (cheapest, most-decisive checks first) -----------
+  if (policy.expiresAt && now > Date.parse(policy.expiresAt)) {
+    return sendText(res, 403, "egress token expired");
+  }
+  if (policy.providers && !policy.providers.includes(providerName)) {
+    return sendText(res, 403, `provider not in token scope: ${providerName}`);
+  }
+  if (policy.spendCapUsd !== undefined && record.spendUsd >= policy.spendCapUsd) {
+    return sendText(res, 402, "egress spend cap exceeded");
+  }
+
+  const method = req.method ?? "GET";
+  let reqBody: Buffer | undefined;
+  try {
+    reqBody =
+      method === "GET" || method === "HEAD"
+        ? undefined
+        : await readBodyCapped(req, deps.config.maxBodyBytes);
+  } catch (err) {
+    if (err instanceof BodyTooLargeError) return sendText(res, 413, "request body too large");
+    throw err;
+  }
+
+  // Model allowlist: parse the request's `model` and gate it. A request with no
+  // model field (e.g. embeddings without one) is allowed even when `models` is
+  // set, so non-chat routes aren't broken — only an explicit, disallowed model
+  // is rejected.
+  const reqModel = reqBody ? parseModel(reqBody) : undefined;
+  if (policy.models && reqModel && !matchModel(policy.models, reqModel)) {
+    return sendText(res, 403, `model not allowed: ${reqModel}`);
+  }
+
+  // Rate limit: check the token budget (read-only) before consuming a call slot,
+  // so a token-exhausted call doesn't burn the call budget too.
+  if (policy.rateLimit) {
+    const tok = deps.limiter!.checkTokens(token, policy.rateLimit, now);
+    if (!tok.ok) {
+      res.setHeader("retry-after", Math.ceil(tok.retryAfterMs / 1000));
+      return sendText(res, 429, "egress rate limit (tokens) exceeded");
+    }
+    const call = deps.limiter!.allow(token, policy.rateLimit, now);
+    if (!call.ok) {
+      res.setHeader("retry-after", Math.ceil(call.retryAfterMs / 1000));
+      return sendText(res, 429, "egress rate limit (calls) exceeded");
+    }
+  }
 
   store.touch(sandboxId);
   const span = startSpan("egress.provider_call", {
@@ -124,17 +289,6 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: Deps): Pr
   }
   headers.set(provider.authHeader, provider.format(provider.apiKey));
 
-  const method = req.method ?? "GET";
-  let reqBody: Buffer | undefined;
-  try {
-    reqBody =
-      method === "GET" || method === "HEAD"
-        ? undefined
-        : await readBodyCapped(req, deps.config.maxBodyBytes);
-  } catch (err) {
-    if (err instanceof BodyTooLargeError) return sendText(res, 413, "request body too large");
-    throw err;
-  }
   let bytes = reqBody?.length ?? 0;
 
   let upstream: Response;
@@ -176,24 +330,57 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: Deps): Pr
   }
   res.end();
 
-  const { tokensIn, tokensOut, cost } = parseUsage(Buffer.concat(tail));
+  const { tokensIn, tokensOut, cost: reportedCost, model: respModel } = parseUsage(Buffer.concat(tail));
+  // Cost: the provider's own figure is authoritative (OpenRouter inlines
+  // `usage.cost`); otherwise compute it from the model price table. Never sum the
+  // two — the result is folded into `providerCost`, keeping one source of truth.
+  const model = respModel ?? reqModel;
+  const cost =
+    reportedCost > 0 ? reportedCost : computeModelCost(model, tokensIn, tokensOut, deps.prices ?? {});
+
   store.addProviderUsage(sandboxId, { bytes, tokensIn, tokensOut, cost });
+  if (cost > 0) store.addEgressTokenSpend(token, cost);
+  if (policy.rateLimit) deps.limiter!.note(token, policy.rateLimit, tokensIn + tokensOut, now);
   span
     .setAttribute("http.status_code", upstream.status)
     .setAttribute("egress.tokens_in", tokensIn)
     .setAttribute("egress.tokens_out", tokensOut)
     .setAttribute("egress.cost", cost);
+  if (model) span.setAttribute("egress.model", model);
   if (upstream.status >= 500) span.setStatus("error");
   span.end();
   log.info("egress call", {
     sandbox: sandboxId,
     provider: providerName,
     status: upstream.status,
+    model,
     bytes,
     tokensIn,
     tokensOut,
     cost,
     traceId: span.traceId,
+  });
+}
+
+/** Parse the `model` field from a JSON request body (best-effort). */
+function parseModel(body: Buffer): string | undefined {
+  try {
+    const o = JSON.parse(body.toString("utf8"));
+    return typeof o?.model === "string" ? o.model : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Match a model id against an allowlist. An entry ending in `*` is a prefix glob
+ * (`gpt-4*` matches `gpt-4o`); otherwise it's an exact, case-insensitive match.
+ */
+function matchModel(patterns: string[], model: string): boolean {
+  const m = model.toLowerCase();
+  return patterns.some((p) => {
+    const pat = p.toLowerCase();
+    return pat.endsWith("*") ? m.startsWith(pat.slice(0, -1)) : m === pat;
   });
 }
 
@@ -206,29 +393,235 @@ function extractToken(req: IncomingMessage): string | undefined {
   return undefined;
 }
 
+/**
+ * Pull the egress token from a forward-proxy request: `Proxy-Authorization`
+ * (`Bearer <token>` or `Basic base64(<token>:)` — what `HTTPS_PROXY=http://<token>@host`
+ * sends) or the `X-Sbx-Egress` header.
+ */
+function extractProxyToken(req: IncomingMessage): string | undefined {
+  const pa = req.headers["proxy-authorization"];
+  if (typeof pa === "string") {
+    if (pa.startsWith("Bearer ")) return pa.slice(7);
+    if (pa.startsWith("Basic ")) {
+      const decoded = Buffer.from(pa.slice(6), "base64").toString("utf8");
+      const user = decoded.split(":")[0];
+      if (user) return user;
+    }
+  }
+  const direct = req.headers["x-sbx-egress"];
+  if (typeof direct === "string" && direct) return direct;
+  return undefined;
+}
+
+/** Split a CONNECT authority (`host:port`, `[v6]:port`) into host + port. */
+function parseAuthority(s: string): { host: string; port: number } {
+  if (s.startsWith("[")) {
+    const end = s.indexOf("]");
+    const host = s.slice(1, end);
+    const port = Number(s.slice(end + 2)) || 443;
+    return { host, port };
+  }
+  const i = s.lastIndexOf(":");
+  if (i === -1) return { host: s, port: 443 };
+  return { host: s.slice(0, i), port: Number(s.slice(i + 1)) || 443 };
+}
+
+/**
+ * Plaintext-HTTP forward-proxy path (apt/pip over http://, via `HTTP_PROXY`):
+ * resolve the token, deny LLM-provider hosts (those go through the gateway path)
+ * and any host not on the allowlist, then forward + meter bytes. No key injection.
+ */
+async function handleForwardHttp(
+  req: IncomingMessage,
+  res: ServerResponse,
+  deps: ResolvedDeps,
+): Promise<void> {
+  let target: URL;
+  try {
+    target = new URL(req.url!);
+  } catch {
+    return sendText(res, 400, "bad forward-proxy target");
+  }
+  const host = normalizeHost(target.host);
+
+  const token = extractProxyToken(req);
+  const rec = token ? deps.store.resolveEgressTokenFull(token) : undefined;
+  if (!rec) {
+    res.setHeader("proxy-authenticate", 'Basic realm="sbx-egress"');
+    return sendText(res, 407, "proxy authentication required");
+  }
+  if (deps.providerHosts.has(host)) {
+    log.warn("egress forward denied: LLM provider host", { sandbox: rec.sandboxId, host });
+    return sendText(res, 403, `direct egress to LLM provider blocked: ${host} — use the gateway path`);
+  }
+  const decision = deps.allowlist.check(host);
+  if (!decision.allow) {
+    log.warn("egress forward denied", { sandbox: rec.sandboxId, host, reason: decision.reason });
+    return sendText(res, 403, `egress to ${host} denied (${decision.reason})`);
+  }
+
+  const method = req.method ?? "GET";
+  let reqBody: Buffer | undefined;
+  try {
+    reqBody =
+      method === "GET" || method === "HEAD"
+        ? undefined
+        : await readBodyCapped(req, deps.config.maxBodyBytes);
+  } catch (err) {
+    if (err instanceof BodyTooLargeError) return sendText(res, 413, "request body too large");
+    throw err;
+  }
+  const headers = new Headers();
+  for (const [k, v] of Object.entries(req.headers)) {
+    const lk = k.toLowerCase();
+    if (
+      v == null ||
+      lk === "proxy-authorization" ||
+      lk === "proxy-connection" ||
+      lk === "x-sbx-egress" ||
+      HOP_REQUEST.has(lk)
+    ) {
+      continue;
+    }
+    headers.set(k, Array.isArray(v) ? v.join(", ") : v);
+  }
+
+  let bytes = reqBody?.length ?? 0;
+  let upstream: Response;
+  try {
+    upstream = await fetch(target, { method, headers, body: reqBody, redirect: "manual" });
+  } catch (err) {
+    return sendText(res, 502, `forward fetch failed: ${String(err)}`);
+  }
+  const respHeaders: Record<string, string> = {};
+  upstream.headers.forEach((value, key) => {
+    if (!HOP_RESPONSE.has(key.toLowerCase())) respHeaders[key] = value;
+  });
+  res.writeHead(upstream.status, respHeaders);
+  if (upstream.body) {
+    const reader = upstream.body.getReader();
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const buf = Buffer.from(value);
+      res.write(buf);
+      bytes += buf.length;
+    }
+  }
+  res.end();
+  deps.store.addEgress(rec.sandboxId, bytes);
+  log.info("egress forward", { sandbox: rec.sandboxId, host, status: upstream.status, bytes });
+}
+
+/**
+ * HTTPS forward-proxy path (`CONNECT host:443`, via `HTTPS_PROXY`): resolve the
+ * token, deny LLM-provider hosts + non-allowlisted hosts (by SNI/authority — the
+ * TLS body stays opaque, no MITM), then open a raw TCP tunnel and meter the bytes
+ * both ways. This is the main path for pip/npm/git, which use HTTPS.
+ */
+async function handleConnect(
+  req: IncomingMessage,
+  clientSocket: Socket,
+  head: Buffer,
+  deps: ResolvedDeps,
+): Promise<void> {
+  const { host, port } = parseAuthority(req.url ?? "");
+  const nhost = normalizeHost(host);
+
+  const token = extractProxyToken(req);
+  const rec = token ? deps.store.resolveEgressTokenFull(token) : undefined;
+  if (!rec) {
+    clientSocket.write(
+      'HTTP/1.1 407 Proxy Authentication Required\r\nProxy-Authenticate: Basic realm="sbx-egress"\r\n\r\n',
+    );
+    clientSocket.destroy();
+    return;
+  }
+  // Provider-domain guard MUST precede the allowlist: a wide allowlist entry must
+  // never re-open a key-bypass tunnel to an LLM provider.
+  if (deps.providerHosts.has(nhost)) {
+    log.warn("egress CONNECT denied: LLM provider host", { sandbox: rec.sandboxId, host: nhost });
+    clientSocket.write("HTTP/1.1 403 Forbidden\r\n\r\n");
+    clientSocket.destroy();
+    return;
+  }
+  const decision = deps.allowlist.check(nhost);
+  if (!decision.allow) {
+    log.warn("egress CONNECT denied", { sandbox: rec.sandboxId, host: nhost, reason: decision.reason });
+    clientSocket.write("HTTP/1.1 403 Forbidden\r\n\r\n");
+    clientSocket.destroy();
+    return;
+  }
+
+  const upstream = netConnect(port, host);
+  let bytes = head?.length ?? 0;
+  let metered = false;
+  const finish = () => {
+    if (metered) return;
+    metered = true;
+    deps.store.addEgress(rec.sandboxId, bytes);
+  };
+  const teardown = () => {
+    finish();
+    upstream.destroy();
+    clientSocket.destroy();
+  };
+  upstream.on("connect", () => {
+    clientSocket.write("HTTP/1.1 200 Connection Established\r\n\r\n");
+    if (head && head.length) upstream.write(head);
+    clientSocket.on("data", (c: Buffer) => (bytes += c.length));
+    upstream.on("data", (c: Buffer) => (bytes += c.length));
+    clientSocket.pipe(upstream);
+    upstream.pipe(clientSocket);
+    log.info("egress CONNECT", { sandbox: rec.sandboxId, host: nhost, port });
+  });
+  upstream.on("error", () => {
+    if (!metered) {
+      try {
+        clientSocket.write("HTTP/1.1 502 Bad Gateway\r\n\r\n");
+      } catch {
+        /* client gone */
+      }
+    }
+    teardown();
+  });
+  upstream.on("close", teardown);
+  clientSocket.on("error", teardown);
+  clientSocket.on("close", teardown);
+}
+
 interface ParsedUsage {
   tokensIn: number;
   tokensOut: number;
   /** Provider-reported cost in USD (OpenRouter `usage.cost`); 0 if not reported. */
   cost: number;
+  /** Model echoed by the provider (preferred for pricing); undefined if absent. */
+  model?: string;
 }
 
 /**
  * Best-effort usage accounting from the provider's response. Reads the `usage`
  * object — token counts (OpenAI `prompt_tokens`/`completion_tokens` or Anthropic
- * `input_tokens`/`output_tokens`) and the **authoritative USD cost** OpenRouter
- * reports as `usage.cost` — from a JSON body or the last SSE `data:` frame.
+ * `input_tokens`/`output_tokens`), the **authoritative USD cost** OpenRouter
+ * reports as `usage.cost`, and the resolved `model` — from a JSON body or the last
+ * SSE `data:` frame.
  */
 function parseUsage(buf: Buffer): ParsedUsage {
   const text = buf.toString("utf8");
   const fromObj = (o: any): ParsedUsage | null => {
     const u = o?.usage;
+    const model = typeof o?.model === "string" ? o.model : undefined;
     if (!u) return null;
     const inn = u.prompt_tokens ?? u.input_tokens;
     const out = u.completion_tokens ?? u.output_tokens;
     const cost = u.cost; // OpenRouter: real USD cost, inline in every response
     if (inn == null && out == null && cost == null) return null;
-    return { tokensIn: Number(inn || 0), tokensOut: Number(out || 0), cost: Number(cost || 0) };
+    return {
+      tokensIn: Number(inn || 0),
+      tokensOut: Number(out || 0),
+      cost: Number(cost || 0),
+      model,
+    };
   };
   try {
     const whole = fromObj(JSON.parse(text));
@@ -236,19 +629,25 @@ function parseUsage(buf: Buffer): ParsedUsage {
   } catch {
     // not a single JSON object; fall through to SSE scan
   }
+  // SSE: the usage frame and the model often arrive in different frames, so keep
+  // the last seen of each independently.
   let best: ParsedUsage | null = null;
+  let lastModel: string | undefined;
   for (const line of text.split(/\r?\n/)) {
     const t = line.trim();
     if (!t.startsWith("data:")) continue;
     const payload = t.slice(5).trim();
     if (!payload || payload === "[DONE]") continue;
     try {
-      const r = fromObj(JSON.parse(payload));
+      const o = JSON.parse(payload);
+      if (typeof o?.model === "string") lastModel = o.model;
+      const r = fromObj(o);
       if (r) best = r;
     } catch {
       // skip non-JSON frames
     }
   }
-  return best ?? { tokensIn: 0, tokensOut: 0, cost: 0 };
+  if (best) return { ...best, model: best.model ?? lastModel };
+  return { tokensIn: 0, tokensOut: 0, cost: 0, model: lastModel };
 }
 

@@ -1,4 +1,5 @@
 import Docker from "dockerode";
+import { gatewayOf } from "../net/firewall.js";
 import { createReadStream, createWriteStream } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
@@ -42,13 +43,25 @@ import { log } from "../logger.js";
  * — the same model Docker exec gives us for free in Phase 0, standing in for the
  * dedicated in-sandbox agent that the microVM drivers will need.
  */
+/** Egress-enforcement network settings, passed in from config by the driver factory. */
+export interface EgressNetConfig {
+  enforce: boolean;
+  network: string;
+  subnet: string;
+  /** Pinned DNS resolver IP, or "" for Docker's embedded resolver. */
+  dns: string;
+}
+
 export class ContainerDriver implements Driver {
   readonly name = "container";
   private docker: Docker;
   private ensured = new Set<string>();
+  private egress?: EgressNetConfig;
+  private egressNetReady = false;
 
-  constructor(docker?: Docker) {
+  constructor(docker?: Docker, egress?: EgressNetConfig) {
     this.docker = docker ?? new Docker();
+    this.egress = egress;
   }
 
   private containerName(id: string): string {
@@ -70,6 +83,29 @@ export class ContainerDriver implements Driver {
       memoryMb: Math.floor((info.MemTotal ?? 0) / (1024 * 1024)),
       cpus: info.NCPU ?? 0,
     };
+  }
+
+  /**
+   * Create the egress-enforcement bridge network if missing (idempotent). Uses the
+   * configured subnet so the host firewall's `-s <subnet>` rules match, with the
+   * gateway pinned to `.1`. Safe to call repeatedly; a 409 (already exists) is fine.
+   */
+  private async ensureEgressNetwork(): Promise<void> {
+    if (!this.egress || this.egressNetReady) return;
+    const { network, subnet } = this.egress;
+    const gateway = gatewayOf(subnet);
+    try {
+      await this.docker.createNetwork({
+        Name: network,
+        Driver: "bridge",
+        CheckDuplicate: true,
+        IPAM: { Driver: "default", Config: [{ Subnet: subnet, Gateway: gateway }] },
+        Labels: { "sbx.managed": "true" },
+      });
+    } catch (err) {
+      if (!isConflict(err)) throw err; // 409 = already exists
+    }
+    this.egressNetReady = true;
   }
 
   /** Create the workspace volume if it does not already exist (idempotent). */
@@ -170,6 +206,10 @@ export class ContainerDriver implements Driver {
     await this.ensureImage(opts.image);
     const persist = opts.persist ?? true;
     if (persist) await this.ensureVolume(opts.id);
+    // Under egress enforcement, put the sandbox on the dedicated bridge network
+    // (whose egress is locked down by the host firewall) and pin its DNS resolver.
+    const enforced = this.egress?.enforce === true;
+    if (enforced) await this.ensureEgressNetwork();
     const env = Object.entries(opts.env ?? {}).map(([k, v]) => `${k}=${v}`);
     const container = await this.docker.createContainer({
       name: this.containerName(opts.id),
@@ -184,6 +224,12 @@ export class ContainerDriver implements Driver {
         AutoRemove: false,
         // Back /workspace with the named volume so it outlives the container.
         ...(persist ? { Binds: [`${this.volumeName(opts.id)}:/workspace`] } : {}),
+        // Join the locked-down egress network when enforcement is on; otherwise the
+        // default bridge.
+        ...(enforced ? { NetworkMode: this.egress!.network } : {}),
+        // Pin DNS to a controlled resolver under enforcement (blocks DNS exfil; DoH
+        // is separately denied by the allowlist). Empty = Docker's embedded resolver.
+        ...(enforced && this.egress!.dns ? { Dns: [this.egress!.dns] } : {}),
         // Make `host.docker.internal` resolve to the daemon host from inside the
         // sandbox so the egress LLM gateway is reachable. Docker Desktop (macOS)
         // injects this name automatically; native Linux dockerd does not, so we

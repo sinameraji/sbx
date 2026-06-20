@@ -4,6 +4,8 @@ import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type {
   CodeContextInfo,
+  EgressPolicy,
+  EgressTokenRecord,
   ExposedPort,
   ProcessInfo,
   SandboxRecord,
@@ -70,8 +72,8 @@ export class SandboxStore {
   private sessions = new Map<string, Map<string, SessionInfo>>();
   // sandboxId -> contextId -> code context
   private contexts = new Map<string, Map<string, CodeContextInfo>>();
-  // egress token -> sandboxId (O(1) lookup for the egress proxy)
-  private egressTokens = new Map<string, string>();
+  // egress token -> record (sandboxId + policy + spend; O(1) lookup for the egress proxy)
+  private egressTokens = new Map<string, EgressTokenRecord>();
 
   constructor(dbPath = ":memory:") {
     if (dbPath !== ":memory:") mkdirSync(dirname(dbPath), { recursive: true });
@@ -143,7 +145,9 @@ export class SandboxStore {
       CREATE TABLE IF NOT EXISTS egress_tokens (
         token     TEXT PRIMARY KEY,
         sandboxId TEXT NOT NULL,
-        createdAt TEXT NOT NULL
+        createdAt TEXT NOT NULL,
+        policy    TEXT NOT NULL DEFAULT '{}',
+        spendUsd  REAL NOT NULL DEFAULT 0
       );
     `);
     // Backfill columns added after the first release on databases created by an
@@ -152,6 +156,8 @@ export class SandboxStore {
     this.ensureColumn("sandboxes", "sleepAfterMs", "INTEGER NOT NULL DEFAULT 0");
     this.ensureColumn("sandboxes", "usage", "TEXT NOT NULL DEFAULT '{}'");
     this.ensureColumn("sandboxes", "limits", "TEXT NOT NULL DEFAULT '{}'");
+    this.ensureColumn("egress_tokens", "policy", "TEXT NOT NULL DEFAULT '{}'");
+    this.ensureColumn("egress_tokens", "spendUsd", "REAL NOT NULL DEFAULT 0");
   }
 
   /** Add a column to a table if it isn't already present (idempotent migration). */
@@ -186,7 +192,7 @@ export class SandboxStore {
       mapIn(this.contexts, row.sandboxId).set(row.contextId, rowToContext(row));
     }
     for (const row of this.db.prepare("SELECT * FROM egress_tokens").all() as any[]) {
-      this.egressTokens.set(row.token, row.sandboxId);
+      this.egressTokens.set(row.token, rowToEgressToken(row));
     }
   }
 
@@ -292,26 +298,46 @@ export class SandboxStore {
 
   // --- egress tokens -------------------------------------------------------
 
-  /** Bind an egress token to a sandbox (write-through). */
-  addEgressToken(token: string, sandboxId: string): void {
-    this.egressTokens.set(token, sandboxId);
+  /** Bind an egress token to a sandbox with an optional policy (write-through). */
+  addEgressToken(token: string, sandboxId: string, policy: EgressPolicy = {}): void {
+    const record: EgressTokenRecord = {
+      token,
+      sandboxId,
+      policy,
+      createdAt: new Date().toISOString(),
+      spendUsd: 0,
+    };
+    this.egressTokens.set(token, record);
     this.db
       .prepare(
-        "INSERT OR REPLACE INTO egress_tokens (token, sandboxId, createdAt) VALUES (?, ?, ?)",
+        "INSERT OR REPLACE INTO egress_tokens (token, sandboxId, createdAt, policy, spendUsd) VALUES (?, ?, ?, ?, ?)",
       )
-      .run(token, sandboxId, new Date().toISOString());
+      .run(token, sandboxId, record.createdAt, JSON.stringify(policy), 0);
   }
 
-  /** Resolve an egress token to its sandbox id (O(1), used per provider call). */
+  /** Resolve an egress token to its sandbox id (O(1)). Back-compat shorthand. */
   resolveEgressToken(token: string): string | undefined {
+    return this.egressTokens.get(token)?.sandboxId;
+  }
+
+  /** Resolve an egress token to its full record (sandbox + policy + spend). */
+  resolveEgressTokenFull(token: string): EgressTokenRecord | undefined {
     return this.egressTokens.get(token);
   }
 
-  /** List the egress tokens minted for a sandbox. */
-  listEgressTokens(sandboxId: string): string[] {
-    return [...this.egressTokens.entries()]
-      .filter(([, sid]) => sid === sandboxId)
-      .map(([token]) => token);
+  /** Add to a token's cumulative spend (write-through). Drives the spend cap. */
+  addEgressTokenSpend(token: string, usd: number): void {
+    const rec = this.egressTokens.get(token);
+    if (!rec || !(usd > 0)) return;
+    rec.spendUsd += usd;
+    this.db
+      .prepare("UPDATE egress_tokens SET spendUsd = ? WHERE token = ?")
+      .run(rec.spendUsd, token);
+  }
+
+  /** List the egress token records minted for a sandbox. */
+  listEgressTokens(sandboxId: string): EgressTokenRecord[] {
+    return [...this.egressTokens.values()].filter((r) => r.sandboxId === sandboxId);
   }
 
   /** Revoke a single egress token. Returns whether it existed. */
@@ -520,7 +546,7 @@ export class SandboxStore {
     this.clearRuntimeState(sandboxId);
     this.sessions.delete(sandboxId);
     this.db.prepare("DELETE FROM sessions WHERE sandboxId = ?").run(sandboxId);
-    for (const token of this.listEgressTokens(sandboxId)) this.egressTokens.delete(token);
+    for (const rec of this.listEgressTokens(sandboxId)) this.egressTokens.delete(rec.token);
     this.db.prepare("DELETE FROM egress_tokens WHERE sandboxId = ?").run(sandboxId);
   }
 
@@ -582,6 +608,16 @@ function parseJsonObject(raw: unknown): any {
   } catch {
     return {};
   }
+}
+
+function rowToEgressToken(row: any): EgressTokenRecord {
+  return {
+    token: row.token,
+    sandboxId: row.sandboxId,
+    policy: parseJsonObject(row.policy) as EgressPolicy,
+    createdAt: row.createdAt,
+    spendUsd: typeof row.spendUsd === "number" ? row.spendUsd : 0,
+  };
 }
 
 function rowToProcess(row: any): ProcessInfo {

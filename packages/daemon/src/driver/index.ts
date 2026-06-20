@@ -16,7 +16,12 @@ export const DRIVER_NAMES = ["container", "firecracker", "applevz"] as const;
 export function createDriver(config: Config): Driver {
   switch (config.driver) {
     case "container":
-      return new ContainerDriver();
+      return new ContainerDriver(undefined, {
+        enforce: config.egressEnforce,
+        network: config.egressNetwork,
+        subnet: config.egressSubnet,
+        dns: config.egressDnsResolver,
+      });
     case "firecracker":
       return new FirecrackerDriver();
     case "applevz":

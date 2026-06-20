@@ -58,6 +58,41 @@ export interface Config {
   /** Port for the egress credential proxy. `0` disables it. */
   egressPort: number;
   /**
+   * Enforce default-deny egress: put sandboxes on a dedicated bridge network and
+   * (Linux only) install host `DOCKER-USER` iptables rules so the ONLY reachable
+   * destinations are the egress gateway + the pinned DNS resolver — everything else
+   * is dropped. Off by default (the gateway is then the "safe path available", not
+   * the "only path"). `SBX_EGRESS_ENFORCE`. Advisory-only on macOS Docker Desktop.
+   */
+  egressEnforce: boolean;
+  /** Docker network name sandboxes join when egress is enforced. `SBX_EGRESS_NETWORK`. */
+  egressNetwork: string;
+  /**
+   * IPv4 subnet (CIDR) for the egress-enforced bridge network. The host firewall
+   * scopes its allow/deny rules to this subnet, and the bridge gateway (`.1`) is the
+   * sandbox's route to the egress gateway. `/24` assumed. `SBX_EGRESS_SUBNET`.
+   */
+  egressSubnet: string;
+  /**
+   * DNS resolver IP pinned into sandboxes under egress enforcement (so DNS can't be
+   * used as an exfil channel and DoH is the only blocked path). Empty = Docker's
+   * embedded resolver. `SBX_EGRESS_DNS`.
+   */
+  egressDnsResolver: string;
+  /**
+   * Path to a JSON `{ allow, deny }` allowlist that fully REPLACES the built-in
+   * default (forward-proxy host allowlist). `SBX_ALLOWLIST_FILE`. Empty = defaults.
+   */
+  allowlistFile: string;
+  /** Extra hosts appended to the allowlist (`SBX_ALLOWLIST_EXTRA`, comma-separated). */
+  allowlistExtra: string[];
+  /**
+   * Include the `source_control` allowlist tier (github/gitlab/bitbucket). On by
+   * default so `git clone` works; set `SBX_ALLOW_SOURCE_CONTROL=false` for
+   * high-security workloads (a writable git host is also an exfil channel).
+   */
+  allowSourceControl: boolean;
+  /**
    * Hostname advertised in egress base URLs returned to clients. Sandboxes reach
    * the daemon host through this name, so on Docker Desktop it defaults to
    * `host.docker.internal`. Set to a LAN IP/DNS name for remote sandboxes.
@@ -70,6 +105,14 @@ export interface Config {
    * when its key is present here. Sourced from `SBX_PROVIDER_KEY_<NAME>` env vars.
    */
   providerKeys: Record<string, string>;
+  /**
+   * Operator-defined / override provider shapes, keyed by lower-case provider
+   * name. Lets an operator add a provider the daemon doesn't ship (or repoint a
+   * built-in — e.g. route `openai` through a Cloudflare AI Gateway prefix) without
+   * a code change. Sourced from `SBX_PROVIDER_<NAME>_BASEURL` / `_AUTHHEADER` /
+   * `_FORMAT`. A route still requires a key (`SBX_PROVIDER_KEY_<NAME>`).
+   */
+  providerConfigs: Record<string, ProviderConfig>;
   /** Host directory where sandbox backup tarballs + metadata are stored. */
   backupDir: string;
   /**
@@ -94,6 +137,12 @@ export interface Config {
   costMemGbPerHour: number;
   /** Cost-meter rate: currency units per GB of preview-proxy egress. */
   costEgressPerGb: number;
+  /**
+   * Path to a JSON model→price override file (`SBX_MODEL_PRICES`), overlaid on the
+   * built-in table. Used to compute an LLM call's USD cost when the provider does
+   * not report one. Empty = built-in defaults only.
+   */
+  modelPricesPath: string;
   /** Minimum level emitted by the structured logger. */
   logLevel: LogLevel;
   /** Log encoding: `json` (one JSON object per line) or `pretty` (human). */
@@ -130,6 +179,15 @@ export interface Config {
 export type LogLevel = "debug" | "info" | "warn" | "error";
 export type LogFormat = "json" | "pretty";
 
+/** Operator-supplied provider shape (base URL + auth header + key-format template). */
+export interface ProviderConfig {
+  baseUrl?: string;
+  /** Header the provider authenticates with (e.g. `authorization`, `x-api-key`). */
+  authHeader?: string;
+  /** Auth-header value template; `{key}` is replaced with the real key (e.g. `Bearer {key}`). */
+  formatTemplate?: string;
+}
+
 export function loadConfig(): Config {
   return {
     host: process.env.SBX_HOST ?? "127.0.0.1",
@@ -149,7 +207,18 @@ export function loadConfig(): Config {
     egressHost: process.env.SBX_EGRESS_HOST ?? "127.0.0.1",
     egressPort: Number(process.env.SBX_EGRESS_PORT ?? 4752),
     egressAdvertiseHost: process.env.SBX_EGRESS_ADVERTISE_HOST ?? "host.docker.internal",
+    egressEnforce: process.env.SBX_EGRESS_ENFORCE === "true",
+    egressNetwork: process.env.SBX_EGRESS_NETWORK ?? "sbx-egress",
+    egressSubnet: process.env.SBX_EGRESS_SUBNET ?? "10.200.0.0/24",
+    egressDnsResolver: process.env.SBX_EGRESS_DNS ?? "",
+    allowlistFile: process.env.SBX_ALLOWLIST_FILE ?? "",
+    allowlistExtra: (process.env.SBX_ALLOWLIST_EXTRA ?? "")
+      .split(",")
+      .map((h) => h.trim())
+      .filter(Boolean),
+    allowSourceControl: process.env.SBX_ALLOW_SOURCE_CONTROL !== "false",
     providerKeys: loadProviderKeys(),
+    providerConfigs: loadProviderConfigs(),
     backupDir: process.env.SBX_BACKUP_DIR ?? join(homedir(), ".sbx", "backups"),
     dbPath: process.env.SBX_DB ?? join(homedir(), ".sbx", "state.db"),
     defaultSleepAfterMs: Number(process.env.SBX_SLEEP_AFTER_MS ?? 0),
@@ -158,6 +227,7 @@ export function loadConfig(): Config {
     costCpuPerHour: Number(process.env.SBX_COST_CPU_PER_HOUR ?? 0.05),
     costMemGbPerHour: Number(process.env.SBX_COST_MEM_GB_PER_HOUR ?? 0.005),
     costEgressPerGb: Number(process.env.SBX_COST_EGRESS_PER_GB ?? 0.01),
+    modelPricesPath: process.env.SBX_MODEL_PRICES ?? "",
     logLevel: parseLogLevel(process.env.SBX_LOG_LEVEL),
     logFormat: process.env.SBX_LOG_FORMAT === "json" ? "json" : "pretty",
     apiKey: process.env.SBX_API_KEY ?? "",
@@ -182,6 +252,32 @@ function loadProviderKeys(): Record<string, string> {
     }
   }
   return keys;
+}
+
+/**
+ * Collect operator-defined provider shapes from `SBX_PROVIDER_<NAME>_<FIELD>` env
+ * vars (FIELD ∈ BASEURL/AUTHHEADER/FORMAT), skipping the `SBX_PROVIDER_KEY_*`
+ * namespace. The provider name is lower-cased; e.g.
+ * `SBX_PROVIDER_CFOPENAI_BASEURL=https://gateway.ai.cloudflare.com/v1/<acct>/<gw>/openai`
+ * defines a `cfopenai` route (pair with `SBX_PROVIDER_KEY_CFOPENAI`).
+ */
+function loadProviderConfigs(): Record<string, ProviderConfig> {
+  const out: Record<string, ProviderConfig> = {};
+  const prefix = "SBX_PROVIDER_";
+  for (const [name, value] of Object.entries(process.env)) {
+    if (!name.startsWith(prefix) || !value) continue;
+    if (name.startsWith("SBX_PROVIDER_KEY_")) continue;
+    const rest = name.slice(prefix.length); // <NAME>_<FIELD>
+    const us = rest.lastIndexOf("_");
+    if (us <= 0) continue;
+    const provName = rest.slice(0, us).toLowerCase();
+    const field = rest.slice(us + 1).toUpperCase();
+    const cfg = (out[provName] ??= {});
+    if (field === "BASEURL") cfg.baseUrl = value;
+    else if (field === "AUTHHEADER") cfg.authHeader = value.toLowerCase();
+    else if (field === "FORMAT") cfg.formatTemplate = value;
+  }
+  return out;
 }
 
 function parseLogLevel(value: string | undefined): LogLevel {

@@ -85,6 +85,45 @@ export interface SandboxUsage {
   lastSampledAt: string;
 }
 
+/**
+ * Per-token egress policy. Every field is optional; an empty policy (`{}`) means
+ * "unlimited" — the original, pre-policy behaviour. Enforced by the egress
+ * gateway on the LLM hot path (see `proxy/egress.ts`).
+ */
+export interface EgressPolicy {
+  /** ISO timestamp after which the token is rejected with 403. Omit = never expires. */
+  expiresAt?: string;
+  /** Cumulative USD this token may spend across provider calls; 402 once reached. */
+  spendCapUsd?: number;
+  /** Sliding-window rate limit (per token). Omit = unlimited. */
+  rateLimit?: {
+    /** Max provider calls per window. */
+    calls?: number;
+    /** Max billed tokens (in+out) per window. */
+    tokens?: number;
+    /** Window length in milliseconds. */
+    windowMs: number;
+  };
+  /** Allowed model ids/prefix-globs (matched against the request's `model`). Omit = all. */
+  models?: string[];
+  /** Allowed provider names (e.g. `openai`). Omit = every configured provider. */
+  providers?: string[];
+}
+
+/**
+ * A minted egress token bound to a sandbox, with its policy and running spend.
+ * The store keeps these in an O(1) `Map<token, EgressTokenRecord>` so the gateway
+ * resolves token → sandbox + policy in one lookup on every provider call.
+ */
+export interface EgressTokenRecord {
+  token: string;
+  sandboxId: string;
+  policy: EgressPolicy;
+  createdAt: string;
+  /** Cumulative USD spent through this token (drives the spend cap). */
+  spendUsd: number;
+}
+
 /** Per-resource cost breakdown in the configured currency. */
 export interface CostBreakdown {
   cpu: number;

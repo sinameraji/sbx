@@ -26,6 +26,7 @@ import { DASHBOARD_HTML } from "../web/dashboard.js";
 import type {
   CodeContextInfo,
   CodeResult,
+  EgressPolicy,
   ExecEvent,
   ExposedPort,
   ProcessInfo,
@@ -241,12 +242,20 @@ function egressConfig(config: Config) {
     openai: { baseUrlEnv: "OPENAI_BASE_URL", keyEnv: "OPENAI_API_KEY" },
     anthropic: { baseUrlEnv: "ANTHROPIC_BASE_URL", keyEnv: "ANTHROPIC_API_KEY" },
     openrouter: { baseUrlEnv: "OPENROUTER_BASE_URL", keyEnv: "OPENROUTER_API_KEY" },
+    google: { baseUrlEnv: "GOOGLE_BASE_URL", keyEnv: "GOOGLE_API_KEY" },
+    gemini: { baseUrlEnv: "GEMINI_BASE_URL", keyEnv: "GEMINI_API_KEY" },
   };
-  const providers = names.map((name) => ({
-    name,
-    baseUrl: `${base}/${name}`,
-    ...ENV_HINT[name],
-  }));
+  // For custom/operator-defined providers, synthesize conventional env names
+  // (`<NAME>_BASE_URL` / `<NAME>_API_KEY`) so auto-wiring still injects something
+  // sensible. Operators can ignore these and wire their SDK by hand.
+  const providers = names.map((name) => {
+    const envName = name.toUpperCase().replace(/[^A-Z0-9]/g, "_");
+    const hint = ENV_HINT[name] ?? {
+      baseUrlEnv: `${envName}_BASE_URL`,
+      keyEnv: `${envName}_API_KEY`,
+    };
+    return { name, baseUrl: `${base}/${name}`, ...hint };
+  });
   return { providers };
 }
 
@@ -262,6 +271,89 @@ function egressEnv(config: Config, token: string): Record<string, string> {
     if (p.keyEnv) env[p.keyEnv] = token;
   }
   return env;
+}
+
+/**
+ * Forward-proxy env for a sandbox under egress enforcement: point `HTTP(S)_PROXY`
+ * at the gateway (the token is the proxy credential), and exclude the gateway host
+ * + loopback via `NO_PROXY` so the sandbox's own LLM base-URL calls (which target
+ * the gateway directly, origin-form) don't loop back through the proxy. Lower-case
+ * variants too, since many tools (curl, pip, apt) read those.
+ */
+function proxyEnv(config: Config, token: string): Record<string, string> {
+  const host = config.egressAdvertiseHost;
+  // Token as BOTH user and password: many clients (pip/urllib3, some others) only
+  // emit `Proxy-Authorization` on a CONNECT when the proxy URL has a non-empty
+  // password. The gateway reads the username half, so the password value is moot.
+  const proxy = `http://${token}:${token}@${host}:${config.egressPort}`;
+  const noProxy = `localhost,127.0.0.1,${host}`;
+  return {
+    HTTP_PROXY: proxy,
+    HTTPS_PROXY: proxy,
+    http_proxy: proxy,
+    https_proxy: proxy,
+    NO_PROXY: noProxy,
+    no_proxy: noProxy,
+  };
+}
+
+/**
+ * Validate + normalise an egress-token policy from a request body. Accepts the
+ * `ttlMs` sugar (→ `expiresAt = now + ttlMs`). An empty/blank body yields `{}`
+ * (unlimited — the pre-policy default). Returns `{ error }` (→ 400) on bad shape.
+ */
+function parseEgressPolicy(body: Record<string, unknown>): { policy: EgressPolicy } | { error: string } {
+  const policy: EgressPolicy = {};
+  const num = (key: string): number | undefined | null => {
+    const v = body[key];
+    if (v === undefined) return undefined;
+    if (typeof v !== "number" || !Number.isFinite(v) || v < 0) return null; // null = invalid
+    return v;
+  };
+
+  const ttlMs = num("ttlMs");
+  if (ttlMs === null) return { error: "ttlMs must be a non-negative number" };
+  if (typeof ttlMs === "number" && ttlMs > 0) {
+    policy.expiresAt = new Date(Date.now() + ttlMs).toISOString();
+  }
+  if (typeof body.expiresAt === "string" && body.expiresAt) {
+    if (Number.isNaN(Date.parse(body.expiresAt))) return { error: "expiresAt must be an ISO timestamp" };
+    policy.expiresAt = body.expiresAt;
+  }
+
+  const spendCapUsd = num("spendCapUsd");
+  if (spendCapUsd === null) return { error: "spendCapUsd must be a non-negative number" };
+  if (typeof spendCapUsd === "number") policy.spendCapUsd = spendCapUsd;
+
+  if (body.rateLimit !== undefined) {
+    const r = body.rateLimit as Record<string, unknown>;
+    if (typeof r !== "object" || r === null) return { error: "rateLimit must be an object" };
+    const windowMs = r.windowMs;
+    if (typeof windowMs !== "number" || !Number.isFinite(windowMs) || windowMs <= 0) {
+      return { error: "rateLimit.windowMs must be a positive number" };
+    }
+    const rateLimit: EgressPolicy["rateLimit"] = { windowMs };
+    for (const k of ["calls", "tokens"] as const) {
+      const v = r[k];
+      if (v === undefined) continue;
+      if (typeof v !== "number" || !Number.isFinite(v) || v < 0) {
+        return { error: `rateLimit.${k} must be a non-negative number` };
+      }
+      rateLimit[k] = v;
+    }
+    policy.rateLimit = rateLimit;
+  }
+
+  for (const key of ["models", "providers"] as const) {
+    const v = body[key];
+    if (v === undefined) continue;
+    if (!Array.isArray(v) || !v.every((s) => typeof s === "string")) {
+      return { error: `${key} must be an array of strings` };
+    }
+    if (v.length > 0) policy[key] = v as string[];
+  }
+
+  return { policy };
 }
 
 /**
@@ -417,15 +509,28 @@ async function handle(
     const id = egressTokensMatch[1];
     if (!store.get(id)) return sendJson(res, 404, { error: "not found" });
     if (method === "POST") {
+      const body = await readJson(req, config.maxBodyBytes);
+      const parsed = parseEgressPolicy(body);
+      if ("error" in parsed) return sendJson(res, 400, { error: parsed.error });
       const token = SandboxStore.newEgressToken();
-      store.addEgressToken(token, id);
-      return sendJson(res, 201, { token, providers: egressConfig(config).providers });
-    }
-    if (method === "GET") {
-      return sendJson(res, 200, {
-        tokens: store.listEgressTokens(id),
+      store.addEgressToken(token, id, parsed.policy);
+      return sendJson(res, 201, {
+        token,
+        policy: parsed.policy,
         providers: egressConfig(config).providers,
       });
+    }
+    if (method === "GET") {
+      const tokens = store.listEgressTokens(id).map((r) => ({
+        token: r.token,
+        policy: r.policy,
+        spendUsd: r.spendUsd,
+        spendRemaining:
+          r.policy.spendCapUsd === undefined
+            ? null
+            : Math.max(0, r.policy.spendCapUsd - r.spendUsd),
+      }));
+      return sendJson(res, 200, { tokens, providers: egressConfig(config).providers });
     }
   }
 
@@ -721,13 +826,23 @@ async function createSandbox(
   const admitted = capacity?.admit(limits.memoryMb) ?? { ok: true };
   if (!admitted.ok) return sendJson(res, 503, { error: admitted.reason });
 
-  // Opt-in egress wiring: mint a token and inject the provider base-URL + key env
-  // vars so any LLM SDK in the sandbox routes through the gateway with no config.
+  // Egress wiring. `egress: true` (or a policy object) opts the sandbox's LLM SDKs
+  // into the gateway (provider base-URL + key env). Independently, when egress
+  // enforcement is ON every sandbox is locked to the gateway, so it also gets a
+  // token + `HTTP(S)_PROXY` so pip/npm/git/apt can reach the allowlist.
   let egressToken: string | undefined;
+  let egressPolicy: EgressPolicy = {};
   let env = (body.env as Record<string, string>) ?? {};
-  if (body.egress === true) {
+  const wantEgress = body.egress === true || (!!body.egress && typeof body.egress === "object");
+  if (typeof body.egress === "object" && body.egress) {
+    const parsed = parseEgressPolicy(body.egress as Record<string, unknown>);
+    if ("error" in parsed) return sendJson(res, 400, { error: parsed.error });
+    egressPolicy = parsed.policy;
+  }
+  if (wantEgress || config.egressEnforce) {
     egressToken = SandboxStore.newEgressToken();
-    env = { ...env, ...egressEnv(config, egressToken) };
+    if (wantEgress) env = { ...env, ...egressEnv(config, egressToken) };
+    if (config.egressEnforce) env = { ...env, ...proxyEnv(config, egressToken) };
   }
 
   try {
@@ -754,7 +869,7 @@ async function createSandbox(
     usage: emptyUsage(),
   };
   store.add(record);
-  if (egressToken) store.addEgressToken(egressToken, id);
+  if (egressToken) store.addEgressToken(egressToken, id, egressPolicy);
   sendJson(res, 201, record);
 }
 

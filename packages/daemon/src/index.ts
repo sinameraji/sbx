@@ -11,6 +11,8 @@ import { SandboxStore } from "./store.js";
 import { createApiServer } from "./api/server.js";
 import { createProxyServer } from "./proxy/server.js";
 import { buildProviders, createEgressProxy } from "./proxy/egress.js";
+import { loadModelPrices } from "./pricing.js";
+import { ensureEgressFirewall } from "./net/firewall.js";
 
 async function main(): Promise<void> {
   const config = loadConfig();
@@ -76,9 +78,14 @@ async function main(): Promise<void> {
   // Egress credential proxy (LLM gateway): injects provider keys into outbound
   // calls and meters them. Runs whenever a port is configured; routes 404 until
   // provider keys (SBX_PROVIDER_KEY_*) are set.
+  // Install the host default-deny egress firewall (Linux + SBX_EGRESS_ENFORCE only;
+  // advisory no-op otherwise). Best-effort: logs and continues if it can't.
+  await ensureEgressFirewall(config);
+
   const providers = buildProviders(config);
+  const prices = loadModelPrices(config.modelPricesPath);
   const egress =
-    config.egressPort > 0 ? createEgressProxy({ config, store, providers }) : undefined;
+    config.egressPort > 0 ? createEgressProxy({ config, store, providers, prices }) : undefined;
   egress?.listen(config.egressPort, config.egressHost, () => {
     log.info("egress proxy listening", {
       url: `http://${config.egressHost}:${config.egressPort}`,

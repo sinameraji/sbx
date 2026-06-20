@@ -113,10 +113,40 @@ export interface EgressProvider {
   keyEnv?: string;
 }
 
+/**
+ * Per-token egress policy. Every field is optional; an omitted/empty policy means
+ * "unlimited" (the original behaviour). Enforced by the daemon's egress gateway.
+ */
+export interface EgressPolicy {
+  /** ISO timestamp after which the token is rejected (403). */
+  expiresAt?: string;
+  /** Sugar accepted on mint: expire `ttlMs` after creation. */
+  ttlMs?: number;
+  /** Cumulative USD this token may spend (402 once reached). */
+  spendCapUsd?: number;
+  /** Sliding-window rate limit (per token). */
+  rateLimit?: { calls?: number; tokens?: number; windowMs: number };
+  /** Allowed model ids/prefix-globs. Omit = all. */
+  models?: string[];
+  /** Allowed provider names. Omit = every configured provider. */
+  providers?: string[];
+}
+
 /** A minted egress token plus the provider base URLs it unlocks. */
 export interface EgressToken {
   token: string;
+  /** The policy bound to the token (echoed back on mint). */
+  policy?: EgressPolicy;
   providers: EgressProvider[];
+}
+
+/** An egress token with its policy + running spend, as returned by `listEgressTokens`. */
+export interface EgressTokenInfo {
+  token: string;
+  policy: EgressPolicy;
+  spendUsd: number;
+  /** USD left under the spend cap, or null when uncapped. */
+  spendRemaining: number | null;
 }
 
 /** Per-resource cost breakdown in the daemon's configured currency. */
@@ -158,8 +188,11 @@ export interface CreateOptions {
    * token and injects provider base-URL + key env vars (e.g. `OPENAI_BASE_URL`,
    * `OPENAI_API_KEY`) so LLM SDKs inside route through the gateway with no real
    * keys. Only providers configured on the daemon are wired. Defaults to false.
+   *
+   * Pass an `EgressPolicy` object instead of `true` to bind the minted token to a
+   * policy (TTL, spend cap, rate limit, model/provider scope).
    */
-  egress?: boolean;
+  egress?: boolean | EgressPolicy;
   /**
    * Ordered shell commands run once, after the container starts at create time
    * (e.g. `["npm i kimiflare"]`). Best-effort: a non-zero exit is logged on the
@@ -587,15 +620,16 @@ export class Sandbox {
    * key — the daemon injects the real provider key and meters the call, so keys
    * never live inside the sandbox.
    */
-  async createEgressToken(): Promise<EgressToken> {
+  async createEgressToken(policy?: EgressPolicy): Promise<EgressToken> {
     return this.client.request<EgressToken>(
       "POST",
       `/sandboxes/${this.info.id}/egress-tokens`,
+      policy ?? {},
     );
   }
 
-  /** List this sandbox's egress tokens and the available provider routes. */
-  async listEgressTokens(): Promise<{ tokens: string[]; providers: EgressProvider[] }> {
+  /** List this sandbox's egress tokens (with policy + spend) and provider routes. */
+  async listEgressTokens(): Promise<{ tokens: EgressTokenInfo[]; providers: EgressProvider[] }> {
     return this.client.request("GET", `/sandboxes/${this.info.id}/egress-tokens`);
   }
 

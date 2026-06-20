@@ -17,6 +17,7 @@
     "dockerode": "^4.0.2"
   },
   "devDependencies": {
+    "@sbx/sdk": "^0.0.1",
     "@types/dockerode": "^3.3.31",
     "@types/node": "^22.5.0",
     "tsx": "^4.16.0",

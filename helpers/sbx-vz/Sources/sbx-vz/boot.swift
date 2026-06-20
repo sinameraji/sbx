@@ -2,36 +2,39 @@ import Foundation
 import Virtualization
 
 // Boot bring-up harness (M1). `sbx-vz boot-test <kernel> <rootfs> [consoleLog]`
-// boots a microVM directly (no daemon), writes the guest console to a log, and —
-// once up — tries to connect to the agent's vsock port. Success on stdout as JSON.
-// This isolates the kernel/rootfs/VZ-config bring-up from the full driver lifecycle;
-// once it reaches the agent, the same configuration moves into the driver path.
+// boots a microVM directly (no daemon), streams the guest console to the log AND
+// our stderr (live), and — once up — tries to connect to the agent's vsock port.
+// Success on stdout as JSON. Isolates kernel/rootfs/VZ-config bring-up from the
+// full driver lifecycle.
 final class BootTest: NSObject, VZVirtualMachineDelegate {
     private let vm: VZVirtualMachine
     private let vsockPort: UInt32
+    private let consoleLogPath: String
+    private var consolePipe: Pipe?
 
     init(kernel: String, rootfs: String, consoleLog: String, cpus: Int, memMb: UInt64, vsockPort: UInt32) throws {
         self.vsockPort = vsockPort
+        self.consoleLogPath = consoleLog
 
         let config = VZVirtualMachineConfiguration()
         config.cpuCount = cpus
         config.memorySize = memMb * 1024 * 1024
 
         let bootLoader = VZLinuxBootLoader(kernelURL: URL(fileURLWithPath: kernel))
-        // console=hvc0 → virtio-console; root=/dev/vda → the rootfs block device;
-        // init=/init → our mount-then-exec-agent shim.
         bootLoader.commandLine = "console=hvc0 root=/dev/vda rw init=/init"
         config.bootLoader = bootLoader
 
         let attachment = try VZDiskImageStorageDeviceAttachment(url: URL(fileURLWithPath: rootfs), readOnly: false)
         config.storageDevices = [VZVirtioBlockDeviceConfiguration(attachment: attachment)]
 
-        FileManager.default.createFile(atPath: consoleLog, contents: nil)
-        guard let writeHandle = FileHandle(forWritingAtPath: consoleLog) else {
-            throw NSError(domain: "sbx-vz", code: 1, userInfo: [NSLocalizedDescriptionKey: "cannot open console log"])
-        }
+        // Console over a Pipe (a regular-file fd is silently dropped by VZ's serial
+        // attachment) — drained live in `run()` to the log file + stderr.
+        let pipe = Pipe()
         let console = VZVirtioConsoleDeviceSerialPortConfiguration()
-        console.attachment = VZFileHandleSerialPortAttachment(fileHandleForReading: nil, fileHandleForWriting: writeHandle)
+        console.attachment = VZFileHandleSerialPortAttachment(
+            fileHandleForReading: nil,
+            fileHandleForWriting: pipe.fileHandleForWriting
+        )
         config.serialPorts = [console]
 
         config.socketDevices = [VZVirtioSocketDeviceConfiguration()]
@@ -39,6 +42,7 @@ final class BootTest: NSObject, VZVirtualMachineDelegate {
         try config.validate()
         self.vm = VZVirtualMachine(configuration: config)
         super.init()
+        self.consolePipe = pipe
         self.vm.delegate = self
     }
 
@@ -54,6 +58,16 @@ final class BootTest: NSObject, VZVirtualMachineDelegate {
     }
 
     func run() {
+        // Drain the guest console pipe → log file + our stderr (live visibility).
+        FileManager.default.createFile(atPath: consoleLogPath, contents: nil)
+        let logFH = FileHandle(forWritingAtPath: consoleLogPath)
+        consolePipe?.fileHandleForReading.readabilityHandler = { handle in
+            let data = handle.availableData
+            if data.isEmpty { return }
+            logFH?.write(data)
+            FileHandle.standardError.write(data)
+        }
+
         vm.start { result in
             switch result {
             case .success:
@@ -63,10 +77,7 @@ final class BootTest: NSObject, VZVirtualMachineDelegate {
                 exit(2)
             }
         }
-
-        // Give the guest time to boot, mount, and have the agent bind vsock:1024,
-        // then probe the agent by connecting. Retry a few times before giving up.
-        attemptConnect(retriesLeft: 12, delay: 1.5)
+        attemptConnect(retriesLeft: 15, delay: 1.5)
         RunLoop.main.run()
     }
 
@@ -84,7 +95,7 @@ final class BootTest: NSObject, VZVirtualMachineDelegate {
                     exit(0)
                 case .failure(let error):
                     if retriesLeft > 0 {
-                        self.note("vsock not ready (\(error.localizedDescription)); \(retriesLeft) retries left")
+                        self.note("vsock not ready (\(error.localizedDescription)); \(retriesLeft) left")
                         self.attemptConnect(retriesLeft: retriesLeft - 1, delay: 1.0)
                     } else {
                         self.emit(["ok": false, "error": "agent vsock never came up: \(error.localizedDescription)"])
@@ -95,10 +106,7 @@ final class BootTest: NSObject, VZVirtualMachineDelegate {
         }
     }
 
-    func guestDidStop(_ virtualMachine: VZVirtualMachine) {
-        note("guest stopped")
-    }
-
+    func guestDidStop(_ virtualMachine: VZVirtualMachine) { note("guest stopped") }
     func virtualMachine(_ virtualMachine: VZVirtualMachine, didStopWithError error: Error) {
         note("guest stopped with error: \(error.localizedDescription)")
     }

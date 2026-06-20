@@ -854,6 +854,13 @@ async function createSandbox(
     return sendJson(res, 422, { error: `sandbox provisioning failed: ${errorMessage(err)}` });
   }
 
+  // Per-sandbox LLM spend ceiling: per-create value (if a valid non-negative
+  // number) overrides the daemon default; 0 = unlimited.
+  const egressSpendCapUsd =
+    typeof body.egressSpendCapUsd === "number" && body.egressSpendCapUsd >= 0
+      ? body.egressSpendCapUsd
+      : config.egressSpendCapUsd;
+
   const now = new Date().toISOString();
   const record: SandboxRecord = {
     id,
@@ -866,6 +873,7 @@ async function createSandbox(
     lastActivityAt: now,
     sleepAfterMs,
     limits,
+    egressSpendCapUsd,
     usage: emptyUsage(),
   };
   store.add(record);

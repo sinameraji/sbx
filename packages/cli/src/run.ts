@@ -20,6 +20,8 @@ export async function runCommand(
   const image = typeof flags.image === "string" ? flags.image : undefined;
   const keep = flags.keep === true;
   const egress = flags.egress === true;
+  const egressSpendCapUsd =
+    typeof flags["egress-spend-cap"] === "string" ? Number(flags["egress-spend-cap"]) : undefined;
   const sleepAfter =
     typeof flags["sleep-after"] === "string"
       ? Number(flags["sleep-after"])
@@ -42,8 +44,9 @@ export async function runCommand(
   try {
     const hasLimits = memoryMb !== undefined || cpus !== undefined || pidsLimit !== undefined;
     const opts =
-      image || env || sleepAfter !== undefined || egress || hasLimits || setup || repo
-        ? { image, env, sleepAfter, egress, setup, repo, repoRef, memoryMb, cpus, pidsLimit }
+      image || env || sleepAfter !== undefined || egress || hasLimits || setup || repo ||
+      egressSpendCapUsd !== undefined
+        ? { image, env, sleepAfter, egress, egressSpendCapUsd, setup, repo, repoRef, memoryMb, cpus, pidsLimit }
         : undefined;
     sandbox = await client.getSandbox(undefined, opts);
   } catch (err) {

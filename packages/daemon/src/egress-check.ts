@@ -271,6 +271,28 @@ async function main(): Promise<void> {
     ok("forward proxy + CONNECT: allow round-trips, deny → 403, provider guard → 403");
   }
 
+  // 13) Per-sandbox spend ceiling: a hard cap across all of a sandbox's tokens,
+  //     independent of per-token policy.
+  {
+    const sb2: SandboxRecord = { ...rec, id: "sbxcap0002", egressSpendCapUsd: 0.01, usage: emptyUsage() };
+    store.add(sb2);
+    const token = SandboxStore.newEgressToken();
+    store.addEgressToken(token, sb2.id); // no per-token policy
+    const first = await fetch(`${base}/mock/v1/chat`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-sbx-egress": token, "x-mock-cost": "1" },
+      body: JSON.stringify({ model: "gpt-4o" }),
+    });
+    assert.equal(first.status, 200, "first call under sandbox cap should 200");
+    const second = await fetch(`${base}/mock/v1/chat`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-sbx-egress": token, "x-mock-cost": "1" },
+      body: JSON.stringify({ model: "gpt-4o" }),
+    });
+    assert.equal(second.status, 402, "second call over sandbox cap should 402");
+    ok("per-sandbox spend ceiling → first 200, then 402");
+  }
+
   console.log(`\negress-check: ${passed} checks passed`);
   egress.close();
   upstream.close();

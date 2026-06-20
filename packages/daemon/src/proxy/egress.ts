@@ -236,7 +236,13 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: ResolvedD
     return sendText(res, 403, `provider not in token scope: ${providerName}`);
   }
   if (policy.spendCapUsd !== undefined && record.spendUsd >= policy.spendCapUsd) {
-    return sendText(res, 402, "egress spend cap exceeded");
+    return sendText(res, 402, "egress spend cap exceeded (token)");
+  }
+  // Per-sandbox ceiling: a hard cap across ALL of the sandbox's tokens, so an
+  // abused token can't exceed it even before it's revoked.
+  const sb = store.get(sandboxId);
+  if (sb?.egressSpendCapUsd && sb.usage.providerCost >= sb.egressSpendCapUsd) {
+    return sendText(res, 402, "egress spend cap exceeded (sandbox)");
   }
 
   const method = req.method ?? "GET";

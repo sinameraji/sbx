@@ -101,7 +101,8 @@ export class SandboxStore {
         lastActivityAt TEXT NOT NULL DEFAULT '',
         sleepAfterMs   INTEGER NOT NULL DEFAULT 0,
         usage          TEXT NOT NULL DEFAULT '{}',
-        limits         TEXT NOT NULL DEFAULT '{}'
+        limits         TEXT NOT NULL DEFAULT '{}',
+        egressSpendCap REAL NOT NULL DEFAULT 0
       );
       CREATE TABLE IF NOT EXISTS processes (
         sandboxId TEXT NOT NULL,
@@ -156,6 +157,7 @@ export class SandboxStore {
     this.ensureColumn("sandboxes", "sleepAfterMs", "INTEGER NOT NULL DEFAULT 0");
     this.ensureColumn("sandboxes", "usage", "TEXT NOT NULL DEFAULT '{}'");
     this.ensureColumn("sandboxes", "limits", "TEXT NOT NULL DEFAULT '{}'");
+    this.ensureColumn("sandboxes", "egressSpendCap", "REAL NOT NULL DEFAULT 0");
     this.ensureColumn("egress_tokens", "policy", "TEXT NOT NULL DEFAULT '{}'");
     this.ensureColumn("egress_tokens", "spendUsd", "REAL NOT NULL DEFAULT 0");
   }
@@ -230,13 +232,14 @@ export class SandboxStore {
     this.db
       .prepare(
         `INSERT INTO sandboxes
-           (id, image, status, createdAt, labels, env, persist, lastActivityAt, sleepAfterMs, usage, limits)
+           (id, image, status, createdAt, labels, env, persist, lastActivityAt, sleepAfterMs, usage, limits, egressSpendCap)
          VALUES
-           ($id, $image, $status, $createdAt, $labels, $env, $persist, $lastActivityAt, $sleepAfterMs, $usage, $limits)
+           ($id, $image, $status, $createdAt, $labels, $env, $persist, $lastActivityAt, $sleepAfterMs, $usage, $limits, $egressSpendCap)
          ON CONFLICT(id) DO UPDATE SET
            image=$image, status=$status, createdAt=$createdAt,
            labels=$labels, env=$env, persist=$persist,
-           lastActivityAt=$lastActivityAt, sleepAfterMs=$sleepAfterMs, usage=$usage, limits=$limits`,
+           lastActivityAt=$lastActivityAt, sleepAfterMs=$sleepAfterMs, usage=$usage, limits=$limits,
+           egressSpendCap=$egressSpendCap`,
       )
       .run({
         id: record.id,
@@ -250,6 +253,7 @@ export class SandboxStore {
         sleepAfterMs: record.sleepAfterMs,
         usage: JSON.stringify(record.usage),
         limits: JSON.stringify(record.limits ?? {}),
+        egressSpendCap: record.egressSpendCapUsd ?? 0,
       });
   }
 
@@ -592,6 +596,7 @@ function rowToSandbox(row: any): SandboxRecord {
     lastActivityAt: row.lastActivityAt || row.createdAt,
     sleepAfterMs: row.sleepAfterMs ?? 0,
     limits: parseJsonObject(row.limits),
+    egressSpendCapUsd: typeof row.egressSpendCap === "number" ? row.egressSpendCap : 0,
     usage: { ...emptyUsage(), ...parseUsage(row.usage) },
   };
 }

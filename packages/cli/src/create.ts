@@ -20,6 +20,8 @@ export async function createCommand(
 
   const image = typeof flags.image === "string" ? flags.image : undefined;
   const egress = flags.egress === true;
+  const egressSpendCapUsd =
+    typeof flags["egress-spend-cap"] === "string" ? Number(flags["egress-spend-cap"]) : undefined;
   const sleepAfter =
     typeof flags["sleep-after"] === "string" ? Number(flags["sleep-after"]) : undefined;
   const { memoryMb, cpus, pidsLimit } = parseLimitFlags(flags);
@@ -44,6 +46,7 @@ export async function createCommand(
       labels,
       sleepAfter,
       egress,
+      egressSpendCapUsd,
       setup,
       repo,
       repoRef,

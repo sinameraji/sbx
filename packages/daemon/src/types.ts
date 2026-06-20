@@ -53,6 +53,13 @@ export interface SandboxRecord {
   sleepAfterMs: number;
   /** Resolved hard resource caps (per-create override merged over daemon defaults). */
   limits: ResourceLimits;
+  /**
+   * Hard ceiling (USD) on this sandbox's cumulative LLM-provider cost across ALL
+   * its egress tokens — the gateway returns 402 once `usage.providerCost` reaches
+   * it, regardless of per-token caps. `0`/undefined = unlimited. A blast-radius
+   * backstop: even an abused, not-yet-revoked token can't exceed it.
+   */
+  egressSpendCapUsd?: number;
   /** Cumulative resource usage, integrated by the metrics sampler. */
   usage: SandboxUsage;
 }

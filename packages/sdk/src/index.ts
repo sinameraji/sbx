@@ -194,6 +194,12 @@ export interface CreateOptions {
    */
   egress?: boolean | EgressPolicy;
   /**
+   * Hard ceiling (USD) on this sandbox's total LLM-provider cost across all its
+   * egress tokens; the gateway returns 402 once reached. A blast-radius backstop
+   * independent of per-token caps. Omit/0 = unlimited (or the daemon default).
+   */
+  egressSpendCapUsd?: number;
+  /**
    * Ordered shell commands run once, after the container starts at create time
    * (e.g. `["npm i kimiflare"]`). Best-effort: a non-zero exit is logged on the
    * daemon, not fatal. Not re-run on resume — with persistence (the default) the

@@ -93,6 +93,12 @@ export interface Config {
    */
   allowSourceControl: boolean;
   /**
+   * Default per-sandbox LLM spend ceiling in USD — the gateway returns 402 once a
+   * sandbox's cumulative provider cost reaches it, across all its tokens. Per-create
+   * `egressSpendCapUsd` overrides. `0` = unlimited. `SBX_EGRESS_SPEND_CAP`.
+   */
+  egressSpendCapUsd: number;
+  /**
    * Hostname advertised in egress base URLs returned to clients. Sandboxes reach
    * the daemon host through this name, so on Docker Desktop it defaults to
    * `host.docker.internal`. Set to a LAN IP/DNS name for remote sandboxes.
@@ -217,6 +223,7 @@ export function loadConfig(): Config {
       .map((h) => h.trim())
       .filter(Boolean),
     allowSourceControl: process.env.SBX_ALLOW_SOURCE_CONTROL !== "false",
+    egressSpendCapUsd: Number(process.env.SBX_EGRESS_SPEND_CAP ?? 0),
     providerKeys: loadProviderKeys(),
     providerConfigs: loadProviderConfigs(),
     backupDir: process.env.SBX_BACKUP_DIR ?? join(homedir(), ".sbx", "backups"),

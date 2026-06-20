@@ -51,6 +51,22 @@ func handleHostInfo() -> [String: Any] {
     ]
 }
 
+// Boot bring-up mode (M1): `sbx-vz boot-test <kernel> <rootfs> [consoleLog]`.
+let cliArgs = CommandLine.arguments
+if cliArgs.count >= 4 && cliArgs[1] == "boot-test" {
+    let consoleLog = cliArgs.count >= 5 ? cliArgs[4] : "/tmp/sbx-vz-console.log"
+    do {
+        let test = try BootTest(
+            kernel: cliArgs[2], rootfs: cliArgs[3], consoleLog: consoleLog,
+            cpus: 1, memMb: 512, vsockPort: 1024
+        )
+        test.run()  // runs the main RunLoop; exits via its result handlers
+    } catch {
+        FileHandle.standardError.write("boot-test setup failed: \(error)\n".data(using: .utf8)!)
+        exit(5)
+    }
+}
+
 while let line = readLine(strippingNewline: true) {
     let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
     if trimmed.isEmpty { continue }

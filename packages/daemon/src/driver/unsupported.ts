@@ -16,6 +16,7 @@ import type {
   ListFilesOptions,
   MkdirOptions,
   ReadFileOptions,
+  StartProcessOptions,
   WaitForPortOptions,
   WriteFileOptions,
 } from "../types.js";
@@ -76,16 +77,29 @@ export abstract class UnsupportedDriver implements Driver {
   async watchFiles(): Promise<void> {
     this.fail("watchFiles");
   }
-  async startProcess(): Promise<StartProcessResult> {
+  async startProcess(
+    _id: string,
+    _procId: string,
+    _command: string,
+    _opts: StartProcessOptions,
+  ): Promise<StartProcessResult> {
     this.fail("startProcess");
   }
-  async listProcesses(): Promise<ProcessLiveness[]> {
+  async listProcesses(
+    _id: string,
+    _procs: Array<{ procId: string; pid: number }>,
+  ): Promise<ProcessLiveness[]> {
     this.fail("listProcesses");
   }
-  async killProcess(): Promise<void> {
+  async killProcess(_id: string, _pid: number, _signal?: string): Promise<void> {
     this.fail("killProcess");
   }
-  async streamProcessLogs(): Promise<void> {
+  async streamProcessLogs(
+    _id: string,
+    _logPath: string,
+    _opts: { follow: boolean; signal: AbortSignal },
+    _onData: (chunk: string) => void,
+  ): Promise<void> {
     this.fail("streamProcessLogs");
   }
   async waitForPort(_id: string, _port: number, _opts: WaitForPortOptions): Promise<boolean> {

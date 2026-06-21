@@ -9,6 +9,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { setTimeout as sleep } from "node:timers/promises";
 import { AppleVzDriver } from "./driver/applevz.js";
 
 async function main(): Promise<void> {
@@ -69,6 +70,28 @@ async function main(): Promise<void> {
       "file persisted across stop/start",
     );
     ok("★ workspace.img persists across stop/start");
+
+    // M4a: background processes (start → list running → logs → kill → list dead).
+    const proc = await driver.startProcess(
+      id,
+      "p1",
+      "i=0; while true; do echo tick-$i; i=$((i+1)); sleep 0.2; done",
+      {},
+    );
+    assert.ok(Number.isFinite(proc.pid), "startProcess returns a pid");
+    await sleep(700);
+    const live = await driver.listProcesses(id, [{ procId: "p1", pid: proc.pid }]);
+    assert.ok(live[0]?.running, "process is running");
+    let logs = "";
+    await driver.streamProcessLogs(id, proc.logPath, { follow: false, signal: new AbortController().signal }, (d) => {
+      logs += d;
+    });
+    assert.match(logs, /tick-/, "process logs captured");
+    await driver.killProcess(id, proc.pid);
+    await sleep(400);
+    const dead = await driver.listProcesses(id, [{ procId: "p1", pid: proc.pid }]);
+    assert.ok(!dead[0]?.running, "process killed");
+    ok("background process: start → running → logs → kill → dead");
 
     await driver.destroy(id);
     ok("destroy");

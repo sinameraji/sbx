@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { AgentConn } from "./agent.js";
 import { UnsupportedDriver } from "./unsupported.js";
-import type { CreateOptions, HostInfo } from "./types.js";
+import type { CreateOptions, HostInfo, ProcessLiveness, StartProcessResult } from "./types.js";
 import type {
   ExecEvent,
   ExecOptions,
@@ -12,10 +12,12 @@ import type {
   ListFilesOptions,
   MkdirOptions,
   ReadFileOptions,
+  StartProcessOptions,
   WaitForPortOptions,
   WriteFileOptions,
 } from "../types.js";
 import { log } from "../logger.js";
+import { shellEscape } from "../util.js";
 
 /** Config the driver factory hands the VZ driver (subset of the daemon config). */
 export interface VzConfig {
@@ -186,6 +188,98 @@ export class AppleVzDriver extends UnsupportedDriver {
     return this.withConn(id, (c) =>
       c.waitForPort(port, { host: opts.host, timeoutMs: opts.timeoutMs, intervalMs: opts.intervalMs }),
     );
+  }
+
+  // --- background processes (via exec, same shell patterns as the container driver) -
+
+  async startProcess(
+    id: string,
+    procId: string,
+    command: string,
+    opts: StartProcessOptions,
+  ): Promise<StartProcessResult> {
+    const logPath = `/tmp/sbx-proc-${procId}.log`;
+    // Background `sh -c CMD` and echo its real pid. No `setsid`: busybox setsid
+    // forks when the caller is a process-group leader, making `$!` the wrapper pid
+    // rather than the command's. The backgrounded process orphans to PID 1 (the
+    // agent) when the launching exec returns, so it survives without setsid; kill
+    // then targets the right pid.
+    const launch = `sh -c ${shellEscape(command)} > ${shellEscape(logPath)} 2>&1 & echo $!`;
+    const { stdout, stderr, exitCode } = await this.execCapture(id, launch, opts);
+    const pid = Number.parseInt(stdout.trim(), 10);
+    if (exitCode !== 0 || !Number.isFinite(pid)) {
+      throw new Error(stderr.trim() || `startProcess failed (exit ${exitCode})`);
+    }
+    return { procId, pid, logPath };
+  }
+
+  async listProcesses(
+    id: string,
+    procs: Array<{ procId: string; pid: number }>,
+  ): Promise<ProcessLiveness[]> {
+    if (procs.length === 0) return [];
+    const pids = procs.map((p) => p.pid).join(" ");
+    // A killed process orphaned to the agent (PID 1) lingers as a zombie since the
+    // agent doesn't reap, and `kill -0` succeeds on a zombie. So read the proc state
+    // and count only a present, non-`Z` (non-zombie) process as running.
+    const cmd =
+      `for p in ${pids}; do s=$(sed 's/^.*) //;s/ .*//' /proc/$p/stat 2>/dev/null); ` +
+      `if [ -n "$s" ] && [ "$s" != "Z" ]; then echo "$p 1"; else echo "$p 0"; fi; done`;
+    const { stdout } = await this.execCapture(id, cmd);
+    const alive = new Map<number, boolean>();
+    for (const line of stdout.split("\n")) {
+      const [p, state] = line.trim().split(" ");
+      if (p) alive.set(Number(p), state === "1");
+    }
+    return procs.map((p) => ({ procId: p.procId, pid: p.pid, running: alive.get(p.pid) ?? false }));
+  }
+
+  async killProcess(id: string, pid: number, signal = "TERM"): Promise<void> {
+    const stripped = signal.replace(/^SIG/, "");
+    const sig = /^[A-Z0-9]+$/.test(stripped) ? stripped : "TERM";
+    const cmd = `kill -${sig} -${pid} 2>/dev/null; kill -${sig} ${pid} 2>/dev/null; true`;
+    await this.execCapture(id, cmd);
+  }
+
+  async streamProcessLogs(
+    id: string,
+    logPath: string,
+    opts: { follow: boolean; signal: AbortSignal },
+    onData: (chunk: string) => void,
+  ): Promise<void> {
+    const vm = this.vms.get(id);
+    if (!vm) throw new Error(`applevz: sandbox ${id} is not running`);
+    const conn = await AgentConn.connect({ path: vm.socketPath, timeoutMs: 15000 });
+    const cmd = opts.follow
+      ? `tail -n +1 -F ${shellEscape(logPath)}`
+      : `cat ${shellEscape(logPath)}`;
+    const onAbort = () => conn.close();
+    opts.signal.addEventListener("abort", onAbort);
+    try {
+      await conn.exec(cmd, {}, (e) => {
+        if (e.type !== "exit") onData(e.data);
+      });
+    } catch {
+      /* connection closed on abort */
+    } finally {
+      opts.signal.removeEventListener("abort", onAbort);
+      conn.close();
+    }
+  }
+
+  /** Run a command and collect its full stdout/stderr/exit (for the process shims). */
+  private async execCapture(
+    id: string,
+    command: string,
+    opts: ExecOptions = {},
+  ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
+    let stdout = "";
+    let stderr = "";
+    const exitCode = await this.exec(id, command, opts, (e) => {
+      if (e.type === "stdout") stdout += e.data;
+      else if (e.type === "stderr") stderr += e.data;
+    });
+    return { stdout, stderr, exitCode };
   }
 
   /** Open a fresh AgentConn to the sandbox's relay socket, run `fn`, close it. */

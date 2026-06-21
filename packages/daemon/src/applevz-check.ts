@@ -114,6 +114,22 @@ async function main(): Promise<void> {
     assert.match(resp, /bridge-works/, "HTTP response flows through the bridge");
     ok("preview TCP bridge: HTTP round-trips through the guest");
 
+    // M4c: interactive PTY terminal — type a command into a real shell, read it back.
+    const term = await driver.openTerminal(id, { cols: 80, rows: 24 });
+    const termOut = await new Promise<string>((resolve) => {
+      let buf = "";
+      term.stream.on("data", (d: Buffer) => {
+        buf += d.toString();
+        if (/TERMINAL_OK_42/.test(buf)) resolve(buf);
+      });
+      term.stream.on("error", () => resolve(buf));
+      setTimeout(() => term.stream.write("echo TERMINAL_OK_$((6*7))\n"), 500);
+      setTimeout(() => resolve(buf), 3500);
+    });
+    term.close();
+    assert.match(termOut, /TERMINAL_OK_42/, "PTY runs the command in a real shell");
+    ok("interactive PTY: command runs in a real shell");
+
     await driver.destroy(id);
     ok("destroy");
 

@@ -4,7 +4,15 @@ import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { AgentConn } from "./agent.js";
 import { UnsupportedDriver } from "./unsupported.js";
-import type { CreateOptions, HostInfo, ProcessLiveness, StartProcessResult, TcpBridge } from "./types.js";
+import type {
+  CreateOptions,
+  HostInfo,
+  ProcessLiveness,
+  StartProcessResult,
+  TcpBridge,
+  TerminalOptions,
+  TerminalSession,
+} from "./types.js";
 import type {
   ExecEvent,
   ExecOptions,
@@ -273,9 +281,31 @@ export class AppleVzDriver extends UnsupportedDriver {
     const vm = this.vms.get(id);
     if (!vm) throw new Error(`applevz: sandbox ${id} is not running`);
     const conn = await AgentConn.connect({ path: vm.socketPath, timeoutMs: 15000 });
-    const stream = conn.openStream({ method: "tcpConnect", host, port });
+    const { stream } = conn.openStream({ method: "tcpConnect", host, port });
     return {
       stream,
+      close: () => {
+        stream.destroy();
+        conn.close();
+      },
+    };
+  }
+
+  /** Interactive PTY shell — backs the dashboard/CLI terminal. */
+  async openTerminal(id: string, opts: TerminalOptions): Promise<TerminalSession> {
+    const vm = this.vms.get(id);
+    if (!vm) throw new Error(`applevz: sandbox ${id} is not running`);
+    const conn = await AgentConn.connect({ path: vm.socketPath, timeoutMs: 15000 });
+    const { stream, streamId } = conn.openStream({
+      method: "openPty",
+      cols: opts.cols,
+      rows: opts.rows,
+      cwd: opts.cwd,
+      env: opts.env,
+    });
+    return {
+      stream,
+      resize: (cols, rows) => conn.controlStream(streamId, { method: "resize", cols, rows }),
       close: () => {
         stream.destroy();
         conn.close();

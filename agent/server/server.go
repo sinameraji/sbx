@@ -24,6 +24,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/creack/pty"
 	"github.com/sinameraji/sbx/agent/proto"
 )
 
@@ -63,8 +64,9 @@ func indexByte(s string, b byte) int {
 // stream is an in-flight request that accepts further input frames (exec/pty
 // stdin, untar bytes). Request/response methods (files, stats) need none.
 type stream struct {
-	cancel context.CancelFunc
-	stdin  io.WriteCloser // process stdin; nil if the handler takes no input
+	cancel  context.CancelFunc
+	stdin   io.WriteCloser    // process stdin / pty master / dialed conn; nil if none
+	control func(payload []byte) // in-stream control (e.g. pty resize); nil if none
 }
 
 // Serve runs the protocol loop on conn until it closes or errors. It sends the
@@ -100,6 +102,17 @@ func (a *Agent) Serve(conn io.ReadWriteCloser) error {
 		}
 		switch f.Type {
 		case proto.Control:
+			// A Control on an already-open stream is an in-stream control message
+			// (e.g. pty resize), not a new request.
+			mu.Lock()
+			if existing := streams[f.StreamID]; existing != nil {
+				mu.Unlock()
+				if existing.control != nil {
+					existing.control(f.Payload)
+				}
+				continue
+			}
+			mu.Unlock()
 			var req proto.Request
 			if err := json.Unmarshal(f.Payload, &req); err != nil {
 				writeError(w, f.StreamID, "bad request json: "+err.Error())
@@ -164,6 +177,8 @@ func (a *Agent) dispatch(ctx context.Context, w *proto.FrameWriter, id uint32, r
 		a.handleWaitForPort(ctx, w, id, req)
 	case "tcpConnect":
 		a.handleTcpConnect(ctx, w, id, req, st, mu)
+	case "openPty":
+		a.handleOpenPty(ctx, w, id, req, st, mu)
 	case "setEnv":
 		a.handleSetEnv(w, id, req)
 	case "stats":
@@ -379,6 +394,57 @@ func (a *Agent) handleTcpConnect(ctx context.Context, w *proto.FrameWriter, id u
 		conn.Close() // unblock the read loop when the host closes the stream
 	}()
 	copyToFrames(w, proto.Stdout, id, conn) // connection output → Stdout frames
+	writeResult(w, id, proto.Result{OK: true})
+}
+
+// handleOpenPty allocates a PTY, runs an interactive shell on it, and bridges it
+// to the stream: Stdin frames are the shell's keyboard input, the pty output is
+// streamed back as Stdout frames, and a `resize` Control message on the stream
+// resizes the pty. Backs the dashboard/CLI terminal. Requires /dev/pts in the
+// guest (mounted by the rootfs init).
+func (a *Agent) handleOpenPty(ctx context.Context, w *proto.FrameWriter, id uint32, req proto.Request, st *stream, mu *sync.Mutex) {
+	shell, _ := shellInvocation("")
+	cmd := exec.Command(shell, "-i")
+	cmd.Dir = req.Cwd
+	if cmd.Dir == "" {
+		cmd.Dir = "/workspace"
+	}
+	cmd.Env = append(a.mergedEnv(req.Env), "TERM=xterm-256color")
+
+	ptmx, err := pty.Start(cmd)
+	if err != nil {
+		writeError(w, id, "openPty: "+err.Error())
+		return
+	}
+	defer func() { _ = ptmx.Close() }()
+	if req.Cols > 0 && req.Rows > 0 {
+		_ = pty.Setsize(ptmx, &pty.Winsize{Cols: uint16(req.Cols), Rows: uint16(req.Rows)})
+	}
+
+	mu.Lock()
+	st.stdin = ptmx // host Stdin frames → pty master (keyboard input)
+	st.control = func(payload []byte) {
+		var m struct {
+			Method string `json:"method"`
+			Cols   int    `json:"cols"`
+			Rows   int    `json:"rows"`
+		}
+		if json.Unmarshal(payload, &m) == nil && m.Method == "resize" {
+			_ = pty.Setsize(ptmx, &pty.Winsize{Cols: uint16(m.Cols), Rows: uint16(m.Rows)})
+		}
+	}
+	mu.Unlock()
+
+	go func() {
+		<-ctx.Done()
+		_ = ptmx.Close()
+		if cmd.Process != nil {
+			_ = cmd.Process.Kill()
+		}
+	}()
+
+	copyToFrames(w, proto.Stdout, id, ptmx) // pty output → Stdout frames
+	_ = cmd.Wait()
 	writeResult(w, id, proto.Result{OK: true})
 }
 

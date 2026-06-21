@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"strconv"
+	"time"
 
 	"golang.org/x/sys/unix"
 )
@@ -55,12 +56,27 @@ func (l *vsockListener) Accept() (net.Conn, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Hand the accepted fd to the net poller. FileConn dups it, so closing the
-	// os.File afterwards is correct and leaves the returned conn valid.
-	f := os.NewFile(uintptr(nfd), "vsock-conn")
-	defer f.Close()
-	return net.FileConn(f)
+	// NOT net.FileConn: it calls getsockname to classify the socket, which Go's
+	// net package doesn't implement for AF_VSOCK ("address family not supported"),
+	// so it drops the connection. Wrap the raw fd's os.File in a minimal net.Conn
+	// instead — the agent protocol only needs Read/Write/Close.
+	return &vsockConn{f: os.NewFile(uintptr(nfd), "vsock-conn"), port: l.port}, nil
 }
+
+// vsockConn adapts an accepted AF_VSOCK socket fd to net.Conn over its os.File.
+type vsockConn struct {
+	f    *os.File
+	port uint32
+}
+
+func (c *vsockConn) Read(b []byte) (int, error)       { return c.f.Read(b) }
+func (c *vsockConn) Write(b []byte) (int, error)      { return c.f.Write(b) }
+func (c *vsockConn) Close() error                     { return c.f.Close() }
+func (c *vsockConn) LocalAddr() net.Addr              { return vsockAddr(c.port) }
+func (c *vsockConn) RemoteAddr() net.Addr             { return vsockAddr(c.port) }
+func (c *vsockConn) SetDeadline(t time.Time) error    { return c.f.SetDeadline(t) }
+func (c *vsockConn) SetReadDeadline(t time.Time) error  { return c.f.SetReadDeadline(t) }
+func (c *vsockConn) SetWriteDeadline(t time.Time) error { return c.f.SetWriteDeadline(t) }
 
 func (l *vsockListener) Close() error { return unix.Close(l.fd) }
 

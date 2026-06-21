@@ -19,14 +19,25 @@ docker run --rm --platform linux/arm64 -v "$PWD/guest:/out" debian:bookworm bash
   command -v gcc >/dev/null || { echo "FATAL: toolchain install failed"; exit 1; }
   cd /tmp
   V=6.6.52
-  curl -fsSL --retry 5 -o linux.tar.xz https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-$V.tar.xz
+  for a in 1 2 3 4 5; do
+    curl -fSL --http1.1 --retry 5 --retry-all-errors -o linux.tar.xz \
+      https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-$V.tar.xz \
+      && tar tJf linux.tar.xz >/dev/null 2>&1 && break
+    echo "kernel download attempt $a failed; retrying"; sleep 5
+  done
+  tar tJf linux.tar.xz >/dev/null 2>&1 || { echo "FATAL: kernel tarball download failed"; exit 1; }
   tar xJf linux.tar.xz
   cd linux-$V
   make defconfig >/dev/null
   ./scripts/config --enable VIRTIO --enable VIRTIO_PCI --enable VIRTIO_BLK \
-    --enable VIRTIO_CONSOLE --enable VIRTIO_NET --enable VSOCKETS \
-    --enable VIRTIO_VSOCKETS --enable EXT4_FS --enable DEVTMPFS --enable DEVTMPFS_MOUNT
+    --enable VIRTIO_CONSOLE --enable VIRTIO_NET \
+    --enable VSOCKETS --enable VSOCKETS_DIAG \
+    --enable VIRTIO_VSOCKETS_COMMON --enable VIRTIO_VSOCKETS \
+    --enable EXT4_FS --enable DEVTMPFS --enable DEVTMPFS_MOUNT
   make olddefconfig >/dev/null
+  echo "=== vsock config (must be =y, built-in) ==="
+  grep -E "CONFIG_(VSOCKETS|VIRTIO_VSOCKETS|VIRTIO_VSOCKETS_COMMON)=" .config || true
+  grep -q "^CONFIG_VIRTIO_VSOCKETS=y" .config || { echo "FATAL: VIRTIO_VSOCKETS is not built-in"; exit 1; }
   echo "building Image with $(nproc) jobs..."
   make -j"$(nproc)" Image >/dev/null 2>&1
   cp arch/arm64/boot/Image /out/vmlinux-vz

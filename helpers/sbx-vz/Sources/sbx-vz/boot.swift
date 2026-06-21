@@ -90,9 +90,17 @@ final class BootTest: NSObject, VZVirtualMachineDelegate {
             dev.connect(toPort: self.vsockPort) { result in
                 switch result {
                 case .success(let conn):
-                    self.note("agent vsock connect ok (fd \(conn.fileDescriptor))")
-                    self.emit(["ok": true, "result": ["vsockConnected": true, "port": self.vsockPort]])
-                    exit(0)
+                    self.note("agent vsock connect ok (fd \(conn.fileDescriptor)); reading…")
+                    let fd = conn.fileDescriptor
+                    DispatchQueue.global().async {
+                        var buf = [UInt8](repeating: 0, count: 256)
+                        let n = read(fd, &buf, buf.count)
+                        let preview = n > 0 ? (String(bytes: buf[0..<n], encoding: .utf8) ?? "<binary>") : "EOF/err errno=\(errno)"
+                        self.note("read \(n) bytes from vsock: \(preview)")
+                        _ = conn // keep the connection alive across the read
+                        self.emit(["ok": n > 0, "result": ["vsockConnected": true, "bytesRead": n]])
+                        exit(n > 0 ? 0 : 7)
+                    }
                 case .failure(let error):
                     if retriesLeft > 0 {
                         self.note("vsock not ready (\(error.localizedDescription)); \(retriesLeft) left")

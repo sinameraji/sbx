@@ -27,7 +27,20 @@ docker run --rm --platform linux/arm64 -v "$PWD/guest:/guest" alpine:3.20 sh -c 
   cp -a /bin /sbin /usr /etc /lib /rootfs/ 2>/dev/null || true
   mkdir -p /rootfs/proc /rootfs/sys /rootfs/dev /rootfs/run /rootfs/tmp /rootfs/workspace
   cp /guest/sbx-agent /rootfs/sbin/sbx-agent
-  printf "#!/bin/sh\nmount -t proc proc /proc 2>/dev/null\nmount -t sysfs sys /sys 2>/dev/null\nmount -t devtmpfs dev /dev 2>/dev/null\necho sbx-guest-init-ok\nexec /sbin/sbx-agent\n" > /rootfs/init
+  cat > /rootfs/init <<"INIT"
+#!/bin/sh
+mount -t proc proc /proc 2>/dev/null
+mount -t sysfs sys /sys 2>/dev/null
+mount -t devtmpfs dev /dev 2>/dev/null
+# Workspace persistent disk (vdb): mount if already formatted (preserves data
+# across stop/start); only format when an unformatted mount fails (first boot).
+if [ -b /dev/vdb ]; then
+  mkdir -p /workspace
+  mount /dev/vdb /workspace 2>/dev/null || { mkfs.ext4 -q -F /dev/vdb && mount /dev/vdb /workspace; }
+fi
+echo sbx-guest-init-ok
+exec /sbin/sbx-agent
+INIT
   chmod +x /rootfs/init
   rm -f /guest/rootfs.img
   mkfs.ext4 -q -F -L sbxroot -d /rootfs /guest/rootfs.img 256M

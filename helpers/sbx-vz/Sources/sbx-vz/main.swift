@@ -1,58 +1,19 @@
 import Foundation
-import Virtualization
 
-// sbx-vz: line-delimited JSON-RPC over stdio, driven by the daemon's AppleVzDriver.
-//
-//   request:  {"id":N,"method":"probe"|"hostInfo"|"shutdown","params":{...}}\n
-//   response: {"id":N,"ok":true,"result":{...}}\n  | {"id":N,"ok":false,"error":"..."}\n
-//
-// M0 surface only. Each response is written with an explicit newline and an
-// unbuffered FileHandle write so the Node side reading line-by-line never stalls
-// on stdio buffering.
+// sbx-vz entrypoint. Modes:
+//   sbx-vz                    one-shot stdio JSON-RPC (probe / hostInfo) — M0.
+//   sbx-vz serve              persistent VM lifecycle + vsock relay — M1+.
+//   sbx-vz boot-test K R [L]  direct boot bring-up harness.
 
-func writeResponse(_ obj: [String: Any]) {
-    guard let data = try? JSONSerialization.data(withJSONObject: obj, options: []) else { return }
-    FileHandle.standardOutput.write(data)
-    FileHandle.standardOutput.write(Data([0x0a]))  // '\n'
-}
+let cliArgs = CommandLine.arguments
 
-/// Report whether this host + binary can run Virtualization.framework VMs.
-func handleProbe() -> [String: Any] {
-    var available = false
-    var reason = ""
-    if #available(macOS 11.0, *) {
-        // Constructing a configuration needs no entitlement and proves the
-        // framework is linked + usable; actually *starting* a VM (M1) needs the
-        // com.apple.security.virtualization entitlement the build signs in.
-        _ = VZVirtualMachineConfiguration()
-        available = true
-    } else {
-        reason = "macOS 11.0+ required for Virtualization.framework"
-    }
-    #if arch(arm64)
-    let arch = "arm64"
-    #else
-    let arch = "x86_64"
-    #endif
-    return [
-        "available": available,
-        "reason": reason,
-        "arch": arch,
-        "macos": ProcessInfo.processInfo.operatingSystemVersionString,
-    ]
-}
-
-/// Host capacity, mirroring the container driver's Docker MemTotal/NCPU.
-func handleHostInfo() -> [String: Any] {
-    let memBytes = ProcessInfo.processInfo.physicalMemory
-    return [
-        "memoryMb": Int(memBytes / (1024 * 1024)),
-        "cpus": ProcessInfo.processInfo.activeProcessorCount,
-    ]
+// Persistent lifecycle server (M1+): `sbx-vz serve` — the daemon drives VM
+// start/stop + the vsock relay over stdio. Never returns.
+if cliArgs.count >= 2 && cliArgs[1] == "serve" {
+    VmServer().run()
 }
 
 // Boot bring-up mode (M1): `sbx-vz boot-test <kernel> <rootfs> [consoleLog]`.
-let cliArgs = CommandLine.arguments
 if cliArgs.count >= 4 && cliArgs[1] == "boot-test" {
     let consoleLog = cliArgs.count >= 5 ? cliArgs[4] : "/tmp/sbx-vz-console.log"
     do {

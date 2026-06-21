@@ -155,6 +155,14 @@ export interface Config {
    * `SBX_VZ_HELPER_PATH` to a bundled/installed location. `SBX_DRIVER=container` ignores it.
    */
   vzHelperPath: string;
+  /** Guest kernel image for the Apple VZ driver (`SBX_VZ_KERNEL`). Uncompressed arm64 Image. */
+  vzKernel: string;
+  /** Base rootfs image for the Apple VZ driver (`SBX_VZ_ROOTFS`). */
+  vzRootfs: string;
+  /** Per-sandbox VM state dir (disks, sockets) for the Apple VZ driver (`SBX_VZ_STATE_DIR`). */
+  vzStateDir: string;
+  /** Default workspace disk size in GiB for a new VZ sandbox (`SBX_VZ_DISK_GB`). */
+  vzDiskGb: number;
   /** Minimum level emitted by the structured logger. */
   logLevel: LogLevel;
   /** Log encoding: `json` (one JSON object per line) or `pretty` (human). */
@@ -242,6 +250,10 @@ export function loadConfig(): Config {
     costEgressPerGb: Number(process.env.SBX_COST_EGRESS_PER_GB ?? 0.01),
     modelPricesPath: process.env.SBX_MODEL_PRICES ?? "",
     vzHelperPath: process.env.SBX_VZ_HELPER_PATH ?? "helpers/sbx-vz/dist/sbx-vz",
+    vzKernel: process.env.SBX_VZ_KERNEL ?? "helpers/sbx-vz/guest/vmlinux-vz",
+    vzRootfs: process.env.SBX_VZ_ROOTFS ?? "helpers/sbx-vz/guest/rootfs.img",
+    vzStateDir: process.env.SBX_VZ_STATE_DIR ?? join(homedir(), ".sbx", "vz"),
+    vzDiskGb: Number(process.env.SBX_VZ_DISK_GB ?? 4),
     logLevel: parseLogLevel(process.env.SBX_LOG_LEVEL),
     logFormat: process.env.SBX_LOG_FORMAT === "json" ? "json" : "pretty",
     apiKey: process.env.SBX_API_KEY ?? "",

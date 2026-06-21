@@ -9,6 +9,16 @@ import type {
   TerminalOptions,
   TerminalSession,
 } from "./types.js";
+import type {
+  ExecEvent,
+  ExecOptions,
+  FileInfo,
+  ListFilesOptions,
+  MkdirOptions,
+  ReadFileOptions,
+  WaitForPortOptions,
+  WriteFileOptions,
+} from "../types.js";
 
 /**
  * Base class for runtime drivers that are part of the architecture but not yet
@@ -43,19 +53,24 @@ export abstract class UnsupportedDriver implements Driver {
   async start(_opts: CreateOptions): Promise<void> {
     this.fail("start");
   }
-  async exec(): Promise<number> {
+  async exec(
+    _id: string,
+    _command: string,
+    _opts: ExecOptions,
+    _onEvent: (e: ExecEvent) => void,
+  ): Promise<number> {
     this.fail("exec");
   }
-  async writeFile(): Promise<void> {
+  async writeFile(_id: string, _opts: WriteFileOptions): Promise<void> {
     this.fail("writeFile");
   }
-  async readFile(): Promise<string> {
+  async readFile(_id: string, _opts: ReadFileOptions): Promise<string> {
     this.fail("readFile");
   }
-  async mkdir(): Promise<void> {
+  async mkdir(_id: string, _opts: MkdirOptions): Promise<void> {
     this.fail("mkdir");
   }
-  async listFiles(): Promise<never> {
+  async listFiles(_id: string, _opts: ListFilesOptions): Promise<FileInfo[]> {
     this.fail("listFiles");
   }
   async watchFiles(): Promise<void> {
@@ -73,7 +88,7 @@ export abstract class UnsupportedDriver implements Driver {
   async streamProcessLogs(): Promise<void> {
     this.fail("streamProcessLogs");
   }
-  async waitForPort(): Promise<boolean> {
+  async waitForPort(_id: string, _port: number, _opts: WaitForPortOptions): Promise<boolean> {
     this.fail("waitForPort");
   }
   async openTcpBridge(): Promise<TcpBridge> {
@@ -88,7 +103,7 @@ export abstract class UnsupportedDriver implements Driver {
   async restoreBackup(): Promise<void> {
     this.fail("restoreBackup");
   }
-  async destroy(): Promise<void> {
+  async destroy(_id: string): Promise<void> {
     this.fail("destroy");
   }
   async stats(): Promise<SandboxStats> {

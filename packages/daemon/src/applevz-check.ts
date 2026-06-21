@@ -93,6 +93,27 @@ async function main(): Promise<void> {
     assert.ok(!dead[0]?.running, "process killed");
     ok("background process: start → running → logs → kill → dead");
 
+    // M4b: preview-URL TCP bridge — a busybox `nc` loop serves a fixed HTTP
+    // response; fetch it through the bridge.
+    await driver.startProcess(
+      id,
+      "srv",
+      "while true; do printf 'HTTP/1.0 200 OK\\r\\n\\r\\nbridge-works' | nc -l -p 9100 2>/dev/null; done",
+      {},
+    );
+    await sleep(900);
+    const bridge = await driver.openTcpBridge(id, 9100, "127.0.0.1");
+    const resp = await new Promise<string>((resolve) => {
+      let buf = "";
+      bridge.stream.on("data", (d: Buffer) => (buf += d.toString()));
+      bridge.stream.on("end", () => resolve(buf));
+      bridge.stream.on("error", () => resolve(buf));
+      setTimeout(() => resolve(buf), 2500);
+    });
+    bridge.close();
+    assert.match(resp, /bridge-works/, "HTTP response flows through the bridge");
+    ok("preview TCP bridge: HTTP round-trips through the guest");
+
     await driver.destroy(id);
     ok("destroy");
 

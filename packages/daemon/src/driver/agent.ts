@@ -1,4 +1,5 @@
 import { connect, type Socket } from "node:net";
+import { Duplex } from "node:stream";
 import type { ExecEvent, FileInfo } from "../types.js";
 
 /**
@@ -209,6 +210,48 @@ export class AgentConn {
 
   async setEnv(env: Record<string, string>): Promise<void> {
     await this.request({ method: "setEnv", env }).done;
+  }
+
+  /**
+   * Open a bidirectional stream for a method that bridges raw bytes (tcpConnect /
+   * pty): writes become Stdin frames host→guest, guest Stdout frames become
+   * readable data, the terminal Result frame ends the readable side, and
+   * destroying the Duplex sends a Close frame. Returns a Node Duplex the caller
+   * (preview proxy / terminal WS) pipes like any socket.
+   */
+  openStream(req: Record<string, unknown>): Duplex {
+    const streamId = this.nextStreamId++;
+    const writeFrame = this.writeFrame.bind(this);
+    const pending = this.pending;
+    const duplex = new Duplex({
+      write(chunk, _enc, cb) {
+        writeFrame(FRAME.Stdin, streamId, Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+        cb();
+      },
+      read() {
+        /* data is pushed as Stdout frames arrive */
+      },
+      destroy(err, cb) {
+        if (pending.has(streamId)) {
+          writeFrame(FRAME.Close, streamId, Buffer.alloc(0));
+          pending.delete(streamId);
+        }
+        cb(err);
+      },
+    });
+    this.pending.set(streamId, {
+      onStdout: (b) => duplex.push(b),
+      onStderr: (b) => duplex.push(b),
+      resolve: () => duplex.push(null), // Result frame → readable EOF
+      reject: (e) => duplex.destroy(e),
+    });
+    this.writeFrame(FRAME.Control, streamId, Buffer.from(JSON.stringify(req), "utf8"));
+    return duplex;
+  }
+
+  /** Send a control message (e.g. pty resize) on an existing stream. */
+  controlStream(streamId: number, msg: Record<string, unknown>): void {
+    this.writeFrame(FRAME.Control, streamId, Buffer.from(JSON.stringify(msg), "utf8"));
   }
 
   async stats(): Promise<unknown> {

@@ -219,7 +219,7 @@ export class AgentConn {
    * destroying the Duplex sends a Close frame. Returns a Node Duplex the caller
    * (preview proxy / terminal WS) pipes like any socket.
    */
-  openStream(req: Record<string, unknown>): Duplex {
+  openStream(req: Record<string, unknown>): { stream: Duplex; streamId: number } {
     const streamId = this.nextStreamId++;
     const writeFrame = this.writeFrame.bind(this);
     const pending = this.pending;
@@ -246,7 +246,7 @@ export class AgentConn {
       reject: (e) => duplex.destroy(e),
     });
     this.writeFrame(FRAME.Control, streamId, Buffer.from(JSON.stringify(req), "utf8"));
-    return duplex;
+    return { stream: duplex, streamId };
   }
 
   /** Send a control message (e.g. pty resize) on an existing stream. */

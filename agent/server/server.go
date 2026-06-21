@@ -162,6 +162,8 @@ func (a *Agent) dispatch(ctx context.Context, w *proto.FrameWriter, id uint32, r
 		a.handleListFiles(w, id, req)
 	case "waitForPort":
 		a.handleWaitForPort(ctx, w, id, req)
+	case "tcpConnect":
+		a.handleTcpConnect(ctx, w, id, req, st, mu)
 	case "setEnv":
 		a.handleSetEnv(w, id, req)
 	case "stats":
@@ -351,6 +353,33 @@ func (a *Agent) handleWaitForPort(ctx context.Context, w *proto.FrameWriter, id 
 		case <-time.After(interval):
 		}
 	}
+}
+
+// handleTcpConnect dials host:port inside the guest and bridges it to the stream:
+// Stdin frames are written to the connection (host→service), the connection's
+// output is streamed back as Stdout frames (service→host). Backs the preview-URL
+// proxy. The stream's stdin is the dialed conn; a Close/cancel from the host shuts
+// the connection so the read loop unblocks.
+func (a *Agent) handleTcpConnect(ctx context.Context, w *proto.FrameWriter, id uint32, req proto.Request, st *stream, mu *sync.Mutex) {
+	host := req.Host
+	if host == "" {
+		host = "127.0.0.1"
+	}
+	conn, err := net.DialTimeout("tcp", net.JoinHostPort(host, strconv.Itoa(req.Port)), 10*time.Second)
+	if err != nil {
+		writeError(w, id, "tcpConnect: "+err.Error())
+		return
+	}
+	defer conn.Close()
+	mu.Lock()
+	st.stdin = conn // host Stdin frames → the dialed connection
+	mu.Unlock()
+	go func() {
+		<-ctx.Done()
+		conn.Close() // unblock the read loop when the host closes the stream
+	}()
+	copyToFrames(w, proto.Stdout, id, conn) // connection output → Stdout frames
+	writeResult(w, id, proto.Result{OK: true})
 }
 
 func (a *Agent) handleSetEnv(w *proto.FrameWriter, id uint32, req proto.Request) {

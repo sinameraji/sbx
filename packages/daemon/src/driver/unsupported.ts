@@ -105,7 +105,7 @@ export abstract class UnsupportedDriver implements Driver {
   async waitForPort(_id: string, _port: number, _opts: WaitForPortOptions): Promise<boolean> {
     this.fail("waitForPort");
   }
-  async openTcpBridge(): Promise<TcpBridge> {
+  async openTcpBridge(_id: string, _port: number, _host: string): Promise<TcpBridge> {
     this.fail("openTcpBridge");
   }
   async openTerminal(_id: string, _opts: TerminalOptions): Promise<TerminalSession> {

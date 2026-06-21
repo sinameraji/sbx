@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { AgentConn } from "./agent.js";
 import { UnsupportedDriver } from "./unsupported.js";
-import type { CreateOptions, HostInfo, ProcessLiveness, StartProcessResult } from "./types.js";
+import type { CreateOptions, HostInfo, ProcessLiveness, StartProcessResult, TcpBridge } from "./types.js";
 import type {
   ExecEvent,
   ExecOptions,
@@ -265,6 +265,22 @@ export class AppleVzDriver extends UnsupportedDriver {
       opts.signal.removeEventListener("abort", onAbort);
       conn.close();
     }
+  }
+
+  /** Raw byte bridge to `host:port` inside the guest — backs the preview-URL proxy.
+   *  Each bridge gets its own AgentConn (the duplex is long-lived). */
+  async openTcpBridge(id: string, port: number, host: string): Promise<TcpBridge> {
+    const vm = this.vms.get(id);
+    if (!vm) throw new Error(`applevz: sandbox ${id} is not running`);
+    const conn = await AgentConn.connect({ path: vm.socketPath, timeoutMs: 15000 });
+    const stream = conn.openStream({ method: "tcpConnect", host, port });
+    return {
+      stream,
+      close: () => {
+        stream.destroy();
+        conn.close();
+      },
+    };
   }
 
   /** Run a command and collect its full stdout/stderr/exit (for the process shims). */

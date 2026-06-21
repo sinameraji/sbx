@@ -32,6 +32,8 @@ docker run --rm --platform linux/arm64 -v "$PWD/guest:/guest" alpine:3.20 sh -c 
 mount -t proc proc /proc 2>/dev/null
 mount -t sysfs sys /sys 2>/dev/null
 mount -t devtmpfs dev /dev 2>/dev/null
+# Loopback up so 127.0.0.1 (waitForPort, preview bridge to local servers) is routable.
+ip link set lo up 2>/dev/null || ifconfig lo up 2>/dev/null || true
 # Workspace persistent disk (vdb): mount if already formatted (preserves data
 # across stop/start); only format when an unformatted mount fails (first boot).
 if [ -b /dev/vdb ]; then

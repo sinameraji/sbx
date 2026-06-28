@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"encoding/json"
 	"io"
 	"net"
@@ -199,6 +200,66 @@ func TestStats(t *testing.T) {
 	}
 	if m["onlineCpus"].(float64) < 1 {
 		t.Fatalf("stats onlineCpus = %v, want >= 1", m["onlineCpus"])
+	}
+}
+
+// TestTarRoundTrip exercises the binary-safe backup path with no VM: tar a
+// populated dir (tarWorkspace → Stdout frames), then untar the captured bytes
+// into a fresh dir (untarWorkspace ← Stdin frames + EOF) and assert the tree and
+// file contents round-trip exactly. Also proves the stdin-attach buffering, since
+// the payload frames are written immediately after the request.
+func TestTarRoundTrip(t *testing.T) {
+	tc, _, done := newTestClient(t)
+	defer done()
+
+	src := t.TempDir()
+	if err := os.WriteFile(filepath.Join(src, "a.txt"), []byte("alpha"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(src, "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// A byte sequence that is invalid UTF-8, to prove the transfer is binary-safe.
+	binBytes := []byte{0x00, 0xff, 0xfe, 0x10, 'h', 'i'}
+	if err := os.WriteFile(filepath.Join(src, "sub", "bin.dat"), binBytes, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// tarWorkspace: collect the streamed tar bytes.
+	tarBytes, _, res := tc.collect(tc.call(proto.Request{Method: "tarWorkspace", Path: src}))
+	if !res.OK {
+		t.Fatalf("tarWorkspace: %+v", res)
+	}
+	if len(tarBytes) == 0 {
+		t.Fatal("tarWorkspace produced no bytes")
+	}
+
+	// untarWorkspace into a fresh dir: send the request, then stream the payload
+	// as Stdin frames followed by EOF (before the handler attaches stdin — the
+	// buffering must catch them).
+	dst := t.TempDir()
+	tc.seq++
+	id := tc.seq
+	reqBody, _ := json.Marshal(proto.Request{Method: "untarWorkspace", Path: dst})
+	if err := tc.w.Write(proto.Control, id, reqBody); err != nil {
+		t.Fatalf("write untar control: %v", err)
+	}
+	if err := tc.w.Write(proto.Stdin, id, tarBytes); err != nil {
+		t.Fatalf("write untar stdin: %v", err)
+	}
+	if err := tc.w.Write(proto.EOF, id, nil); err != nil {
+		t.Fatalf("write untar eof: %v", err)
+	}
+	if _, _, res := tc.collect(id); !res.OK {
+		t.Fatalf("untarWorkspace: %+v", res)
+	}
+
+	if got, err := os.ReadFile(filepath.Join(dst, "a.txt")); err != nil || string(got) != "alpha" {
+		t.Fatalf("a.txt = %q (%v), want alpha", got, err)
+	}
+	got, err := os.ReadFile(filepath.Join(dst, "sub", "bin.dat"))
+	if err != nil || !bytes.Equal(got, binBytes) {
+		t.Fatalf("bin.dat = %v (%v), want %v", got, err, binBytes)
 	}
 }
 

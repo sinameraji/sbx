@@ -12,6 +12,7 @@ package server
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -63,10 +64,37 @@ func indexByte(s string, b byte) int {
 
 // stream is an in-flight request that accepts further input frames (exec/pty
 // stdin, untar bytes). Request/response methods (files, stats) need none.
+//
+// A handler attaches its stdin sink (process stdin, pty master, dialed conn,
+// tar -x stdin) only after it has started the underlying process — but the host
+// may already be sending Stdin/EOF frames by then (untar in particular streams
+// the payload immediately after the request). pendingInput buffers those frames
+// and eofPending records an early EOF, both flushed by attachStdin once the sink
+// exists, so no input is dropped. All three fields are guarded by Serve's mu.
 type stream struct {
-	cancel  context.CancelFunc
-	stdin   io.WriteCloser    // process stdin / pty master / dialed conn; nil if none
-	control func(payload []byte) // in-stream control (e.g. pty resize); nil if none
+	cancel       context.CancelFunc
+	stdin        io.WriteCloser       // process stdin / pty master / dialed conn / untar stdin; nil until attached
+	control      func(payload []byte) // in-stream control (e.g. pty resize); nil if none
+	pendingInput [][]byte             // Stdin frames received before stdin was attached
+	eofPending   bool                 // an EOF received before stdin was attached
+}
+
+// attachStdin sets the stream's stdin sink and flushes any input buffered before
+// the handler was ready (see stream doc). mu is Serve's stream mutex; it is held
+// only while swapping fields, never across the writes.
+func attachStdin(mu *sync.Mutex, st *stream, w io.WriteCloser) {
+	mu.Lock()
+	st.stdin = w
+	pending := st.pendingInput
+	st.pendingInput = nil
+	eof := st.eofPending
+	mu.Unlock()
+	for _, b := range pending {
+		w.Write(b)
+	}
+	if eof {
+		w.Close()
+	}
 }
 
 // Serve runs the protocol loop on conn until it closes or errors. It sends the
@@ -136,18 +164,26 @@ func (a *Agent) Serve(conn io.ReadWriteCloser) error {
 			}(f.StreamID, req)
 		case proto.Stdin:
 			mu.Lock()
-			st := streams[f.StreamID]
-			mu.Unlock()
-			if st != nil && st.stdin != nil {
-				st.stdin.Write(f.Payload)
+			if st := streams[f.StreamID]; st != nil {
+				if st.stdin != nil {
+					st.stdin.Write(f.Payload)
+				} else {
+					// Buffer until the handler attaches stdin. ReadFrame allocated
+					// f.Payload fresh, so it's safe to retain without copying.
+					st.pendingInput = append(st.pendingInput, f.Payload)
+				}
 			}
+			mu.Unlock()
 		case proto.EOF:
 			mu.Lock()
-			st := streams[f.StreamID]
-			mu.Unlock()
-			if st != nil && st.stdin != nil {
-				st.stdin.Close()
+			if st := streams[f.StreamID]; st != nil {
+				if st.stdin != nil {
+					st.stdin.Close()
+				} else {
+					st.eofPending = true
+				}
 			}
+			mu.Unlock()
 		case proto.Close:
 			mu.Lock()
 			st := streams[f.StreamID]
@@ -177,6 +213,10 @@ func (a *Agent) dispatch(ctx context.Context, w *proto.FrameWriter, id uint32, r
 		a.handleWaitForPort(ctx, w, id, req)
 	case "tcpConnect":
 		a.handleTcpConnect(ctx, w, id, req, st, mu)
+	case "tarWorkspace":
+		a.handleTarWorkspace(ctx, w, id, req)
+	case "untarWorkspace":
+		a.handleUntarWorkspace(ctx, w, id, req, st, mu)
 	case "openPty":
 		a.handleOpenPty(ctx, w, id, req, st, mu)
 	case "setEnv":
@@ -231,9 +271,7 @@ func (a *Agent) handleExec(ctx context.Context, w *proto.FrameWriter, id uint32,
 		writeError(w, id, "stdin pipe: "+err.Error())
 		return
 	}
-	mu.Lock()
-	st.stdin = stdin
-	mu.Unlock()
+	attachStdin(mu, st, stdin)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -386,14 +424,75 @@ func (a *Agent) handleTcpConnect(ctx context.Context, w *proto.FrameWriter, id u
 		return
 	}
 	defer conn.Close()
-	mu.Lock()
-	st.stdin = conn // host Stdin frames → the dialed connection
-	mu.Unlock()
+	attachStdin(mu, st, conn) // host Stdin frames → the dialed connection
 	go func() {
 		<-ctx.Done()
 		conn.Close() // unblock the read loop when the host closes the stream
 	}()
 	copyToFrames(w, proto.Stdout, id, conn) // connection output → Stdout frames
+	writeResult(w, id, proto.Result{OK: true})
+}
+
+// handleTarWorkspace streams a tar of `path` (default /workspace) to the host as
+// Stdout frames, ending with a Result. Binary-safe: the bytes flow through raw
+// Stdout frames, not the lossy UTF-8 exec path. Backs createBackup. The tar is
+// rooted at "." so it restores into any target dir.
+func (a *Agent) handleTarWorkspace(ctx context.Context, w *proto.FrameWriter, id uint32, req proto.Request) {
+	path := req.Path
+	if path == "" {
+		path = "/workspace"
+	}
+	cmd := exec.CommandContext(ctx, "tar", "-cf", "-", "-C", path, ".")
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		writeError(w, id, "tar stdout: "+err.Error())
+		return
+	}
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Start(); err != nil {
+		writeError(w, id, "tar start: "+err.Error())
+		return
+	}
+	copyToFrames(w, proto.Stdout, id, stdout)
+	if err := cmd.Wait(); err != nil {
+		writeError(w, id, "tar: "+err.Error()+": "+stderr.String())
+		return
+	}
+	writeResult(w, id, proto.Result{OK: true})
+}
+
+// handleUntarWorkspace replaces `path` (default /workspace) with the tar streamed
+// in as Stdin frames: the existing contents are cleared first (restore is a
+// replacement, mirroring the container driver), then `tar -x` consumes stdin
+// until the host's EOF frame. Backs restoreBackup.
+func (a *Agent) handleUntarWorkspace(ctx context.Context, w *proto.FrameWriter, id uint32, req proto.Request, st *stream, mu *sync.Mutex) {
+	path := req.Path
+	if path == "" {
+		path = "/workspace"
+	}
+	if entries, err := os.ReadDir(path); err == nil {
+		for _, e := range entries {
+			os.RemoveAll(filepath.Join(path, e.Name()))
+		}
+	}
+	cmd := exec.CommandContext(ctx, "tar", "-xf", "-", "-C", path)
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		writeError(w, id, "tar stdin: "+err.Error())
+		return
+	}
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Start(); err != nil {
+		writeError(w, id, "untar start: "+err.Error())
+		return
+	}
+	attachStdin(mu, st, stdin) // flush any payload buffered before we were ready, incl. EOF
+	if err := cmd.Wait(); err != nil {
+		writeError(w, id, "untar: "+err.Error()+": "+stderr.String())
+		return
+	}
 	writeResult(w, id, proto.Result{OK: true})
 }
 
@@ -422,7 +521,6 @@ func (a *Agent) handleOpenPty(ctx context.Context, w *proto.FrameWriter, id uint
 	}
 
 	mu.Lock()
-	st.stdin = ptmx // host Stdin frames → pty master (keyboard input)
 	st.control = func(payload []byte) {
 		var m struct {
 			Method string `json:"method"`
@@ -434,6 +532,7 @@ func (a *Agent) handleOpenPty(ctx context.Context, w *proto.FrameWriter, id uint
 		}
 	}
 	mu.Unlock()
+	attachStdin(mu, st, ptmx) // host Stdin frames → pty master (keyboard input)
 
 	go func() {
 		<-ctx.Done()

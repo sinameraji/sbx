@@ -27,6 +27,12 @@ export interface SandboxRecord {
   image: string;
   status: SandboxStatus;
   createdAt: string;
+  /**
+   * Runtime driver backing this sandbox (`container` | `applevz` | `firecracker`).
+   * Set at create time (per-sandbox isolation selection); the daemon routes every
+   * op to this driver. Empty/undefined falls back to the daemon default driver.
+   */
+  driver?: string;
   labels: Record<string, string>;
   /**
    * Sandbox-level environment variables, merged into every `exec`/`startProcess`

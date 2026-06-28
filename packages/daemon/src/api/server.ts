@@ -807,6 +807,13 @@ async function createSandbox(
 ): Promise<void> {
   const id = SandboxStore.newId();
   const image = typeof body.image === "string" ? body.image : config.defaultImage;
+  // Per-sandbox isolation selection: pick the runtime driver (default SBX_DRIVER).
+  const driverName = typeof body.driver === "string" && body.driver ? body.driver : config.driver;
+  if (!DRIVER_NAMES.includes(driverName as (typeof DRIVER_NAMES)[number])) {
+    return sendJson(res, 400, {
+      error: `unknown driver "${driverName}" (expected: ${DRIVER_NAMES.join(" | ")})`,
+    });
+  }
   const labels = (body.labels as Record<string, string>) ?? {};
   const persist = body.persist !== false;
   const sleepAfterMs =
@@ -846,7 +853,7 @@ async function createSandbox(
   }
 
   try {
-    await driver.create({ id, image, env, labels, persist, setup, repo, repoRef, limits });
+    await driver.create({ id, image, driver: driverName, env, labels, persist, setup, repo, repoRef, limits });
   } catch (err) {
     // Provisioning failed (e.g. repo clone) — tear down the half-built container
     // so it doesn't orphan, and report the failure instead of leaking it.
@@ -867,6 +874,7 @@ async function createSandbox(
     image,
     status: "running",
     createdAt: now,
+    driver: driverName,
     labels,
     env,
     persist,

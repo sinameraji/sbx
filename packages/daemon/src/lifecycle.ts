@@ -43,6 +43,7 @@ export async function resumeSandbox(
   await driver.start({
     id: record.id,
     image: record.image,
+    driver: record.driver,
     env: record.env,
     labels: record.labels,
     persist: record.persist,

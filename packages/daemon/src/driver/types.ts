@@ -88,6 +88,12 @@ export interface SandboxStats {
 export interface CreateOptions {
   id: string;
   image: string;
+  /**
+   * Runtime driver to back this sandbox (per-sandbox isolation selection). The
+   * `DriverRouter` reads it to dispatch `create`/`start`; later id-addressed ops
+   * resolve the driver from the sandbox record. Empty → the daemon default.
+   */
+  driver?: string;
   env?: Record<string, string>;
   labels?: Record<string, string>;
   /**

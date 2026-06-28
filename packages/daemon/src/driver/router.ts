@@ -1,0 +1,176 @@
+import type { Config } from "../config.js";
+import type { SandboxStore } from "../store.js";
+import type {
+  ExecEvent,
+  ExecOptions,
+  FileChangeEvent,
+  FileInfo,
+  ListFilesOptions,
+  MkdirOptions,
+  ReadFileOptions,
+  StartProcessOptions,
+  WaitForPortOptions,
+  WatchOptions,
+  WriteFileOptions,
+} from "../types.js";
+import { createNamedDriver } from "./index.js";
+import type {
+  CreateOptions,
+  Driver,
+  HostInfo,
+  ProcessLiveness,
+  SandboxStats,
+  StartProcessResult,
+  TcpBridge,
+  TerminalOptions,
+  TerminalSession,
+} from "./types.js";
+
+/**
+ * Per-sandbox driver router. Implements the `Driver` surface but, instead of
+ * doing the work itself, dispatches each call to the runtime driver that backs
+ * the addressed sandbox — so a single daemon can run container sandboxes and
+ * Apple VZ microVM sandboxes side by side ("swap the isolation tier per sandbox,
+ * change nothing else"). Every existing `driver.<op>(id, …)` call site keeps
+ * working unchanged; the routing happens here.
+ *
+ * The sandbox→driver mapping is the record's `driver` field (set at create from
+ * the request, persisted in the store). `create`/`start` carry the choice on
+ * their `CreateOptions`; id-addressed ops read it back from the store. An unset
+ * or unknown value falls back to the daemon default driver. Driver instances are
+ * built lazily by name and cached, so an unused driver is never constructed.
+ */
+export class DriverRouter implements Driver {
+  readonly name: string;
+  private instances = new Map<string, Driver>();
+
+  constructor(
+    private readonly config: Config,
+    private readonly store: SandboxStore,
+    private readonly defaultName: string,
+  ) {
+    this.name = defaultName;
+  }
+
+  /** Get (constructing + caching on first use) the driver instance for a name. */
+  private instance(name: string | undefined): Driver {
+    const key = name || this.defaultName;
+    let d = this.instances.get(key);
+    if (!d) {
+      d = createNamedDriver(key, this.config);
+      this.instances.set(key, d);
+    }
+    return d;
+  }
+
+  /** The driver backing an existing sandbox (from its record), or the default. */
+  private forId(id: string): Driver {
+    return this.instance(this.store.get(id)?.driver);
+  }
+
+  /** The driver chosen for a create/start (opts wins, then the record, then default). */
+  private forOpts(opts: CreateOptions): Driver {
+    return this.instance(opts.driver ?? this.store.get(opts.id)?.driver);
+  }
+
+  // --- lifecycle (choice carried on opts) -----------------------------------
+
+  create(opts: CreateOptions): Promise<void> {
+    return this.forOpts(opts).create(opts);
+  }
+  start(opts: CreateOptions): Promise<void> {
+    return this.forOpts(opts).start(opts);
+  }
+  stop(id: string): Promise<void> {
+    return this.forId(id).stop(id);
+  }
+  destroy(id: string): Promise<void> {
+    return this.forId(id).destroy(id);
+  }
+
+  // --- id-addressed ops (driver resolved from the record) -------------------
+
+  exec(
+    id: string,
+    command: string,
+    opts: ExecOptions,
+    onEvent: (e: ExecEvent) => void,
+  ): Promise<number> {
+    return this.forId(id).exec(id, command, opts, onEvent);
+  }
+  writeFile(id: string, opts: WriteFileOptions): Promise<void> {
+    return this.forId(id).writeFile(id, opts);
+  }
+  readFile(id: string, opts: ReadFileOptions): Promise<string> {
+    return this.forId(id).readFile(id, opts);
+  }
+  mkdir(id: string, opts: MkdirOptions): Promise<void> {
+    return this.forId(id).mkdir(id, opts);
+  }
+  listFiles(id: string, opts: ListFilesOptions): Promise<FileInfo[]> {
+    return this.forId(id).listFiles(id, opts);
+  }
+  watchFiles(
+    id: string,
+    path: string,
+    opts: WatchOptions & { signal: AbortSignal },
+    onEvent: (e: FileChangeEvent) => void,
+  ): Promise<void> {
+    return this.forId(id).watchFiles(id, path, opts, onEvent);
+  }
+  startProcess(
+    id: string,
+    procId: string,
+    command: string,
+    opts: StartProcessOptions,
+  ): Promise<StartProcessResult> {
+    return this.forId(id).startProcess(id, procId, command, opts);
+  }
+  listProcesses(
+    id: string,
+    procs: Array<{ procId: string; pid: number }>,
+  ): Promise<ProcessLiveness[]> {
+    return this.forId(id).listProcesses(id, procs);
+  }
+  killProcess(id: string, pid: number, signal?: string): Promise<void> {
+    return this.forId(id).killProcess(id, pid, signal);
+  }
+  streamProcessLogs(
+    id: string,
+    logPath: string,
+    opts: { follow: boolean; signal: AbortSignal },
+    onData: (chunk: string) => void,
+  ): Promise<void> {
+    return this.forId(id).streamProcessLogs(id, logPath, opts, onData);
+  }
+  waitForPort(id: string, port: number, opts: WaitForPortOptions): Promise<boolean> {
+    return this.forId(id).waitForPort(id, port, opts);
+  }
+  openTcpBridge(id: string, port: number, host: string): Promise<TcpBridge> {
+    return this.forId(id).openTcpBridge(id, port, host);
+  }
+  openTerminal(id: string, opts: TerminalOptions): Promise<TerminalSession> {
+    return this.forId(id).openTerminal(id, opts);
+  }
+  createBackup(id: string, tarPath: string): Promise<{ bytes: number }> {
+    return this.forId(id).createBackup(id, tarPath);
+  }
+  restoreBackup(id: string, tarPath: string): Promise<void> {
+    return this.forId(id).restoreBackup(id, tarPath);
+  }
+  stats(id: string): Promise<SandboxStats> {
+    return this.forId(id).stats(id);
+  }
+
+  // --- host-level (default driver) ------------------------------------------
+
+  /** Ping the default driver — the daemon's fail-fast startup check. Other
+   *  drivers are validated lazily when a sandbox first selects them. */
+  ping(): Promise<void> {
+    return this.instance(this.defaultName).ping();
+  }
+  /** Host capacity from the default driver (mixed-driver accounting is future work). */
+  hostInfo(): Promise<HostInfo> {
+    return this.instance(this.defaultName).hostInfo();
+  }
+}

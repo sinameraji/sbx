@@ -1,4 +1,4 @@
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { execFileSync, spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import {
   closeSync,
   createReadStream,
@@ -10,10 +10,11 @@ import {
   rmSync,
   unlinkSync,
 } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { AgentConn } from "./agent.js";
 import { UnsupportedDriver } from "./unsupported.js";
+import { VzImageCache } from "./vz-image.js";
 import type {
   CreateOptions,
   HostInfo,
@@ -47,6 +48,8 @@ export interface VzConfig {
   rootfs: string;
   stateDir: string;
   diskGb: number;
+  /** Cache dir for OCI→ext4 converted rootfs images + the blank workspace template. */
+  imageCacheDir: string;
 }
 
 /** Live per-sandbox VM: the `sbx-vz serve` process + its relay socket + disk. */
@@ -71,9 +74,18 @@ interface VmState {
 export class AppleVzDriver extends UnsupportedDriver {
   readonly name = "applevz";
   private vms = new Map<string, VmState>();
+  private images: VzImageCache;
 
   constructor(private readonly cfg: VzConfig) {
     super();
+    // `helpers/sbx-vz` holds the converter scripts + staged guest files, two dirs
+    // up from the helper binary (helpers/sbx-vz/dist/sbx-vz).
+    const vzDir = dirname(dirname(cfg.helperPath));
+    this.images = new VzImageCache({
+      vzDir,
+      cacheDir: cfg.imageCacheDir,
+      prebuiltRootfs: cfg.rootfs,
+    });
   }
 
   // --- lifecycle ------------------------------------------------------------
@@ -98,8 +110,28 @@ export class AppleVzDriver extends UnsupportedDriver {
     if (this.vms.has(id)) return; // already running
     const stateDir = join(this.cfg.stateDir, id);
     mkdirSync(stateDir, { recursive: true });
+
+    // Resolve the rootfs for this sandbox's image (sentinels → prebuilt Alpine
+    // base; anything else is converted from the OCI image + cached).
+    const rootfs = await this.images.ensureRootfs(opts.image);
+
+    // First boot only: give the sandbox its own workspace disk. Prefer cloning the
+    // blank pre-formatted template (works for images without mkfs.ext4, and the
+    // guest just mounts it); fall back to a sparse file the guest formats itself.
     const workspaceImg = join(stateDir, "workspace.img");
-    ensureSparseFile(workspaceImg, this.cfg.diskGb * 1024 ** 3); // guest formats on first boot
+    if (!existsSync(workspaceImg)) {
+      let blank: string | null = null;
+      try {
+        blank = await this.images.ensureBlankWorkspace(this.cfg.diskGb);
+      } catch (err) {
+        log.warn("blank workspace build failed; guest will format a sparse disk", {
+          sandbox: id,
+          error: (err as Error).message,
+        });
+      }
+      if (blank) cloneFile(blank, workspaceImg);
+      else ensureSparseFile(workspaceImg, this.cfg.diskGb * 1024 ** 3);
+    }
     const socketPath = `/tmp/sbx-vz-${id}.sock`; // short, fits sun_path
     try {
       unlinkSync(socketPath);
@@ -119,7 +151,7 @@ export class AppleVzDriver extends UnsupportedDriver {
     try {
       await helper.rpc("start", {
         kernel: this.cfg.kernel,
-        rootfs: this.cfg.rootfs,
+        rootfs,
         workspace: workspaceImg,
         cpus,
         memMb,
@@ -532,6 +564,17 @@ class HelperProcess {
     } catch {
       /* already gone */
     }
+  }
+}
+
+/** Copy `src` to `dst`, preferring an APFS copy-on-write clone (instant, shares
+ *  blocks until written) and falling back to a sparse-preserving `cp`. Used to
+ *  give each sandbox its own workspace disk from the blank template cheaply. */
+function cloneFile(src: string, dst: string): void {
+  try {
+    execFileSync("cp", ["-c", src, dst]); // APFS clonefile()
+  } catch {
+    execFileSync("cp", [src, dst]); // non-APFS: plain copy (still sparse-aware on macOS)
   }
 }
 

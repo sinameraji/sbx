@@ -163,6 +163,12 @@ export interface Config {
   vzStateDir: string;
   /** Default workspace disk size in GiB for a new VZ sandbox (`SBX_VZ_DISK_GB`). */
   vzDiskGb: number;
+  /**
+   * Cache dir for OCI→ext4 converted rootfs images + the blank workspace template
+   * (`SBX_VZ_IMAGE_CACHE`). Keyed by image name; populated on demand from
+   * `SBX_IMAGE`. Kept separate from the per-sandbox state dir so it survives.
+   */
+  vzImageCacheDir: string;
   /** Minimum level emitted by the structured logger. */
   logLevel: LogLevel;
   /** Log encoding: `json` (one JSON object per line) or `pretty` (human). */
@@ -254,6 +260,7 @@ export function loadConfig(): Config {
     vzRootfs: process.env.SBX_VZ_ROOTFS ?? "helpers/sbx-vz/guest/rootfs.img",
     vzStateDir: process.env.SBX_VZ_STATE_DIR ?? join(homedir(), ".sbx", "vz"),
     vzDiskGb: Number(process.env.SBX_VZ_DISK_GB ?? 4),
+    vzImageCacheDir: process.env.SBX_VZ_IMAGE_CACHE ?? join(homedir(), ".sbx", "vz", "images"),
     logLevel: parseLogLevel(process.env.SBX_LOG_LEVEL),
     logFormat: process.env.SBX_LOG_FORMAT === "json" ? "json" : "pretty",
     apiKey: process.env.SBX_API_KEY ?? "",

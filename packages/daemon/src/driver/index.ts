@@ -31,6 +31,7 @@ export function createDriver(config: Config): Driver {
         rootfs: config.vzRootfs,
         stateDir: config.vzStateDir,
         diskGb: config.vzDiskGb,
+        imageCacheDir: config.vzImageCacheDir,
       });
     default:
       throw new Error(

@@ -7,7 +7,7 @@
  */
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { AppleVzDriver } from "./driver/applevz.js";
@@ -20,6 +20,8 @@ async function main(): Promise<void> {
     rootfs: "helpers/sbx-vz/guest/rootfs.img",
     stateDir,
     diskGb: 2,
+    // Stable cache so converted images + the blank workspace survive across runs.
+    imageCacheDir: join(homedir(), ".sbx", "vz", "images"),
   });
   const id = "vzcheck01";
   let passed = 0;
@@ -229,6 +231,23 @@ async function main(): Promise<void> {
       ok(`resource limits: ${(memKb / 1024) | 0}MB mem / ${nproc} cpu / pids.max=${pidsMax}`);
     } finally {
       await driver.destroy(lid).catch(() => {});
+    }
+
+    // M6b-2: honor SBX_IMAGE — convert a real OCI image and run its own python.
+    const pyId = "vzpython01";
+    try {
+      console.error("[check] converting python:3.11-slim → VZ rootfs (first run pulls + builds)…");
+      await driver.create({ id: pyId, image: "python:3.11-slim", persist: true });
+      let pyOut = "";
+      const pc = await driver.exec(pyId, "python3 --version && echo IMG_OK", {}, (e) => {
+        if (e.type === "stdout") pyOut += e.data;
+      });
+      assert.equal(pc, 0, "python3 exec exit code");
+      assert.match(pyOut, /Python 3\.11/, "the converted image runs its own python3");
+      assert.match(pyOut, /IMG_OK/, "exec works in the converted image");
+      ok(`SBX_IMAGE honored: ${pyOut.trim().split("\n")[0]}`);
+    } finally {
+      await driver.destroy(pyId).catch(() => {});
     }
 
     console.log(`\napplevz-check: ${passed} checks passed`);

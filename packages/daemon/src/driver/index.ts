@@ -8,13 +8,22 @@ import type { Driver } from "./types.js";
 export const DRIVER_NAMES = ["container", "firecracker", "applevz"] as const;
 
 /**
- * Construct the runtime driver selected by `config.driver` (`SBX_DRIVER`). The
- * container driver is the only built implementation today; the microVM drivers
- * compile and report a clear "needs <host>" error from `ping()` so the daemon
- * fails fast with guidance. Adding a real driver is a one-line change here.
+ * Construct the runtime driver named by `config.driver` (`SBX_DRIVER`) — the
+ * daemon's default. The `DriverRouter` calls `createNamedDriver` to build other
+ * drivers on demand for per-sandbox isolation selection.
  */
 export function createDriver(config: Config): Driver {
-  switch (config.driver) {
+  return createNamedDriver(config.driver, config);
+}
+
+/**
+ * Construct a specific runtime driver by name. The container driver is fully
+ * built; the microVM drivers compile and report a clear "needs <host>" error
+ * from `ping()` so a bad selection fails with guidance. Adding a real driver is
+ * a one-line change here.
+ */
+export function createNamedDriver(name: string, config: Config): Driver {
+  switch (name) {
     case "container":
       return new ContainerDriver(undefined, {
         enforce: config.egressEnforce,
@@ -34,8 +43,6 @@ export function createDriver(config: Config): Driver {
         imageCacheDir: config.vzImageCacheDir,
       });
     default:
-      throw new Error(
-        `unknown SBX_DRIVER "${config.driver}" (expected: ${DRIVER_NAMES.join(" | ")})`,
-      );
+      throw new Error(`unknown driver "${name}" (expected: ${DRIVER_NAMES.join(" | ")})`);
   }
 }

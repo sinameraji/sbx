@@ -2,7 +2,7 @@
 import { BackupRegistry } from "./backups.js";
 import { Capacity } from "./capacity.js";
 import { loadConfig } from "./config.js";
-import { createDriver } from "./driver/index.js";
+import { DriverRouter } from "./driver/router.js";
 import { startReaper } from "./lifecycle.js";
 import { configureLogger, log } from "./logger.js";
 import { MetricsHistory, startSampler } from "./metrics.js";
@@ -22,14 +22,10 @@ async function main(): Promise<void> {
     otlpEndpoint: config.otlpEndpoint,
     ringSize: config.traceRing,
   });
-  let driver;
-  try {
-    driver = createDriver(config);
-  } catch (err) {
-    log.error("driver selection failed", { driver: config.driver, error: String(err) });
-    process.exit(1);
-  }
   const store = new SandboxStore(config.dbPath);
+  // Per-sandbox driver router: dispatches each sandbox's ops to the runtime
+  // driver it was created with (container ↔ applevz), defaulting to SBX_DRIVER.
+  const driver = new DriverRouter(config, store, config.driver);
   const backups = new BackupRegistry(config.backupDir);
   const history = new MetricsHistory(config.metricsHistory);
 

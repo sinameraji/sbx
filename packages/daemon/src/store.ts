@@ -95,6 +95,7 @@ export class SandboxStore {
         image          TEXT NOT NULL,
         status         TEXT NOT NULL,
         createdAt      TEXT NOT NULL,
+        driver         TEXT NOT NULL DEFAULT '',
         labels         TEXT NOT NULL,
         env            TEXT NOT NULL,
         persist        INTEGER NOT NULL,
@@ -158,6 +159,7 @@ export class SandboxStore {
     this.ensureColumn("sandboxes", "usage", "TEXT NOT NULL DEFAULT '{}'");
     this.ensureColumn("sandboxes", "limits", "TEXT NOT NULL DEFAULT '{}'");
     this.ensureColumn("sandboxes", "egressSpendCap", "REAL NOT NULL DEFAULT 0");
+    this.ensureColumn("sandboxes", "driver", "TEXT NOT NULL DEFAULT ''");
     this.ensureColumn("egress_tokens", "policy", "TEXT NOT NULL DEFAULT '{}'");
     this.ensureColumn("egress_tokens", "spendUsd", "REAL NOT NULL DEFAULT 0");
   }
@@ -232,11 +234,11 @@ export class SandboxStore {
     this.db
       .prepare(
         `INSERT INTO sandboxes
-           (id, image, status, createdAt, labels, env, persist, lastActivityAt, sleepAfterMs, usage, limits, egressSpendCap)
+           (id, image, status, createdAt, driver, labels, env, persist, lastActivityAt, sleepAfterMs, usage, limits, egressSpendCap)
          VALUES
-           ($id, $image, $status, $createdAt, $labels, $env, $persist, $lastActivityAt, $sleepAfterMs, $usage, $limits, $egressSpendCap)
+           ($id, $image, $status, $createdAt, $driver, $labels, $env, $persist, $lastActivityAt, $sleepAfterMs, $usage, $limits, $egressSpendCap)
          ON CONFLICT(id) DO UPDATE SET
-           image=$image, status=$status, createdAt=$createdAt,
+           image=$image, status=$status, createdAt=$createdAt, driver=$driver,
            labels=$labels, env=$env, persist=$persist,
            lastActivityAt=$lastActivityAt, sleepAfterMs=$sleepAfterMs, usage=$usage, limits=$limits,
            egressSpendCap=$egressSpendCap`,
@@ -246,6 +248,7 @@ export class SandboxStore {
         image: record.image,
         status: record.status,
         createdAt: record.createdAt,
+        driver: record.driver ?? "",
         labels: JSON.stringify(record.labels),
         env: JSON.stringify(record.env),
         persist: record.persist ? 1 : 0,
@@ -590,6 +593,7 @@ function rowToSandbox(row: any): SandboxRecord {
     image: row.image,
     status: row.status,
     createdAt: row.createdAt,
+    driver: row.driver || undefined,
     labels: JSON.parse(row.labels),
     env: JSON.parse(row.env),
     persist: row.persist === 1,

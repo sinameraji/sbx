@@ -41,6 +41,7 @@ export function createNamedDriver(name: string, config: Config): Driver {
         stateDir: config.vzStateDir,
         diskGb: config.vzDiskGb,
         imageCacheDir: config.vzImageCacheDir,
+        warmPool: config.vzWarmPool,
       });
     default:
       throw new Error(`unknown driver "${name}" (expected: ${DRIVER_NAMES.join(" | ")})`);

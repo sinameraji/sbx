@@ -169,6 +169,13 @@ export interface Config {
    * `SBX_IMAGE`. Kept separate from the per-sandbox state dir so it survives.
    */
   vzImageCacheDir: string;
+  /**
+   * Warm-pool size for the Apple VZ driver (`SBX_VZ_WARM_POOL`, default 0 = off):
+   * keep this many base-image microVMs pre-booted so a `create` of the base image
+   * is an instant adopt instead of a ~2s cold boot. The pool refills in the
+   * background as guests are claimed.
+   */
+  vzWarmPool: number;
   /** Minimum level emitted by the structured logger. */
   logLevel: LogLevel;
   /** Log encoding: `json` (one JSON object per line) or `pretty` (human). */
@@ -261,6 +268,7 @@ export function loadConfig(): Config {
     vzStateDir: process.env.SBX_VZ_STATE_DIR ?? join(homedir(), ".sbx", "vz"),
     vzDiskGb: Number(process.env.SBX_VZ_DISK_GB ?? 4),
     vzImageCacheDir: process.env.SBX_VZ_IMAGE_CACHE ?? join(homedir(), ".sbx", "vz", "images"),
+    vzWarmPool: Number(process.env.SBX_VZ_WARM_POOL ?? 0),
     logLevel: parseLogLevel(process.env.SBX_LOG_LEVEL),
     logFormat: process.env.SBX_LOG_FORMAT === "json" ? "json" : "pretty",
     apiKey: process.env.SBX_API_KEY ?? "",

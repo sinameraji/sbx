@@ -7,6 +7,7 @@ import {
   ftruncateSync,
   mkdirSync,
   openSync,
+  renameSync,
   rmSync,
   unlinkSync,
 } from "node:fs";
@@ -50,6 +51,8 @@ export interface VzConfig {
   diskGb: number;
   /** Cache dir for OCI→ext4 converted rootfs images + the blank workspace template. */
   imageCacheDir: string;
+  /** Pre-boot this many base-image microVMs for instant adopt (0 = off). */
+  warmPool?: number;
 }
 
 /** Live per-sandbox VM: the `sbx-vz serve` process + its relay socket + disk. */
@@ -76,6 +79,14 @@ export class AppleVzDriver extends UnsupportedDriver {
   private vms = new Map<string, VmState>();
   private images: VzImageCache;
 
+  // Warm pool: pre-booted spare base-image guests for instant adopt on create.
+  private pool: VmState[] = [];
+  private poolTarget: number;
+  private poolSeq = 0;
+  private filling = false;
+  private readonly poolImage = "base"; // sentinel → the prebuilt Alpine base rootfs
+  private readonly poolDir: string;
+
   constructor(private readonly cfg: VzConfig) {
     super();
     // `helpers/sbx-vz` holds the converter scripts + staged guest files, two dirs
@@ -86,6 +97,17 @@ export class AppleVzDriver extends UnsupportedDriver {
       cacheDir: cfg.imageCacheDir,
       prebuiltRootfs: cfg.rootfs,
     });
+    this.poolTarget = Math.max(0, cfg.warmPool ?? 0);
+    this.poolDir = join(cfg.stateDir, "_pool");
+    if (this.poolTarget > 0) {
+      // Clear stale slots from a previous run (their helpers died with the daemon).
+      try {
+        rmSync(this.poolDir, { recursive: true, force: true });
+      } catch {
+        /* not there */
+      }
+      this.fillPool();
+    }
   }
 
   // --- lifecycle ------------------------------------------------------------
@@ -104,55 +126,112 @@ export class AppleVzDriver extends UnsupportedDriver {
     await this.launch(opts);
   }
 
-  /** Spawn the helper, create/keep workspace.img, boot the VM, apply sandbox env. */
+  /** Bring a sandbox live: adopt a warm-pool guest when eligible (instant), else
+   *  cold-boot a VM. Then apply the sandbox env. */
   private async launch(opts: CreateOptions): Promise<void> {
     const id = opts.id;
     if (this.vms.has(id)) return; // already running
-    const stateDir = join(this.cfg.stateDir, id);
-    mkdirSync(stateDir, { recursive: true });
 
-    // Resolve the rootfs for this sandbox's image (sentinels → prebuilt Alpine
-    // base; anything else is converted from the OCI image + cached).
-    const rootfs = await this.images.ensureRootfs(opts.image);
+    const adopted = await this.tryClaimFromPool(opts);
+    if (!adopted) {
+      const stateDir = join(this.cfg.stateDir, id);
+      // If a snapshot exists from a fast-pause, resume from it (RAM + device state
+      // restored, no kernel boot) instead of cold-booting.
+      const snapPath = join(stateDir, "snapshot.bin");
+      const restoreFrom = existsSync(snapPath) ? snapPath : undefined;
+      let vm: VmState;
+      try {
+        vm = await this.bootVm({
+          id,
+          stateDir,
+          image: opts.image,
+          socketPath: `/tmp/sbx-vz-${id}.sock`, // short, fits sun_path
+          limits: opts.limits,
+          restoreFrom,
+        });
+      } catch (err) {
+        if (restoreFrom) {
+          // A snapshot that won't restore must never brick the sandbox: discard it
+          // and cold-boot. The workspace disk is intact — only live RAM state is lost.
+          log.warn("snapshot restore failed; discarding it and cold-booting", {
+            sandbox: id,
+            error: (err as Error).message,
+          });
+          try {
+            unlinkSync(snapPath);
+          } catch {
+            /* ignore */
+          }
+          return this.launch(opts); // snapshot gone → cold boot this time
+        }
+        throw new Error(`applevz: VM start failed: ${(err as Error).message}`);
+      }
+      this.vms.set(id, vm);
+      if (restoreFrom) {
+        try {
+          unlinkSync(snapPath); // single-use: the in-RAM state is now live
+        } catch {
+          /* ignore */
+        }
+      }
+    }
 
-    // First boot only: give the sandbox its own workspace disk. Prefer cloning the
-    // blank pre-formatted template (works for images without mkfs.ext4, and the
-    // guest just mounts it); fall back to a sparse file the guest formats itself.
-    // If a snapshot exists from a fast-pause, resume from it (RAM + device state
-    // restored, no kernel boot) instead of cold-booting.
-    const snapPath = join(stateDir, "snapshot.bin");
-    const restoreFrom = existsSync(snapPath) ? snapPath : undefined;
+    // Sandbox-level env: applied once on the shared agent so every exec inherits it.
+    if (opts.env && Object.keys(opts.env).length) {
+      await this.withConn(id, (c) => c.setEnv(opts.env!));
+    }
+    log.info("applevz VM up", { sandbox: id, warm: adopted });
+  }
 
-    const workspaceImg = join(stateDir, "workspace.img");
+  /**
+   * Boot a VM and wait for its in-guest agent, returning the live VmState. Shared
+   * by the cold-launch path and the warm-pool filler. Does not touch `this.vms`
+   * or apply sandbox env — the caller owns those.
+   */
+  private async bootVm(p: {
+    id: string;
+    stateDir: string;
+    image: string;
+    socketPath: string;
+    limits?: CreateOptions["limits"];
+    restoreFrom?: string;
+  }): Promise<VmState> {
+    mkdirSync(p.stateDir, { recursive: true });
+    // Resolve the rootfs for the image (sentinels → prebuilt base; else converted).
+    const rootfs = await this.images.ensureRootfs(p.image);
+
+    // First boot only: give the VM its own workspace disk. Prefer cloning the blank
+    // pre-formatted template (works for images without mkfs.ext4); else a sparse
+    // file the guest formats itself.
+    const workspaceImg = join(p.stateDir, "workspace.img");
     if (!existsSync(workspaceImg)) {
       let blank: string | null = null;
       try {
         blank = await this.images.ensureBlankWorkspace(this.cfg.diskGb);
       } catch (err) {
         log.warn("blank workspace build failed; guest will format a sparse disk", {
-          sandbox: id,
+          sandbox: p.id,
           error: (err as Error).message,
         });
       }
       if (blank) cloneFile(blank, workspaceImg);
       else ensureSparseFile(workspaceImg, this.cfg.diskGb * 1024 ** 3);
     }
-    const socketPath = `/tmp/sbx-vz-${id}.sock`; // short, fits sun_path
     try {
-      unlinkSync(socketPath);
+      unlinkSync(p.socketPath);
     } catch {
       /* not there */
     }
 
-    const helper = new HelperProcess(this.cfg.helperPath, join(stateDir, "console.log"));
-    this.vms.set(id, { helper, socketPath, workspaceImg, stateDir });
+    const helper = new HelperProcess(this.cfg.helperPath, join(p.stateDir, "console.log"));
+    const vm: VmState = { helper, socketPath: p.socketPath, workspaceImg, stateDir: p.stateDir };
 
     // Memory + CPU are hard VM caps (VZ memorySize/cpuCount). VZ needs an integer
     // vCPU count, so a fractional `cpus` rounds up. pidsLimit has no VM analogue —
     // it's enforced inside the guest via a cgroup the init sets up from the cmdline.
-    const cpus = opts.limits?.cpus ? Math.max(1, Math.ceil(opts.limits.cpus)) : 2;
-    const memMb = opts.limits?.memoryMb && opts.limits.memoryMb > 0 ? opts.limits.memoryMb : 1024;
-    const pidsMax = opts.limits?.pidsLimit && opts.limits.pidsLimit > 0 ? opts.limits.pidsLimit : 0;
+    const cpus = p.limits?.cpus ? Math.max(1, Math.ceil(p.limits.cpus)) : 2;
+    const memMb = p.limits?.memoryMb && p.limits.memoryMb > 0 ? p.limits.memoryMb : 1024;
+    const pidsMax = p.limits?.pidsLimit && p.limits.pidsLimit > 0 ? p.limits.pidsLimit : 0;
     try {
       await helper.rpc("start", {
         kernel: this.cfg.kernel,
@@ -161,57 +240,26 @@ export class AppleVzDriver extends UnsupportedDriver {
         cpus,
         memMb,
         pidsMax,
-        socketPath,
+        socketPath: p.socketPath,
         vsockPort: 1024,
-        restoreFrom,
+        restoreFrom: p.restoreFrom,
       });
     } catch (err) {
       helper.kill();
-      this.vms.delete(id);
-      if (restoreFrom) {
-        // A snapshot that won't restore must never brick the sandbox: discard it
-        // and cold-boot. The workspace disk is intact — only live RAM state is lost.
-        log.warn("snapshot restore failed; discarding it and cold-booting", {
-          sandbox: id,
-          error: (err as Error).message,
-        });
-        try {
-          unlinkSync(snapPath);
-        } catch {
-          /* ignore */
-        }
-        return this.launch(opts); // snapshot gone → cold boot this time
-      }
-      throw new Error(`applevz: VM start failed: ${(err as Error).message}`);
+      throw err;
     }
-    // A snapshot is single-use: the in-RAM state is now live, so consume it.
-    if (restoreFrom) {
-      try {
-        unlinkSync(snapPath);
-      } catch {
-        /* ignore */
-      }
-    }
-
     // The VM has started, but the guest agent needs a moment to boot + bind vsock.
-    await this.waitForAgent(id);
-
-    // Sandbox-level env: applied once on the shared agent so every exec inherits it.
-    if (opts.env && Object.keys(opts.env).length) {
-      await this.withConn(id, (c) => c.setEnv(opts.env!));
-    }
-    log.info("applevz VM up", { sandbox: id });
+    await this.waitForAgentSocket(p.socketPath);
+    return vm;
   }
 
   /** Poll the relay until the in-guest agent answers (Hello), or time out. */
-  private async waitForAgent(id: string, timeoutMs = 30000): Promise<void> {
-    const vm = this.vms.get(id);
-    if (!vm) throw new Error(`applevz: sandbox ${id} not tracked`);
+  private async waitForAgentSocket(socketPath: string, timeoutMs = 30000): Promise<void> {
     const deadline = Date.now() + timeoutMs;
     let lastErr: unknown;
     while (Date.now() < deadline) {
       try {
-        const conn = await AgentConn.connect({ path: vm.socketPath, timeoutMs: 2000 });
+        const conn = await AgentConn.connect({ path: socketPath, timeoutMs: 2000 });
         conn.close();
         return;
       } catch (err) {
@@ -219,7 +267,103 @@ export class AppleVzDriver extends UnsupportedDriver {
         await sleep(400);
       }
     }
-    throw new Error(`applevz: agent never came up for ${id}: ${String((lastErr as Error)?.message ?? lastErr)}`);
+    throw new Error(`applevz: agent never came up (${socketPath}): ${String((lastErr as Error)?.message ?? lastErr)}`);
+  }
+
+  // --- warm pool ------------------------------------------------------------
+
+  /** Number of pre-booted spare guests ready to adopt. */
+  poolSize(): number {
+    return this.pool.length;
+  }
+
+  /**
+   * Adopt a pre-booted spare for `opts` when eligible — a plain create of the
+   * pooled base image with default limits and no existing workspace. Renames the
+   * spare's slot dir to the sandbox's canonical state dir (an APFS rename leaves
+   * the running VM's open workspace fd valid), registers it, and replenishes the
+   * pool. Returns true on adopt, false to fall through to a cold boot.
+   */
+  private async tryClaimFromPool(opts: CreateOptions): Promise<boolean> {
+    if (this.poolTarget <= 0) return false;
+    const noLimits =
+      !opts.limits || (!opts.limits.memoryMb && !opts.limits.cpus && !opts.limits.pidsLimit);
+    const canonical = join(this.cfg.stateDir, opts.id);
+    const eligible =
+      (opts.image === this.poolImage || opts.image === "alpine") &&
+      noLimits &&
+      !existsSync(join(canonical, "workspace.img")); // a resume already has a workspace
+    if (!eligible) return false;
+
+    const spare = this.pool.shift();
+    if (!spare) {
+      this.fillPool(); // none ready — warm up for next time
+      return false;
+    }
+    // Adopt: move the spare's slot dir to the canonical sandbox dir. The running
+    // helper keeps its open fds (inode survives the rename), so the live VM is
+    // unaffected; a later stop/start recomputes the canonical path and finds it.
+    renameSync(spare.stateDir, canonical);
+    this.vms.set(opts.id, {
+      helper: spare.helper,
+      socketPath: spare.socketPath,
+      workspaceImg: join(canonical, "workspace.img"),
+      stateDir: canonical,
+    });
+    this.fillPool(); // replenish in the background
+    log.info("applevz adopted a warm-pool guest", { sandbox: opts.id });
+    return true;
+  }
+
+  /** Top the pool up to its target in the background (one filler at a time). */
+  private fillPool(): void {
+    if (this.poolTarget <= 0 || this.filling) return;
+    void this.doFill();
+  }
+
+  private async doFill(): Promise<void> {
+    this.filling = true;
+    try {
+      while (this.pool.length < this.poolTarget) {
+        const n = ++this.poolSeq;
+        try {
+          const vm = await this.bootVm({
+            id: `pool-${n}`,
+            stateDir: join(this.poolDir, `slot-${n}`),
+            image: this.poolImage,
+            socketPath: `/tmp/sbx-vz-pool-${n}.sock`,
+          });
+          this.pool.push(vm);
+          log.info("warm pool: spare guest ready", { size: this.pool.length, target: this.poolTarget });
+        } catch (err) {
+          log.warn("warm pool: spare boot failed (will retry on next claim)", {
+            error: (err as Error).message,
+          });
+          break; // don't hot-loop on a persistent failure
+        }
+      }
+    } finally {
+      this.filling = false;
+    }
+  }
+
+  /** Tear down all spare guests (e.g. on shutdown). Idempotent. */
+  async drainPool(): Promise<void> {
+    this.poolTarget = 0;
+    const spares = this.pool.splice(0);
+    for (const g of spares) {
+      g.helper.kill();
+      try {
+        unlinkSync(g.socketPath);
+      } catch {
+        /* ignore */
+      }
+    }
+    try {
+      rmSync(this.poolDir, { recursive: true, force: true });
+    } catch {
+      /* ignore */
+    }
   }
 
   async stop(id: string): Promise<void> {

@@ -179,6 +179,34 @@ async function main(): Promise<void> {
     await driver.destroy(id);
     ok("destroy");
 
+    // M6a: resource limits — a second VM capped at 256 MiB / 1 cpu / 64 pids.
+    // Memory + CPU are hard VM caps; pidsLimit is enforced by a guest cgroup.
+    const lid = "vzcheck02";
+    try {
+      await driver.create({
+        id: lid,
+        image: "base",
+        persist: true,
+        limits: { memoryMb: 256, cpus: 1, pidsLimit: 64 },
+      });
+      const read = async (cmd: string): Promise<string> => {
+        let o = "";
+        await driver.exec(lid, cmd, {}, (e) => {
+          if (e.type === "stdout") o += e.data;
+        });
+        return o.trim();
+      };
+      const memKb = Number(await read("grep MemTotal /proc/meminfo | awk '{print $2}'"));
+      assert.ok(memKb > 0 && memKb <= 256 * 1024, `guest MemTotal ${memKb}KB within the 256 MiB cap`);
+      const nproc = Number(await read("nproc"));
+      assert.equal(nproc, 1, "guest sees exactly 1 online CPU");
+      const pidsMax = await read("cat /sys/fs/cgroup/sandbox/pids.max 2>/dev/null");
+      assert.equal(pidsMax, "64", "guest pids cgroup capped at 64");
+      ok(`resource limits: ${(memKb / 1024) | 0}MB mem / ${nproc} cpu / pids.max=${pidsMax}`);
+    } finally {
+      await driver.destroy(lid).catch(() => {});
+    }
+
     console.log(`\napplevz-check: ${passed} checks passed`);
   } finally {
     await driver.stop(id).catch(() => {});

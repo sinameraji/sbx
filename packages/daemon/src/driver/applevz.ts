@@ -110,8 +110,12 @@ export class AppleVzDriver extends UnsupportedDriver {
     const helper = new HelperProcess(this.cfg.helperPath, join(stateDir, "console.log"));
     this.vms.set(id, { helper, socketPath, workspaceImg, stateDir });
 
+    // Memory + CPU are hard VM caps (VZ memorySize/cpuCount). VZ needs an integer
+    // vCPU count, so a fractional `cpus` rounds up. pidsLimit has no VM analogue —
+    // it's enforced inside the guest via a cgroup the init sets up from the cmdline.
     const cpus = opts.limits?.cpus ? Math.max(1, Math.ceil(opts.limits.cpus)) : 2;
     const memMb = opts.limits?.memoryMb && opts.limits.memoryMb > 0 ? opts.limits.memoryMb : 1024;
+    const pidsMax = opts.limits?.pidsLimit && opts.limits.pidsLimit > 0 ? opts.limits.pidsLimit : 0;
     try {
       await helper.rpc("start", {
         kernel: this.cfg.kernel,
@@ -119,6 +123,7 @@ export class AppleVzDriver extends UnsupportedDriver {
         workspace: workspaceImg,
         cpus,
         memMb,
+        pidsMax,
         socketPath,
         vsockPort: 1024,
       });

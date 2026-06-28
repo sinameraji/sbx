@@ -179,6 +179,30 @@ async function main(): Promise<void> {
     await driver.destroy(id);
     ok("destroy");
 
+    // M6b-1: two sandboxes booting the same read-only base rootfs concurrently,
+    // each writing to its own workspace — proves the shared base is safe.
+    const ca = "vzconcur-a";
+    const cb = "vzconcur-b";
+    try {
+      await Promise.all([
+        driver.create({ id: ca, image: "base", persist: true }),
+        driver.create({ id: cb, image: "base", persist: true }),
+      ]);
+      await Promise.all([
+        driver.writeFile(ca, { path: "/workspace/who.txt", content: "alpha" }),
+        driver.writeFile(cb, { path: "/workspace/who.txt", content: "beta" }),
+      ]);
+      const [ra, rb] = await Promise.all([
+        driver.readFile(ca, { path: "/workspace/who.txt" }),
+        driver.readFile(cb, { path: "/workspace/who.txt" }),
+      ]);
+      assert.equal(ra, "alpha", "sandbox A workspace isolated");
+      assert.equal(rb, "beta", "sandbox B workspace isolated");
+      ok("two concurrent VMs share the read-only base, isolated workspaces");
+    } finally {
+      await Promise.all([driver.destroy(ca).catch(() => {}), driver.destroy(cb).catch(() => {})]);
+    }
+
     // M6a: resource limits — a second VM capped at 256 MiB / 1 cpu / 64 pids.
     // Memory + CPU are hard VM caps; pidsLimit is enforced by a guest cgroup.
     const lid = "vzcheck02";

@@ -182,9 +182,13 @@ final class VmServer: NSObject, VZVirtualMachineDelegate {
             bootLoader.commandLine = cmdline
             config.bootLoader = bootLoader
 
+            // The rootfs (vda) is READ-ONLY: one image backs every VM of a given
+            // OCI image, so a shared read-write mount would corrupt across
+            // concurrent sandboxes. The guest init backs writable paths with tmpfs
+            // and the per-sandbox workspace (vdb) disk.
             var disks: [VZStorageDeviceConfiguration] = [
                 VZVirtioBlockDeviceConfiguration(
-                    attachment: try VZDiskImageStorageDeviceAttachment(url: URL(fileURLWithPath: rootfs), readOnly: false))
+                    attachment: try VZDiskImageStorageDeviceAttachment(url: URL(fileURLWithPath: rootfs), readOnly: true))
             ]
             if let workspace = workspace {
                 disks.append(VZVirtioBlockDeviceConfiguration(

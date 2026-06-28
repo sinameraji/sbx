@@ -17,6 +17,7 @@
     "check:agent": "npm run build --workspace @sbx/daemon && (cd agent && go build -o /tmp/sbx-agent-darwin ./cmd/sbx-agent) && node packages/daemon/dist/agent-check.js",
     "check:applevz": "npm run build:vz && npm run build --workspace @sbx/daemon && node packages/daemon/dist/applevz-check.js",
     "check:router": "npm run build --workspace @sbx/daemon && node packages/daemon/dist/router-check.js",
+    "smoke:vz": "npm run build && node packages/daemon/dist/smoke-vz.js",
     "smoke:py": "npm run build && python3 sdk/python/smoke.py",
     "smoke:mastra": "npm run build && node packages/mastra/test.mjs",
     "build:vz": "cd helpers/sbx-vz && swift build -c release && mkdir -p dist && cp .build/release/sbx-vz dist/sbx-vz && codesign --sign - --entitlements sbx-vz.entitlements --force dist/sbx-vz && echo 'signed dist/sbx-vz'",

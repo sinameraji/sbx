@@ -118,6 +118,11 @@ export class AppleVzDriver extends UnsupportedDriver {
     // First boot only: give the sandbox its own workspace disk. Prefer cloning the
     // blank pre-formatted template (works for images without mkfs.ext4, and the
     // guest just mounts it); fall back to a sparse file the guest formats itself.
+    // If a snapshot exists from a fast-pause, resume from it (RAM + device state
+    // restored, no kernel boot) instead of cold-booting.
+    const snapPath = join(stateDir, "snapshot.bin");
+    const restoreFrom = existsSync(snapPath) ? snapPath : undefined;
+
     const workspaceImg = join(stateDir, "workspace.img");
     if (!existsSync(workspaceImg)) {
       let blank: string | null = null;
@@ -158,11 +163,34 @@ export class AppleVzDriver extends UnsupportedDriver {
         pidsMax,
         socketPath,
         vsockPort: 1024,
+        restoreFrom,
       });
     } catch (err) {
       helper.kill();
       this.vms.delete(id);
+      if (restoreFrom) {
+        // A snapshot that won't restore must never brick the sandbox: discard it
+        // and cold-boot. The workspace disk is intact — only live RAM state is lost.
+        log.warn("snapshot restore failed; discarding it and cold-booting", {
+          sandbox: id,
+          error: (err as Error).message,
+        });
+        try {
+          unlinkSync(snapPath);
+        } catch {
+          /* ignore */
+        }
+        return this.launch(opts); // snapshot gone → cold boot this time
+      }
       throw new Error(`applevz: VM start failed: ${(err as Error).message}`);
+    }
+    // A snapshot is single-use: the in-RAM state is now live, so consume it.
+    if (restoreFrom) {
+      try {
+        unlinkSync(snapPath);
+      } catch {
+        /* ignore */
+      }
     }
 
     // The VM has started, but the guest agent needs a moment to boot + bind vsock.
@@ -202,6 +230,33 @@ export class AppleVzDriver extends UnsupportedDriver {
     // workspace wouldn't survive stop/start. Best-effort.
     await this.exec(id, "sync", {}, () => {}).catch(() => {});
     vm.helper.kill(); // killing the helper tears down the VM; workspace.img persists
+    this.vms.delete(id);
+    try {
+      unlinkSync(vm.socketPath);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  /**
+   * Fast-pause: save the live VM's full state (RAM + virtual devices) to disk and
+   * tear the helper down, so the next `start` resumes **without a kernel boot**
+   * (VZ `saveMachineStateTo`/`restoreMachineStateFrom`, macOS 14+). The workspace
+   * disk + the snapshot file are all that's needed to resume; unlike `stop`, no
+   * `sync` is needed (the snapshot is a consistent point-in-time including the
+   * guest page cache). Background processes/servers come back live on resume.
+   */
+  async snapshot(id: string): Promise<void> {
+    const vm = this.vms.get(id);
+    if (!vm) throw new Error(`applevz: sandbox ${id} is not running`);
+    // Flush the guest fs first so workspace writes are durable on disk even if a
+    // later resume can't restore the snapshot and has to cold-boot (a true restore
+    // would carry the page cache in the saved RAM state, so this only helps the
+    // fallback — it never hurts).
+    await this.exec(id, "sync", {}, () => {}).catch(() => {});
+    const snapPath = join(vm.stateDir, "snapshot.bin");
+    await vm.helper.rpc("snapshot", { path: snapPath });
+    vm.helper.kill(); // state saved; free the compute
     this.vms.delete(id);
     try {
       unlinkSync(vm.socketPath);

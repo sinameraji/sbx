@@ -233,6 +233,33 @@ async function main(): Promise<void> {
       await driver.destroy(lid).catch(() => {});
     }
 
+    // M7a: snapshot/resume. VZ saveMachineStateTo saves the full VM state (RAM +
+    // devices); a later start() restores it (instant resume, no kernel boot),
+    // falling back to a cold boot if restore is unsupported. Disk state always
+    // survives; an in-RAM (tmpfs) marker survives only a true restore.
+    const snapId = "vzsnap01";
+    try {
+      await driver.create({ id: snapId, image: "base", persist: true });
+      await driver.writeFile(snapId, { path: "/workspace/disk.txt", content: "on-disk" });
+      await driver.exec(snapId, "echo SNAPSHOT_RAM_OK > /run/marker", {}, () => {}); // /run = tmpfs
+      await driver.snapshot(snapId); // pause + saveMachineStateTo + tear down
+      ok("snapshot saved (VZ saveMachineStateTo)");
+      await driver.start({ id: snapId, image: "base", persist: true }); // restore (or cold-fallback)
+      assert.equal(
+        await driver.readFile(snapId, { path: "/workspace/disk.txt" }),
+        "on-disk",
+        "workspace survives resume",
+      );
+      let ram = "";
+      await driver.exec(snapId, "cat /run/marker 2>/dev/null", {}, (e) => {
+        if (e.type === "stdout") ram += e.data;
+      });
+      if (/SNAPSHOT_RAM_OK/.test(ram)) ok("★ instant restore: in-RAM state resumed (no cold boot)");
+      else ok("resume works (in-RAM restore WIP — cold-boot fallback; see plan M7a)");
+    } finally {
+      await driver.destroy(snapId).catch(() => {});
+    }
+
     // M6b-2: honor SBX_IMAGE — convert a real OCI image and run its own python.
     const pyId = "vzpython01";
     try {

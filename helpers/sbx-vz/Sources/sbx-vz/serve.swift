@@ -147,6 +147,7 @@ final class VmServer: NSObject, VZVirtualMachineDelegate {
         case "probe": ok(id, handleProbe())
         case "hostInfo": ok(id, handleHostInfo())
         case "start": startVM(id, params)
+        case "snapshot": snapshot(id, params)
         case "stop": teardown(); ok(id, ["stopped": true])
         case "shutdown": teardown(); exit(0)
         default: fail(id, "unknown method: \(method)")
@@ -167,6 +168,7 @@ final class VmServer: NSObject, VZVirtualMachineDelegate {
         let memMb = UInt64(params["memMb"] as? Int ?? 1024)
         let workspace = params["workspace"] as? String
         let pidsMax = params["pidsMax"] as? Int ?? 0
+        let restoreFrom = params["restoreFrom"] as? String
 
         do {
             let config = VZVirtualMachineConfiguration()
@@ -213,11 +215,13 @@ final class VmServer: NSObject, VZVirtualMachineDelegate {
             machine.delegate = self
             self.vm = machine
 
-            machine.start { result in
+            // Either restore a saved snapshot (fast resume: RAM + device state come
+            // back, no kernel boot) or cold-boot the VM.
+            let onRunning: (Result<Void, Error>) -> Void = { result in
                 switch result {
                 case .success:
                     if self.startRelay() {
-                        self.ok(id, ["started": true])
+                        self.ok(id, ["started": true, "restored": restoreFrom != nil])
                     } else {
                         self.fail(id, "vm started but relay socket setup failed")
                     }
@@ -225,8 +229,45 @@ final class VmServer: NSObject, VZVirtualMachineDelegate {
                     self.fail(id, "vm start: \(error.localizedDescription)")
                 }
             }
+            if let restoreFrom = restoreFrom {
+                guard #available(macOS 14.0, *) else {
+                    return fail(id, "restore needs macOS 14+")
+                }
+                machine.restoreMachineStateFrom(url: URL(fileURLWithPath: restoreFrom)) { rerr in
+                    if let rerr = rerr {
+                        return self.fail(id, "restore: \(rerr.localizedDescription)")
+                    }
+                    machine.resume(completionHandler: onRunning)
+                }
+            } else {
+                machine.start(completionHandler: onRunning)
+            }
         } catch {
             fail(id, "start setup: \(error.localizedDescription)")
+        }
+    }
+
+    /// Pause the running VM and save its full state (RAM + devices) to `path`, so
+    /// a later `start {restoreFrom: path}` resumes instantly without a kernel boot.
+    /// Requires macOS 14+. The caller tears the helper down afterward; the saved
+    /// state + the workspace disk are all that's needed to resume.
+    private func snapshot(_ id: Any?, _ params: [String: Any]) {
+        guard let path = params["path"] as? String else { return fail(id, "snapshot: path required") }
+        guard let vm = self.vm else { return fail(id, "snapshot: no running vm") }
+        guard #available(macOS 14.0, *) else { return fail(id, "snapshot needs macOS 14+") }
+        vm.pause { presult in
+            switch presult {
+            case .failure(let e):
+                self.fail(id, "pause: \(e.localizedDescription)")
+            case .success:
+                vm.saveMachineStateTo(url: URL(fileURLWithPath: path)) { serr in
+                    if let serr = serr {
+                        self.fail(id, "saveMachineState: \(serr.localizedDescription)")
+                    } else {
+                        self.ok(id, ["snapshot": path])
+                    }
+                }
+            }
         }
     }
 

@@ -18,6 +18,7 @@
     "check:applevz": "npm run build:vz && npm run build --workspace @sbx/daemon && node packages/daemon/dist/applevz-check.js",
     "check:router": "npm run build --workspace @sbx/daemon && node packages/daemon/dist/router-check.js",
     "check:warmpool": "npm run build --workspace @sbx/daemon && node packages/daemon/dist/warmpool-check.js",
+    "check:fc": "npm run build --workspace @sbx/daemon && node packages/daemon/dist/fc-check.js",
     "smoke:vz": "npm run build && node packages/daemon/dist/smoke-vz.js",
     "smoke:py": "npm run build && python3 sdk/python/smoke.py",
     "smoke:mastra": "npm run build && node packages/mastra/test.mjs",

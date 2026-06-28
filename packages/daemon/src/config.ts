@@ -176,6 +176,18 @@ export interface Config {
    * background as guests are claimed.
    */
   vzWarmPool: number;
+  /** `firecracker` binary path for the Firecracker driver (`SBX_FC_BIN`). */
+  fcBin: string;
+  /** Guest kernel (uncompressed vmlinux) for the Firecracker driver (`SBX_FC_KERNEL`). */
+  fcKernel: string;
+  /** Prebuilt base rootfs for the Firecracker driver (`SBX_FC_ROOTFS`). */
+  fcRootfs: string;
+  /** Per-sandbox VM state dir for the Firecracker driver (`SBX_FC_STATE_DIR`). */
+  fcStateDir: string;
+  /** Default workspace disk size in GiB for a new Firecracker sandbox (`SBX_FC_DISK_GB`). */
+  fcDiskGb: number;
+  /** Converted OCI→ext4 rootfs cache for the Firecracker driver (`SBX_FC_IMAGE_CACHE`). */
+  fcImageCacheDir: string;
   /** Minimum level emitted by the structured logger. */
   logLevel: LogLevel;
   /** Log encoding: `json` (one JSON object per line) or `pretty` (human). */
@@ -269,6 +281,12 @@ export function loadConfig(): Config {
     vzDiskGb: Number(process.env.SBX_VZ_DISK_GB ?? 4),
     vzImageCacheDir: process.env.SBX_VZ_IMAGE_CACHE ?? join(homedir(), ".sbx", "vz", "images"),
     vzWarmPool: Number(process.env.SBX_VZ_WARM_POOL ?? 0),
+    fcBin: process.env.SBX_FC_BIN ?? "firecracker",
+    fcKernel: process.env.SBX_FC_KERNEL ?? "helpers/sbx-vz/guest/vmlinux-fc",
+    fcRootfs: process.env.SBX_FC_ROOTFS ?? "helpers/sbx-vz/guest/rootfs.img",
+    fcStateDir: process.env.SBX_FC_STATE_DIR ?? join(homedir(), ".sbx", "fc"),
+    fcDiskGb: Number(process.env.SBX_FC_DISK_GB ?? 8),
+    fcImageCacheDir: process.env.SBX_FC_IMAGE_CACHE ?? join(homedir(), ".sbx", "fc", "images"),
     logLevel: parseLogLevel(process.env.SBX_LOG_LEVEL),
     logFormat: process.env.SBX_LOG_FORMAT === "json" ? "json" : "pretty",
     apiKey: process.env.SBX_API_KEY ?? "",

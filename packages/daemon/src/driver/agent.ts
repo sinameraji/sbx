@@ -84,6 +84,35 @@ export class AgentConn {
     });
   }
 
+  /**
+   * Wrap an already-connected byte stream (e.g. a Firecracker vsock socket after
+   * its `CONNECT` handshake) and resolve once the agent's Hello arrives. `leftover`
+   * is any bytes that arrived with the handshake reply but belong to the agent
+   * stream (possibly the Hello itself), fed in before live data.
+   */
+  static attach(socket: Socket, leftover?: Buffer, timeoutMs = 10000): Promise<AgentConn> {
+    return new Promise((resolve, reject) => {
+      const conn = new AgentConn(socket);
+      const timer = setTimeout(() => {
+        socket.destroy();
+        reject(new Error("agent hello timed out"));
+      }, timeoutMs);
+      conn.onHello = (hello) => {
+        clearTimeout(timer);
+        conn.hello = hello;
+        resolve(conn);
+      };
+      socket.on("data", (d) => conn.feed(d));
+      socket.on("error", (e) => {
+        clearTimeout(timer);
+        conn.failAll(e);
+        reject(e);
+      });
+      socket.on("close", () => conn.failAll(new Error("agent connection closed")));
+      if (leftover && leftover.length) conn.feed(leftover);
+    });
+  }
+
   private onHello?: (h: AgentHello) => void;
 
   /** Accumulate bytes and dispatch whole frames. */

@@ -139,6 +139,23 @@ async function main(): Promise<void> {
       `stats: ${stats.onlineCpus} cpu / ${(stats.memBytes / 1e6).toFixed(0)}MB / ${stats.pids} pids`,
     );
 
+    // M3: watch — open the stream, create a file, assert the event arrives.
+    const watchAbort = new AbortController();
+    const events: string[] = [];
+    const watching = driver.watchFiles(
+      id,
+      "/workspace",
+      { intervalMs: 200, signal: watchAbort.signal },
+      (e) => events.push(`${e.type}:${e.path}`),
+    );
+    await sleep(400); // let the watcher take its baseline snapshot
+    await driver.writeFile(id, { path: "/workspace/watched.txt", content: "hi" });
+    for (let i = 0; i < 30 && !events.some((e) => /watched\.txt/.test(e)); i++) await sleep(100);
+    watchAbort.abort();
+    await watching;
+    assert.ok(events.some((e) => /watched\.txt/.test(e)), "watch saw the new file");
+    ok(`watch: ${events.find((e) => /watched\.txt/.test(e))}`);
+
     // M5: backup → mutate → restore → rollback round-trip.
     const backupPath = join(stateDir, "backup.tar");
     await driver.writeFile(id, { path: "/workspace/keep.txt", content: "in-backup" });

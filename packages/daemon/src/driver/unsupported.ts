@@ -12,12 +12,14 @@ import type {
 import type {
   ExecEvent,
   ExecOptions,
+  FileChangeEvent,
   FileInfo,
   ListFilesOptions,
   MkdirOptions,
   ReadFileOptions,
   StartProcessOptions,
   WaitForPortOptions,
+  WatchOptions,
   WriteFileOptions,
 } from "../types.js";
 
@@ -74,7 +76,12 @@ export abstract class UnsupportedDriver implements Driver {
   async listFiles(_id: string, _opts: ListFilesOptions): Promise<FileInfo[]> {
     this.fail("listFiles");
   }
-  async watchFiles(): Promise<void> {
+  async watchFiles(
+    _id: string,
+    _path: string,
+    _opts: WatchOptions & { signal: AbortSignal },
+    _onEvent: (e: FileChangeEvent) => void,
+  ): Promise<void> {
     this.fail("watchFiles");
   }
   async startProcess(

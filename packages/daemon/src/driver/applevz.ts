@@ -27,12 +27,14 @@ import type {
 import type {
   ExecEvent,
   ExecOptions,
+  FileChangeEvent,
   FileInfo,
   ListFilesOptions,
   MkdirOptions,
   ReadFileOptions,
   StartProcessOptions,
   WaitForPortOptions,
+  WatchOptions,
   WriteFileOptions,
 } from "../types.js";
 import { log } from "../logger.js";
@@ -206,6 +208,17 @@ export class AppleVzDriver extends UnsupportedDriver {
     return this.withConn(id, (c) =>
       c.waitForPort(port, { host: opts.host, timeoutMs: opts.timeoutMs, intervalMs: opts.intervalMs }),
     );
+  }
+
+  /** Watch a path recursively for changes over the agent (poll-based mtime diff),
+   *  streaming events until `opts.signal` aborts. Its own long-lived AgentConn. */
+  async watchFiles(
+    id: string,
+    path: string,
+    opts: WatchOptions & { signal: AbortSignal },
+    onEvent: (e: FileChangeEvent) => void,
+  ): Promise<void> {
+    return this.withConn(id, (c) => c.watch(path, opts.intervalMs ?? 1000, opts.signal, onEvent));
   }
 
   // --- background processes (via exec, same shell patterns as the container driver) -

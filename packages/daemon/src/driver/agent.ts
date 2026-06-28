@@ -1,6 +1,6 @@
 import { connect, type Socket } from "node:net";
 import { Duplex } from "node:stream";
-import type { ExecEvent, FileInfo } from "../types.js";
+import type { ExecEvent, FileChangeEvent, FileInfo } from "../types.js";
 
 /**
  * Host-side client for the in-sandbox `sbx-agent` wire protocol (see `agent/proto`).
@@ -210,6 +210,50 @@ export class AgentConn {
 
   async setEnv(env: Record<string, string>): Promise<void> {
     await this.request({ method: "setEnv", env }).done;
+  }
+
+  /**
+   * Watch `path` recursively, invoking `onEvent` per change until `signal`
+   * aborts (which sends a Close frame; the agent stops and replies Result).
+   * The agent streams `<type>\t<path>` lines as Stdout frames.
+   */
+  async watch(
+    path: string,
+    intervalMs: number,
+    signal: AbortSignal,
+    onEvent: (e: FileChangeEvent) => void,
+  ): Promise<void> {
+    const streamId = this.nextStreamId++;
+    let lineBuf = "";
+    const parse = (b: Buffer): void => {
+      lineBuf += b.toString("utf8");
+      let idx: number;
+      while ((idx = lineBuf.indexOf("\n")) !== -1) {
+        const line = lineBuf.slice(0, idx);
+        lineBuf = lineBuf.slice(idx + 1);
+        const tab = line.indexOf("\t");
+        if (tab === -1) continue;
+        const type = line.slice(0, tab);
+        if (type === "created" || type === "modified" || type === "deleted") {
+          onEvent({ type, path: line.slice(tab + 1) });
+        }
+      }
+    };
+    await new Promise<void>((resolve, reject) => {
+      this.pending.set(streamId, { onStdout: parse, resolve: () => resolve(), reject });
+      // Open the watch stream first, then arm cancellation, so the Control frame
+      // always precedes any Close frame.
+      this.writeFrame(
+        FRAME.Control,
+        streamId,
+        Buffer.from(JSON.stringify({ method: "watch", path, intervalMs }), "utf8"),
+      );
+      const onAbort = (): void => {
+        if (this.pending.has(streamId)) this.writeFrame(FRAME.Close, streamId, Buffer.alloc(0));
+      };
+      if (signal.aborted) onAbort();
+      else signal.addEventListener("abort", onAbort, { once: true });
+    });
   }
 
   /**

@@ -249,6 +249,41 @@ export class AgentConn {
     return { stream: duplex, streamId };
   }
 
+  /**
+   * Receive a guest→host byte stream for `req` (e.g. tarWorkspace): each Stdout
+   * frame's raw bytes are handed to `onChunk` (binary-safe — Buffers, no UTF-8
+   * decode), and the promise resolves on the terminal Result (rejects on error).
+   */
+  async readStream(req: Record<string, unknown>, onChunk: (b: Buffer) => void): Promise<void> {
+    const streamId = this.nextStreamId++;
+    await new Promise<void>((resolve, reject) => {
+      this.pending.set(streamId, { onStdout: onChunk, resolve: () => resolve(), reject });
+      this.writeFrame(FRAME.Control, streamId, Buffer.from(JSON.stringify(req), "utf8"));
+    });
+  }
+
+  /**
+   * Send a host→guest byte stream for `req` (e.g. untarWorkspace): write payload
+   * chunks with `write`, signal end-of-input with `end`, and await `done` for the
+   * terminal Result. Bytes go as raw Stdin frames; EOF as an EOF frame.
+   */
+  writeStream(req: Record<string, unknown>): {
+    write: (b: Buffer) => void;
+    end: () => void;
+    done: Promise<void>;
+  } {
+    const streamId = this.nextStreamId++;
+    const done = new Promise<void>((resolve, reject) => {
+      this.pending.set(streamId, { resolve: () => resolve(), reject });
+    });
+    this.writeFrame(FRAME.Control, streamId, Buffer.from(JSON.stringify(req), "utf8"));
+    return {
+      write: (b) => this.writeFrame(FRAME.Stdin, streamId, b),
+      end: () => this.writeFrame(FRAME.EOF, streamId, Buffer.alloc(0)),
+      done,
+    };
+  }
+
   /** Send a control message (e.g. pty resize) on an existing stream. */
   controlStream(streamId: number, msg: Record<string, unknown>): void {
     this.writeFrame(FRAME.Control, streamId, Buffer.from(JSON.stringify(msg), "utf8"));

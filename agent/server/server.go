@@ -212,6 +212,8 @@ func (a *Agent) dispatch(ctx context.Context, w *proto.FrameWriter, id uint32, r
 		a.handleListFiles(w, id, req)
 	case "waitForPort":
 		a.handleWaitForPort(ctx, w, id, req)
+	case "watch":
+		a.handleWatch(ctx, w, id, req)
 	case "tcpConnect":
 		a.handleTcpConnect(ctx, w, id, req, st, mu)
 	case "tarWorkspace":
@@ -437,6 +439,64 @@ func (a *Agent) handleTcpConnect(ctx context.Context, w *proto.FrameWriter, id u
 	}()
 	copyToFrames(w, proto.Stdout, id, conn) // connection output → Stdout frames
 	writeResult(w, id, proto.Result{OK: true})
+}
+
+// handleWatch polls `path` (default /workspace) recursively and streams change
+// events to the host as `<type>\t<path>\n` Stdout lines (created/modified/
+// deleted) until the host cancels the stream (Close → ctx). Poll-based mtime
+// diff, mirroring the container driver's python watcher — portable, no inotify
+// dependency, and the guest may lack python3. Backs watchFiles (M3).
+func (a *Agent) handleWatch(ctx context.Context, w *proto.FrameWriter, id uint32, req proto.Request) {
+	root := req.Path
+	if root == "" {
+		root = "/workspace"
+	}
+	interval := durOrDefault(req.IntervalMs, time.Second)
+	prev := snapshotTree(root)
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			writeResult(w, id, proto.Result{OK: true})
+			return
+		case <-ticker.C:
+		}
+		cur := snapshotTree(root)
+		for p, mt := range prev {
+			if cmt, ok := cur[p]; !ok {
+				emitChange(w, id, "deleted", p)
+			} else if cmt != mt {
+				emitChange(w, id, "modified", p)
+			}
+		}
+		for p := range cur {
+			if _, ok := prev[p]; !ok {
+				emitChange(w, id, "created", p)
+			}
+		}
+		prev = cur
+	}
+}
+
+// snapshotTree maps every path under root (excluding root itself) to its
+// modification time in unix-nanos, for the watch mtime diff.
+func snapshotTree(root string) map[string]int64 {
+	m := map[string]int64{}
+	filepath.WalkDir(root, func(p string, d os.DirEntry, err error) error {
+		if err != nil || p == root {
+			return nil // unreadable entry or the root itself; skip
+		}
+		if info, ierr := d.Info(); ierr == nil {
+			m[p] = info.ModTime().UnixNano()
+		}
+		return nil
+	})
+	return m
+}
+
+func emitChange(w *proto.FrameWriter, id uint32, kind, path string) {
+	w.Write(proto.Stdout, id, []byte(kind+"\t"+path+"\n"))
 }
 
 // handleTarWorkspace streams a tar of `path` (default /workspace) to the host as

@@ -166,6 +166,7 @@ final class VmServer: NSObject, VZVirtualMachineDelegate {
         let cpus = params["cpus"] as? Int ?? 2
         let memMb = UInt64(params["memMb"] as? Int ?? 1024)
         let workspace = params["workspace"] as? String
+        let pidsMax = params["pidsMax"] as? Int ?? 0
 
         do {
             let config = VZVirtualMachineConfiguration()
@@ -173,7 +174,12 @@ final class VmServer: NSObject, VZVirtualMachineDelegate {
             config.memorySize = memMb * 1024 * 1024
 
             let bootLoader = VZLinuxBootLoader(kernelURL: URL(fileURLWithPath: kernel))
-            bootLoader.commandLine = "console=hvc0 root=/dev/vda rw init=/init"
+            // Memory + CPU are hard-capped by the VM config above (the guest can't
+            // see beyond them). pidsLimit has no VM-config analogue, so it rides in
+            // on the kernel cmdline for the guest init to enforce via a cgroup.
+            var cmdline = "console=hvc0 root=/dev/vda rw init=/init"
+            if pidsMax > 0 { cmdline += " sbx.pids=\(pidsMax)" }
+            bootLoader.commandLine = cmdline
             config.bootLoader = bootLoader
 
             var disks: [VZStorageDeviceConfiguration] = [

@@ -33,6 +33,21 @@ mount -t proc proc /proc 2>/dev/null
 mount -t sysfs sys /sys 2>/dev/null
 mount -t devtmpfs dev /dev 2>/dev/null
 mkdir -p /dev/pts && mount -t devpts devpts /dev/pts 2>/dev/null  # PTYs (terminal)
+# cgroup v2 (resource limits): mount the unified hierarchy if the kernel did not.
+mkdir -p /sys/fs/cgroup
+mountpoint -q /sys/fs/cgroup 2>/dev/null || mount -t cgroup2 none /sys/fs/cgroup 2>/dev/null
+# pidsLimit: the host injects sbx.pids=<N> on the kernel cmdline. Enable the pids
+# controller, then run the agent (PID 1) in a leaf cgroup capped at N processes.
+# Memory + CPU need no guest enforcement — the VM hard-caps them.
+for tok in $(cat /proc/cmdline 2>/dev/null); do
+  case "$tok" in sbx.pids=*) PIDS_MAX="${tok#sbx.pids=}";; esac
+done
+if [ -n "${PIDS_MAX:-}" ] && [ -f /sys/fs/cgroup/cgroup.controllers ]; then
+  echo +pids > /sys/fs/cgroup/cgroup.subtree_control 2>/dev/null || true
+  mkdir -p /sys/fs/cgroup/sandbox
+  echo "$PIDS_MAX" > /sys/fs/cgroup/sandbox/pids.max 2>/dev/null || true
+  echo 1 > /sys/fs/cgroup/sandbox/cgroup.procs 2>/dev/null || true  # move PID 1 in
+fi
 # Loopback up so 127.0.0.1 (waitForPort, preview bridge to local servers) is routable.
 ip link set lo up 2>/dev/null || ifconfig lo up 2>/dev/null || true
 # Workspace persistent disk (vdb): mount if already formatted (preserves data

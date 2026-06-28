@@ -24,7 +24,8 @@
     "smoke:mastra": "npm run build && node packages/mastra/test.mjs",
     "build:vz": "cd helpers/sbx-vz && swift build -c release && mkdir -p dist && cp .build/release/sbx-vz dist/sbx-vz && codesign --sign - --entitlements sbx-vz.entitlements --force dist/sbx-vz && echo 'signed dist/sbx-vz'",
     "test:agent": "cd agent && go test ./...",
-    "build:agent": "cd agent && CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o dist/sbx-agent-linux-arm64 ./cmd/sbx-agent && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o dist/sbx-agent-linux-amd64 ./cmd/sbx-agent"
+    "build:agent": "cd agent && CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o dist/sbx-agent-linux-arm64 ./cmd/sbx-agent && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o dist/sbx-agent-linux-amd64 ./cmd/sbx-agent",
+    "smoke:fc": "npm run build --workspace @sbx/daemon && node packages/daemon/dist/smoke-fc.js"
   },
   "engines": {
     "node": ">=20"

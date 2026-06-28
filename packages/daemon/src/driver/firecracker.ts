@@ -75,7 +75,8 @@ export class FirecrackerDriver extends AgentDriver {
       vzDir: vzDir.endsWith("guest") ? dirname(vzDir) : "helpers/sbx-vz",
       cacheDir: cfg.imageCacheDir,
       prebuiltRootfs: cfg.rootfs,
-      platform: cfg.platform,
+      // Convert OCI images for the host arch (the guest runs on this KVM host).
+      platform: cfg.platform ?? (process.arch === "arm64" ? "linux/arm64" : "linux/amd64"),
     });
   }
 

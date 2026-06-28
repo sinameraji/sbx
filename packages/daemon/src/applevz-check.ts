@@ -130,6 +130,35 @@ async function main(): Promise<void> {
     assert.match(termOut, /TERMINAL_OK_42/, "PTY runs the command in a real shell");
     ok("interactive PTY: command runs in a real shell");
 
+    // M5: stats from the guest /proc + cgroup (via the agent).
+    const stats = await driver.stats(id);
+    assert.ok(stats.onlineCpus >= 1, "stats reports online CPUs");
+    assert.ok(stats.memBytes > 0, "stats reports resident memory");
+    assert.ok(stats.pids > 0, "stats reports running pids");
+    ok(
+      `stats: ${stats.onlineCpus} cpu / ${(stats.memBytes / 1e6).toFixed(0)}MB / ${stats.pids} pids`,
+    );
+
+    // M5: backup → mutate → restore → rollback round-trip.
+    const backupPath = join(stateDir, "backup.tar");
+    await driver.writeFile(id, { path: "/workspace/keep.txt", content: "in-backup" });
+    const { bytes } = await driver.createBackup(id, backupPath);
+    assert.ok(bytes > 0, "backup wrote bytes");
+    await driver.writeFile(id, { path: "/workspace/keep.txt", content: "MUTATED" });
+    await driver.writeFile(id, { path: "/workspace/extra.txt", content: "added-after-backup" });
+    await driver.restoreBackup(id, backupPath);
+    assert.equal(
+      await driver.readFile(id, { path: "/workspace/keep.txt" }),
+      "in-backup",
+      "restore rolled the mutation back",
+    );
+    const filesAfter = await driver.listFiles(id, { path: "/workspace" });
+    assert.ok(
+      !filesAfter.some((f) => f.name === "extra.txt"),
+      "restore cleared files added after the backup",
+    );
+    ok("★ backup → mutate → restore → rollback");
+
     await driver.destroy(id);
     ok("destroy");
 

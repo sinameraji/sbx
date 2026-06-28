@@ -111,16 +111,16 @@ export abstract class UnsupportedDriver implements Driver {
   async openTerminal(_id: string, _opts: TerminalOptions): Promise<TerminalSession> {
     this.fail("openTerminal");
   }
-  async createBackup(): Promise<{ bytes: number }> {
+  async createBackup(_id: string, _tarPath: string): Promise<{ bytes: number }> {
     this.fail("createBackup");
   }
-  async restoreBackup(): Promise<void> {
+  async restoreBackup(_id: string, _tarPath: string): Promise<void> {
     this.fail("restoreBackup");
   }
   async destroy(_id: string): Promise<void> {
     this.fail("destroy");
   }
-  async stats(): Promise<SandboxStats> {
+  async stats(_id: string): Promise<SandboxStats> {
     this.fail("stats");
   }
   async hostInfo(): Promise<HostInfo> {

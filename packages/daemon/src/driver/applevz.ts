@@ -1,5 +1,15 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { closeSync, createWriteStream, existsSync, ftruncateSync, mkdirSync, openSync, rmSync, unlinkSync } from "node:fs";
+import {
+  closeSync,
+  createReadStream,
+  createWriteStream,
+  existsSync,
+  ftruncateSync,
+  mkdirSync,
+  openSync,
+  rmSync,
+  unlinkSync,
+} from "node:fs";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { AgentConn } from "./agent.js";
@@ -8,6 +18,7 @@ import type {
   CreateOptions,
   HostInfo,
   ProcessLiveness,
+  SandboxStats,
   StartProcessResult,
   TcpBridge,
   TerminalOptions,
@@ -51,10 +62,9 @@ interface VmState {
  * so the daemon's `AgentConn` speaks the agent wire protocol straight into the
  * guest — the same surface the container driver gets from `docker exec`.
  *
- * Implemented (M1/M2): create/stop/start/destroy lifecycle with workspace
- * persistence, exec, files, waitForPort, ping, hostInfo. Processes, terminal,
- * preview bridge, backups, watch, and stats are later milestones (still
- * `UnsupportedDriver`).
+ * Implemented (M1–M5): create/stop/start/destroy lifecycle with workspace
+ * persistence, exec, files, waitForPort, processes, terminal, preview bridge,
+ * stats, and backup/restore. `watchFiles` (M3 inotify) is the remaining gap.
  */
 export class AppleVzDriver extends UnsupportedDriver {
   readonly name = "applevz";
@@ -311,6 +321,57 @@ export class AppleVzDriver extends UnsupportedDriver {
         conn.close();
       },
     };
+  }
+
+  // --- stats + backup/restore (M5) ------------------------------------------
+
+  /** Live resource snapshot from the guest's /proc + cgroup files (via the agent).
+   *  cpuPercent is left 0 by the guest — the metrics sampler derives it from the
+   *  delta of successive cpuTotalUsageNs samples, exactly as for the container driver. */
+  async stats(id: string): Promise<SandboxStats> {
+    const s = await this.withConn(id, (c) => c.stats());
+    return s as SandboxStats;
+  }
+
+  /** Tar the guest's /workspace to `tarPath` on the host (over the agent). */
+  async createBackup(id: string, tarPath: string): Promise<{ bytes: number }> {
+    const vm = this.vms.get(id);
+    if (!vm) throw new Error(`applevz: sandbox ${id} is not running`);
+    const conn = await AgentConn.connect({ path: vm.socketPath, timeoutMs: 15000 });
+    try {
+      const out = createWriteStream(tarPath);
+      let bytes = 0;
+      await conn.readStream({ method: "tarWorkspace", path: "/workspace" }, (b) => {
+        bytes += b.length;
+        out.write(b);
+      });
+      await new Promise<void>((resolve, reject) =>
+        out.end((err?: Error | null) => (err ? reject(err) : resolve())),
+      );
+      return { bytes };
+    } finally {
+      conn.close();
+    }
+  }
+
+  /** Replace the guest's /workspace with the tar at `tarPath` (cleared first). */
+  async restoreBackup(id: string, tarPath: string): Promise<void> {
+    const vm = this.vms.get(id);
+    if (!vm) throw new Error(`applevz: sandbox ${id} is not running`);
+    const conn = await AgentConn.connect({ path: vm.socketPath, timeoutMs: 15000 });
+    try {
+      const up = conn.writeStream({ method: "untarWorkspace", path: "/workspace" });
+      await new Promise<void>((resolve, reject) => {
+        const rs = createReadStream(tarPath);
+        rs.on("data", (chunk) => up.write(chunk as Buffer));
+        rs.on("end", resolve);
+        rs.on("error", reject);
+      });
+      up.end();
+      await up.done;
+    } finally {
+      conn.close();
+    }
   }
 
   /** Run a command and collect its full stdout/stderr/exit (for the process shims). */

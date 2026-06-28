@@ -22,6 +22,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -257,6 +258,11 @@ func shellInvocation(command string) (string, []string) {
 	return "/bin/sh", []string{"-c", command}
 }
 
+// shellQuote single-quotes s for safe interpolation into a shell command line.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
 func (a *Agent) handleExec(ctx context.Context, w *proto.FrameWriter, id uint32, req proto.Request, st *stream, mu *sync.Mutex) {
 	shell, args := shellInvocation(req.Command)
 	cmd := exec.CommandContext(ctx, shell, args...)
@@ -442,7 +448,11 @@ func (a *Agent) handleTarWorkspace(ctx context.Context, w *proto.FrameWriter, id
 	if path == "" {
 		path = "/workspace"
 	}
-	cmd := exec.CommandContext(ctx, "tar", "-cf", "-", "-C", path, ".")
+	// Route through the shell (not exec.Command("tar")) so busybox's standalone
+	// shell resolves the applet — the agent runs as PID 1 with no PATH, so a
+	// direct LookPath("tar") fails, exactly as it would for nc/echo.
+	shell, args := shellInvocation("exec tar -cf - -C " + shellQuote(path) + " .")
+	cmd := exec.CommandContext(ctx, shell, args...)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		writeError(w, id, "tar stdout: "+err.Error())
@@ -476,7 +486,8 @@ func (a *Agent) handleUntarWorkspace(ctx context.Context, w *proto.FrameWriter, 
 			os.RemoveAll(filepath.Join(path, e.Name()))
 		}
 	}
-	cmd := exec.CommandContext(ctx, "tar", "-xf", "-", "-C", path)
+	shell, args := shellInvocation("exec tar -xf - -C " + shellQuote(path))
+	cmd := exec.CommandContext(ctx, shell, args...)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		writeError(w, id, "tar stdin: "+err.Error())

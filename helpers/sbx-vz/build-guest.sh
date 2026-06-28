@@ -18,48 +18,20 @@ mkdir -p guest
 # 1. Agent (built by `npm run build:agent`) → staged into the rootfs as PID-1.
 cp ../../agent/dist/sbx-agent-linux-arm64 guest/sbx-agent
 
-# 2. Rootfs: alpine userland + agent + a tiny init that mounts /proc,/sys,/dev
-#    then execs the agent (which binds vsock:1024 for the host driver).
+# 2. Rootfs: alpine userland + agent + the shared guest init (guest/init.sh),
+#    booted READ-ONLY (serve.swift mounts it readOnly), so the init backs every
+#    writable path with tmpfs or the per-sandbox /dev/vdb disk. The init is the
+#    same file convert-image.sh injects into arbitrary OCI images.
 docker run --rm --platform linux/arm64 -v "$PWD/guest:/guest" alpine:3.20 sh -c '
   set -e
   apk add --no-cache e2fsprogs >/dev/null 2>&1
   mkdir -p /rootfs
   cp -a /bin /sbin /usr /etc /lib /rootfs/ 2>/dev/null || true
+  # Mountpoints the init needs to exist on the read-only rootfs.
   mkdir -p /rootfs/proc /rootfs/sys /rootfs/dev /rootfs/run /rootfs/tmp /rootfs/workspace
   cp /guest/sbx-agent /rootfs/sbin/sbx-agent
-  cat > /rootfs/init <<"INIT"
-#!/bin/sh
-mount -t proc proc /proc 2>/dev/null
-mount -t sysfs sys /sys 2>/dev/null
-mount -t devtmpfs dev /dev 2>/dev/null
-mkdir -p /dev/pts && mount -t devpts devpts /dev/pts 2>/dev/null  # PTYs (terminal)
-# cgroup v2 (resource limits): mount the unified hierarchy if the kernel did not.
-mkdir -p /sys/fs/cgroup
-mountpoint -q /sys/fs/cgroup 2>/dev/null || mount -t cgroup2 none /sys/fs/cgroup 2>/dev/null
-# pidsLimit: the host injects sbx.pids=<N> on the kernel cmdline. Enable the pids
-# controller, then run the agent (PID 1) in a leaf cgroup capped at N processes.
-# Memory + CPU need no guest enforcement — the VM hard-caps them.
-for tok in $(cat /proc/cmdline 2>/dev/null); do
-  case "$tok" in sbx.pids=*) PIDS_MAX="${tok#sbx.pids=}";; esac
-done
-if [ -n "${PIDS_MAX:-}" ] && [ -f /sys/fs/cgroup/cgroup.controllers ]; then
-  echo +pids > /sys/fs/cgroup/cgroup.subtree_control 2>/dev/null || true
-  mkdir -p /sys/fs/cgroup/sandbox
-  echo "$PIDS_MAX" > /sys/fs/cgroup/sandbox/pids.max 2>/dev/null || true
-  echo 1 > /sys/fs/cgroup/sandbox/cgroup.procs 2>/dev/null || true  # move PID 1 in
-fi
-# Loopback up so 127.0.0.1 (waitForPort, preview bridge to local servers) is routable.
-ip link set lo up 2>/dev/null || ifconfig lo up 2>/dev/null || true
-# Workspace persistent disk (vdb): mount if already formatted (preserves data
-# across stop/start); only format when an unformatted mount fails (first boot).
-if [ -b /dev/vdb ]; then
-  mkdir -p /workspace
-  mount /dev/vdb /workspace 2>/dev/null || { mkfs.ext4 -q -F /dev/vdb && mount /dev/vdb /workspace; }
-fi
-echo sbx-guest-init-ok
-exec /sbin/sbx-agent
-INIT
-  chmod +x /rootfs/init
+  cp /guest/init.sh /rootfs/init
+  chmod +x /rootfs/init /rootfs/sbin/sbx-agent
   rm -f /guest/rootfs.img
   mkfs.ext4 -q -F -L sbxroot -d /rootfs /guest/rootfs.img 256M
 '

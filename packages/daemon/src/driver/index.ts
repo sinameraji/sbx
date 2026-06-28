@@ -32,7 +32,14 @@ export function createNamedDriver(name: string, config: Config): Driver {
         dns: config.egressDnsResolver,
       });
     case "firecracker":
-      return new FirecrackerDriver();
+      return new FirecrackerDriver({
+        fcBin: config.fcBin,
+        kernel: config.fcKernel,
+        rootfs: config.fcRootfs,
+        stateDir: config.fcStateDir,
+        diskGb: config.fcDiskGb,
+        imageCacheDir: config.fcImageCacheDir,
+      });
     case "applevz":
       return new AppleVzDriver({
         helperPath: config.vzHelperPath,

@@ -101,10 +101,11 @@ async function main(): Promise<void> {
       ? startSampler({ driver, store, history, intervalMs: config.metricsIntervalMs })
       : undefined;
 
-  const shutdown = () => {
+  const shutdown = async () => {
     log.info("shutting down");
     if (reaper) clearInterval(reaper);
     if (sampler) clearInterval(sampler);
+    await driver.shutdown().catch(() => {}); // tear down the VZ warm pool, if any
     stopTracing();
     egress?.close();
     proxy.close();
@@ -113,8 +114,8 @@ async function main(): Promise<void> {
       process.exit(0);
     });
   };
-  process.on("SIGINT", shutdown);
-  process.on("SIGTERM", shutdown);
+  process.on("SIGINT", () => void shutdown());
+  process.on("SIGTERM", () => void shutdown());
 }
 
 main().catch((err) => {

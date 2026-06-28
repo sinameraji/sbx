@@ -173,4 +173,13 @@ export class DriverRouter implements Driver {
   hostInfo(): Promise<HostInfo> {
     return this.instance(this.defaultName).hostInfo();
   }
+
+  /** Best-effort teardown of any driver-held background resources (e.g. the VZ
+   *  warm pool's pre-booted spare VMs) on daemon shutdown. */
+  async shutdown(): Promise<void> {
+    for (const d of this.instances.values()) {
+      const drain = (d as { drainPool?: () => Promise<void> }).drainPool;
+      if (typeof drain === "function") await drain.call(d).catch(() => {});
+    }
+  }
 }

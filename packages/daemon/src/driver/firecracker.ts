@@ -15,7 +15,16 @@ import { dirname, join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { AgentConn } from "./agent.js";
 import { AgentDriver } from "./agent-driver.js";
-import { buildFcApiCalls, FC_DEFAULT_BOOT_ARGS, FC_START_ACTION, FcApi, fcVsockConnect } from "./fc-api.js";
+import {
+  buildFcApiCalls,
+  buildSnapshotCreateCall,
+  buildSnapshotLoadCall,
+  FC_DEFAULT_BOOT_ARGS,
+  FC_PAUSE_VM,
+  FC_START_ACTION,
+  FcApi,
+  fcVsockConnect,
+} from "./fc-api.js";
 import { VzImageCache } from "./vz-image.js";
 import type { CreateOptions, HostInfo } from "./types.js";
 import { log } from "../logger.js";
@@ -101,6 +110,27 @@ export class FirecrackerDriver extends AgentDriver {
     if (this.vms.has(id)) return;
     const stateDir = join(this.cfg.stateDir, id);
     mkdirSync(stateDir, { recursive: true });
+
+    // If a snapshot exists from a fast-pause, resume from it (guest RAM + device
+    // state restored — no kernel boot; background processes come back live).
+    const vmstate = join(stateDir, "snapshot.vmstate");
+    const memFile = join(stateDir, "snapshot.mem");
+    if (existsSync(vmstate) && existsSync(memFile)) {
+      try {
+        await this.resumeFromSnapshot(id, stateDir, vmstate, memFile);
+        log.info("firecracker VM resumed from snapshot", { sandbox: id });
+        return;
+      } catch (err) {
+        // A snapshot that won't load must never brick the sandbox: discard it and
+        // cold-boot (workspace intact — `snapshot()` synced the guest fs first;
+        // only live RAM/process state is lost).
+        log.warn("snapshot restore failed; discarding it and cold-booting", {
+          sandbox: id,
+          error: (err as Error).message,
+        });
+        for (const f of [vmstate, memFile]) rmQuiet(f);
+      }
+    }
 
     const rootfs = await this.images.ensureRootfs(opts.image);
 
@@ -194,6 +224,60 @@ export class FirecrackerDriver extends AgentDriver {
     throw new Error(`firecracker: agent never came up: ${String((lastErr as Error)?.message ?? lastErr)}`);
   }
 
+  /** Boot a fresh VMM and load the saved snapshot into it (no kernel boot). */
+  private async resumeFromSnapshot(
+    id: string,
+    stateDir: string,
+    vmstate: string,
+    memFile: string,
+  ): Promise<void> {
+    const apiSock = join(stateDir, "fc-api.sock");
+    const vsockUds = join(stateDir, "vsock.sock");
+    // The snapshot pins the vsock UDS path; firecracker re-binds it on load, so
+    // stale socket files must be gone first.
+    for (const s of [apiSock, vsockUds]) rmQuiet(s);
+    const proc = spawn(this.cfg.fcBin, ["--api-sock", apiSock], { stdio: ["ignore", "pipe", "pipe"] });
+    proc.stdout.pipe(createWriteStream(join(stateDir, "console.log"), { flags: "a" }));
+    proc.stderr.pipe(createWriteStream(join(stateDir, "console.log"), { flags: "a" }));
+    const vm: FcVm = { proc, apiSock, vsockUds, workspaceImg: join(stateDir, "workspace.img"), stateDir };
+    this.vms.set(id, vm);
+    try {
+      await waitForFile(apiSock, 5000);
+      await new FcApi(apiSock).call(buildSnapshotLoadCall(vmstate, memFile));
+      await this.waitForAgent(vm);
+    } catch (err) {
+      proc.kill("SIGKILL");
+      this.vms.delete(id);
+      throw err;
+    }
+    // One-shot: guest state diverges the moment the VM resumes, so a second load
+    // from these files would resurrect a stale past. Unlinking is safe — the VMM
+    // maps the memory file privately (copy-on-write).
+    for (const f of [vmstate, memFile]) rmQuiet(f);
+  }
+
+  /**
+   * Fast-pause (B7): pause the vCPUs, write a Full Firecracker snapshot (device
+   * state + guest RAM) into the sandbox's state dir, and tear the VMM down. The
+   * next `start` resumes from it **without a kernel boot** — background
+   * processes/servers come back live. Same contract as the VZ driver's
+   * `snapshot()`: the guest fs is synced first, so if the later restore has to
+   * fall back to a cold boot the workspace is still intact.
+   */
+  async snapshot(id: string): Promise<void> {
+    const vm = this.vms.get(id);
+    if (!vm) throw new Error(`firecracker: sandbox ${id} is not running`);
+    await this.exec(id, "sync", {}, () => {}).catch(() => {});
+    const api = new FcApi(vm.apiSock);
+    await api.call(FC_PAUSE_VM);
+    await api.call(
+      buildSnapshotCreateCall(join(vm.stateDir, "snapshot.vmstate"), join(vm.stateDir, "snapshot.mem")),
+    );
+    vm.proc.kill("SIGKILL"); // state saved; free the compute
+    this.vms.delete(id);
+    for (const s of [vm.apiSock, vm.vsockUds]) rmQuiet(s);
+  }
+
   async stop(id: string): Promise<void> {
     const vm = this.vms.get(id);
     if (!vm) return;
@@ -201,13 +285,7 @@ export class FirecrackerDriver extends AgentDriver {
     await this.exec(id, "sync", {}, () => {}).catch(() => {});
     vm.proc.kill("SIGKILL"); // tears down the microVM; workspace.img persists
     this.vms.delete(id);
-    for (const s of [vm.apiSock, vm.vsockUds]) {
-      try {
-        unlinkSync(s);
-      } catch {
-        /* ignore */
-      }
-    }
+    for (const s of [vm.apiSock, vm.vsockUds]) rmQuiet(s);
   }
 
   async destroy(id: string): Promise<void> {
@@ -261,6 +339,15 @@ export class FirecrackerDriver extends AgentDriver {
       /* not Linux; use totalmem() */
     }
     return { memoryMb, cpus: osCpus().length };
+  }
+}
+
+/** Remove a file, ignoring a missing one. */
+function rmQuiet(path: string): void {
+  try {
+    unlinkSync(path);
+  } catch {
+    /* not there */
   }
 }
 

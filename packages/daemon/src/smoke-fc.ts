@@ -76,16 +76,50 @@ async function main(): Promise<void> {
     assert.ok(stats.memBytes > 0 && stats.onlineCpus >= 1, "stats reports mem + cpus");
     ok(`stats: ${stats.onlineCpus} cpu / ${(stats.memBytes / 1e6).toFixed(0)}MB / ${stats.pids} pids`);
 
-    // Persistence across stop/start.
+    // Fast-pause → resume (B7): full snapshot to disk, restore WITHOUT a kernel
+    // boot. In-RAM state must survive: a tmpfs marker + a live background process.
+    console.error("[smoke-fc] snapshot → resume (fast-pause)…");
+    const markerCode = await driver.exec(
+      id,
+      "grep -qE '^tmpfs /tmp ' /proc/mounts && echo ram-1 > /tmp/ram-marker",
+      {},
+      () => {},
+    );
+    assert.equal(markerCode, 0, "/tmp is tmpfs (marker is genuinely RAM-only)");
+    const survivor = await driver.startProcess(id, "p2", "while true; do sleep 1; done", {});
+    const tSave = Date.now();
+    await driver.snapshot(id);
+    const saveMs = Date.now() - tSave;
+    const tResume = Date.now();
+    await driver.start({ id, image, env: {}, persist: true });
+    const resumeMs = Date.now() - tResume;
+    assert.match(
+      await driver.readFile(id, { path: "/tmp/ram-marker" }),
+      /ram-1/,
+      "tmpfs marker survived snapshot→resume (guest RAM restored)",
+    );
+    const alive = await driver.listProcesses(id, [{ procId: "p2", pid: survivor.pid }]);
+    assert.ok(alive[0]?.running, "background process survived snapshot→resume");
+    await driver.killProcess(id, survivor.pid);
+    ok(`★ snapshot fast-pause → resume, no kernel boot (save ${saveMs}ms, resume ${resumeMs}ms)`);
+
+    // Persistence across stop/start (cold path: workspace survives, RAM doesn't).
     console.error("[smoke-fc] stop → start (workspace persistence)…");
     await driver.stop(id);
+    const tCold = Date.now();
     await driver.start({ id, image, env: {}, persist: true });
+    const coldMs = Date.now() - tCold;
     assert.equal(
       await driver.readFile(id, { path: "/workspace/persist.txt" }),
       "fc-persist-123",
       "workspace persisted across stop/start",
     );
-    ok("★ workspace.img persists across stop/start");
+    const markerGone = await driver
+      .readFile(id, { path: "/tmp/ram-marker" })
+      .then(() => false)
+      .catch(() => true);
+    assert.ok(markerGone, "tmpfs marker cleared by a cold stop/start (RAM not persisted)");
+    ok(`★ workspace.img persists across stop/start (cold boot ${coldMs}ms vs resume ${resumeMs}ms)`);
 
     await driver.destroy(id);
     ok("destroy");

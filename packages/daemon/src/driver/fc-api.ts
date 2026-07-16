@@ -11,9 +11,9 @@ import { connect, type Socket } from "node:net";
  * a KVM host; everything here is pure logic + thin I/O, exercised by `check:fc`.
  */
 
-/** A single Firecracker API call (always a PUT of a JSON body to the API socket). */
+/** A single Firecracker API call (a PUT/PATCH of a JSON body to the API socket). */
 export interface FcApiCall {
-  method: "PUT";
+  method: "PUT" | "PATCH";
   path: string;
   body: Record<string, unknown>;
 }
@@ -91,6 +91,40 @@ export const FC_START_ACTION: FcApiCall = {
   path: "/actions",
   body: { action_type: "InstanceStart" },
 };
+
+/** The call that pauses a running VM's vCPUs (required before /snapshot/create). */
+export const FC_PAUSE_VM: FcApiCall = {
+  method: "PATCH",
+  path: "/vm",
+  body: { state: "Paused" },
+};
+
+/** Build the call that writes a Full snapshot (device state + guest RAM) to disk. */
+export function buildSnapshotCreateCall(vmstatePath: string, memPath: string): FcApiCall {
+  return {
+    method: "PUT",
+    path: "/snapshot/create",
+    body: { snapshot_type: "Full", snapshot_path: vmstatePath, mem_file_path: memPath },
+  };
+}
+
+/**
+ * Build the call that restores a **fresh, unconfigured** VMM process from a
+ * snapshot and resumes it immediately. The snapshot pins the original host paths
+ * (kernel/rootfs/workspace drives, vsock UDS), so those files must still exist at
+ * the same locations; Firecracker re-binds the vsock UDS listener itself on load.
+ */
+export function buildSnapshotLoadCall(vmstatePath: string, memPath: string): FcApiCall {
+  return {
+    method: "PUT",
+    path: "/snapshot/load",
+    body: {
+      snapshot_path: vmstatePath,
+      mem_backend: { backend_type: "File", backend_path: memPath },
+      resume_vm: true,
+    },
+  };
+}
 
 /**
  * Parse Firecracker's vsock host→guest handshake reply. After the host connects

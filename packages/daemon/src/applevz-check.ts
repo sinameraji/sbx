@@ -7,6 +7,7 @@
  */
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
+import { createServer as createHttpServer } from "node:http";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
@@ -14,6 +15,11 @@ import { AppleVzDriver } from "./driver/applevz.js";
 
 async function main(): Promise<void> {
   const stateDir = mkdtempSync(join(tmpdir(), "sbx-vz-state-"));
+  // Mock egress gateway: guests reach it ONLY via the vsock relay (no NIC).
+  const EGRESS_PORT = 47522;
+  const gateway = createHttpServer((_req, res) => res.end("vz-egress-pong"));
+  await new Promise<void>((r) => gateway.listen(EGRESS_PORT, "127.0.0.1", r));
+
   const driver = new AppleVzDriver({
     helperPath: "helpers/sbx-vz/dist/sbx-vz",
     kernel: "helpers/sbx-vz/guest/vmlinux-vz",
@@ -22,6 +28,8 @@ async function main(): Promise<void> {
     diskGb: 2,
     // Stable cache so converted images + the blank workspace survive across runs.
     imageCacheDir: join(homedir(), ".sbx", "vz", "images"),
+    egressPort: EGRESS_PORT,
+    egressHost: "127.0.0.1",
   });
   const id = "vzcheck01";
   let passed = 0;
@@ -53,6 +61,21 @@ async function main(): Promise<void> {
     });
     assert.match(envOut, /vz-ok/, "sandbox env applied to exec");
     ok("sandbox env applied");
+
+    // Egress-over-vsock: the NIC-less guest reaches the (mock) gateway through
+    // its loopback relay — its only route out of the VM.
+    let egOut = "";
+    const egCode = await driver.exec(
+      id,
+      `wget -qO- http://127.0.0.1:${EGRESS_PORT}/ping`,
+      {},
+      (e) => {
+        if (e.type === "stdout") egOut += e.data;
+      },
+    );
+    assert.equal(egCode, 0, "in-guest wget via the egress relay");
+    assert.match(egOut, /vz-egress-pong/, "egress relay reached the gateway");
+    ok("★ egress-over-vsock: guest loopback → vsock → gateway (no NIC)");
 
     await driver.writeFile(id, { path: "/workspace/persist.txt", content: "persist-me-123" });
     assert.equal(await driver.readFile(id, { path: "/workspace/persist.txt" }), "persist-me-123");
@@ -262,6 +285,15 @@ async function main(): Promise<void> {
         "in-RAM tmpfs marker lost — restore silently fell back to a cold boot",
       );
       ok(`★ instant restore: in-RAM state resumed in ${resumeMs}ms (no cold boot)`);
+      // The egress relay must survive the snapshot→resume cycle: the in-guest
+      // listener lives in restored RAM; the host listener is re-installed by the
+      // fresh helper process.
+      let egResume = "";
+      await driver.exec(snapId, `wget -qO- http://127.0.0.1:${EGRESS_PORT}/after-resume`, {}, (e) => {
+        if (e.type === "stdout") egResume += e.data;
+      });
+      assert.match(egResume, /vz-egress-pong/, "egress relay must work after snapshot→resume");
+      ok("egress relay survives snapshot→resume");
     } finally {
       await driver.destroy(snapId).catch(() => {});
     }
@@ -286,6 +318,7 @@ async function main(): Promise<void> {
     console.log(`\napplevz-check: ${passed} checks passed`);
   } finally {
     await driver.stop(id).catch(() => {});
+    await new Promise<void>((r) => gateway.close(() => r()));
     rmSync(stateDir, { recursive: true, force: true });
   }
 }

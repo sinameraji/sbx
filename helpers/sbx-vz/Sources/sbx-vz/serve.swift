@@ -83,10 +83,13 @@ private func setNonBlocking(_ fd: Int32) {
     _ = fcntl(fd, F_SETFL, flags | O_NONBLOCK)
 }
 
-final class VmServer: NSObject, VZVirtualMachineDelegate {
+final class VmServer: NSObject, VZVirtualMachineDelegate, VZVirtioSocketListenerDelegate {
     private var vm: VZVirtualMachine?
     private var vmConfig: VZVirtualMachineConfiguration?
     private var vsockPort: UInt32 = 1024
+    private var egressVsockPort: UInt32 = 0
+    private var egressTarget: String = ""
+    private var egressListener: VZVirtioSocketListener?
     private var socketPath: String = ""
     private var listenFD: Int32 = -1
     private var acceptSource: DispatchSourceRead?
@@ -165,6 +168,8 @@ final class VmServer: NSObject, VZVirtualMachineDelegate {
         }
         self.socketPath = socketPath
         if let p = params["vsockPort"] as? Int { vsockPort = UInt32(p) }
+        if let p = params["egressPort"] as? Int, p > 0 { egressVsockPort = UInt32(p) }
+        if let t = params["egressTarget"] as? String { egressTarget = t }
         let cpus = params["cpus"] as? Int ?? 2
         let memMb = UInt64(params["memMb"] as? Int ?? 1024)
         let workspace = params["workspace"] as? String
@@ -238,6 +243,7 @@ final class VmServer: NSObject, VZVirtualMachineDelegate {
             let onRunning: (Result<Void, Error>) -> Void = { result in
                 switch result {
                 case .success:
+                    self.startEgressListener(machine) // guest→host egress relay (both boot + restore)
                     if self.startRelay() {
                         self.ok(id, ["started": true, "restored": restoreFrom != nil])
                     } else {
@@ -299,6 +305,69 @@ final class VmServer: NSObject, VZVirtualMachineDelegate {
                 }
             }
         }
+    }
+
+    // MARK: guest→host egress relay (vsock listener → TCP to the gateway)
+
+    /// Install a vsock listener for guest-initiated connections on the egress
+    /// port, splicing each one to a fresh TCP connection to the egress gateway.
+    /// This is the NIC-less guest's only route out of the VM: default-deny holds
+    /// by construction — there is no network device to escape through.
+    private func startEgressListener(_ machine: VZVirtualMachine) {
+        guard egressVsockPort > 0, !egressTarget.isEmpty else { return }
+        guard let dev = machine.socketDevices.first as? VZVirtioSocketDevice else {
+            note("egress: no vsock device; relay disabled")
+            return
+        }
+        let listener = VZVirtioSocketListener()
+        listener.delegate = self
+        dev.setSocketListener(listener, forPort: egressVsockPort)
+        egressListener = listener
+        note("egress relay: vsock :\(egressVsockPort) → \(egressTarget)")
+    }
+
+    func listener(
+        _ listener: VZVirtioSocketListener,
+        shouldAcceptNewConnection connection: VZVirtioSocketConnection,
+        from socketDevice: VZVirtioSocketDevice
+    ) -> Bool {
+        guard let fd = dialTCP(egressTarget) else {
+            note("egress relay: cannot reach \(egressTarget)")
+            return false
+        }
+        let relay = Relay(clientFD: fd, conn: connection)
+        let key = ObjectIdentifier(relay)
+        relay.onClose = { [weak self] in self?.relays[key] = nil }
+        relays[key] = relay
+        relay.start()
+        return true
+    }
+
+    /// Blocking TCP connect to "host:port" (loopback-fast; the gateway is local).
+    private func dialTCP(_ target: String) -> Int32? {
+        let parts = target.split(separator: ":")
+        guard parts.count == 2, let port = UInt16(parts[1]) else { return nil }
+        var host = String(parts[0])
+        if host == "localhost" { host = "127.0.0.1" }
+        let fd = socket(AF_INET, SOCK_STREAM, 0)
+        if fd < 0 { return nil }
+        var addr = sockaddr_in()
+        addr.sin_family = sa_family_t(AF_INET)
+        addr.sin_port = port.bigEndian
+        if inet_pton(AF_INET, host, &addr.sin_addr) != 1 {
+            close(fd)
+            return nil
+        }
+        let rc = withUnsafePointer(to: &addr) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                connect(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+            }
+        }
+        if rc != 0 {
+            close(fd)
+            return nil
+        }
+        return fd
     }
 
     private func teardown() {

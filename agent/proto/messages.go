@@ -37,11 +37,15 @@ type Request struct {
 	Mode    string `json:"mode,omitempty"`    // octal string, e.g. "0644"
 	Parents bool   `json:"parents,omitempty"` // mkdir -p
 
-	// waitForPort
+	// waitForPort / tcpConnect / egressListen
 	Port       int    `json:"port,omitempty"`
 	Host       string `json:"host,omitempty"`
 	TimeoutMs  int    `json:"timeoutMs,omitempty"`
 	IntervalMs int    `json:"intervalMs,omitempty"`
+
+	// egressListen: host vsock port to dial per relayed connection (defaults to
+	// the in-guest `port` when 0).
+	VsockPort int `json:"vsockPort,omitempty"`
 
 	// pty resize
 	Cols int `json:"cols,omitempty"`

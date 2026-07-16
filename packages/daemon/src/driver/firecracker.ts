@@ -1,4 +1,5 @@
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
+import { createServer as createNetServer, connect as netConnect } from "node:net";
 import {
   closeSync,
   createWriteStream,
@@ -52,6 +53,14 @@ export interface FcConfig {
   warmPool?: number;
   /** Image the warm pool pre-boots (a plain create of this image adopts a spare). */
   poolImage?: string;
+  /**
+   * Egress gateway port for the guest relay (0/unset = no relay). The guest gets
+   * a loopback listener on this port whose connections tunnel over vsock to the
+   * host and on to `egressHost:egressPort` — the NIC-less guest's only way out.
+   */
+  egressPort?: number;
+  /** Host the egress gateway listens on (default 127.0.0.1). */
+  egressHost?: string;
 }
 
 /** Live per-sandbox microVM: the `firecracker` process + its API + vsock sockets. */
@@ -244,6 +253,17 @@ export class FirecrackerDriver extends AgentDriver {
     const vm = await this.withOneRetry(p.id, configureAndBoot, "boot");
     try {
       await this.waitForAgent(vm);
+      // Cold boots need the in-guest side of the egress relay started (after a
+      // snapshot resume it's already alive in the restored RAM).
+      if (this.cfg.egressPort && this.cfg.egressPort > 0) {
+        const { socket, leftover } = await fcVsockConnect(vm.vsockUds, AGENT_VSOCK_PORT, 15000);
+        const conn = await AgentConn.attach(socket, leftover, 15000);
+        try {
+          await conn.egressListen(this.cfg.egressPort);
+        } finally {
+          conn.close();
+        }
+      }
     } catch (err) {
       await killAndWait(vm.proc);
       throw err;
@@ -339,6 +359,7 @@ export class FirecrackerDriver extends AgentDriver {
     proc.stdout.pipe(createWriteStream(join(stateDir, "console.log"), { flags: "a" }));
     proc.stderr.pipe(createWriteStream(join(stateDir, "console.log"), { flags: "a" }));
     const vm: FcVm = { proc, apiSock, vsockUds, workspaceImg: join(stateDir, "workspace.img"), stateDir };
+    this.startEgressRelay(vm);
     try {
       await waitForFile(apiSock, 5000); // firecracker creates the API socket on startup
     } catch (err) {
@@ -346,6 +367,41 @@ export class FirecrackerDriver extends AgentDriver {
       throw err;
     }
     return vm;
+  }
+
+  /**
+   * Host side of the guest egress relay. When the guest dials vsock port P,
+   * firecracker connects to the unix socket `<vsockUds>_P` — so we listen there
+   * and splice every such connection to the egress gateway. Set up per-VMM
+   * (boot, snapshot-load, and pool spares alike) before the guest can dial;
+   * torn down automatically with the VMM process.
+   */
+  private startEgressRelay(vm: FcVm): void {
+    const port = this.cfg.egressPort;
+    if (!port || port <= 0) return;
+    const path = `${vm.vsockUds}_${port}`;
+    rmQuiet(path);
+    const srv = createNetServer((guest) => {
+      const up = netConnect(port, this.cfg.egressHost ?? "127.0.0.1");
+      const close = (): void => {
+        guest.destroy();
+        up.destroy();
+      };
+      guest.pipe(up);
+      up.pipe(guest);
+      guest.on("error", close);
+      up.on("error", close);
+      guest.on("close", close);
+      up.on("close", close);
+    });
+    srv.on("error", (err) =>
+      log.warn("egress relay listener error", { path, error: String(err) }),
+    );
+    srv.listen(path);
+    vm.proc.once("exit", () => {
+      srv.close();
+      rmQuiet(path);
+    });
   }
 
   /**

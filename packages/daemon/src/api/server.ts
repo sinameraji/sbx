@@ -236,8 +236,8 @@ async function handleTerminalUpgrade(
  * sandbox points its SDK at, plus suggested env vars. The token is used in place
  * of each provider's real API key (the daemon swaps it for the real one).
  */
-function egressConfig(config: Config) {
-  const base = `http://${config.egressAdvertiseHost}:${config.egressPort}`;
+function egressConfig(config: Config, advertiseHost?: string) {
+  const base = `http://${advertiseHost ?? config.egressAdvertiseHost}:${config.egressPort}`;
   const names = Object.keys(buildProviders(config));
   const ENV_HINT: Record<string, { baseUrlEnv: string; keyEnv: string }> = {
     openai: { baseUrlEnv: "OPENAI_BASE_URL", keyEnv: "OPENAI_API_KEY" },
@@ -265,9 +265,9 @@ function egressConfig(config: Config) {
  * standing in for each provider's real key. Injected at create time when a
  * sandbox opts into egress, so the gateway is drop-in (no in-sandbox config).
  */
-function egressEnv(config: Config, token: string): Record<string, string> {
+function egressEnv(config: Config, token: string, advertiseHost?: string): Record<string, string> {
   const env: Record<string, string> = {};
-  for (const p of egressConfig(config).providers) {
+  for (const p of egressConfig(config, advertiseHost).providers) {
     if (p.baseUrlEnv) env[p.baseUrlEnv] = p.baseUrl;
     if (p.keyEnv) env[p.keyEnv] = token;
   }
@@ -281,8 +281,8 @@ function egressEnv(config: Config, token: string): Record<string, string> {
  * the gateway directly, origin-form) don't loop back through the proxy. Lower-case
  * variants too, since many tools (curl, pip, apt) read those.
  */
-function proxyEnv(config: Config, token: string): Record<string, string> {
-  const host = config.egressAdvertiseHost;
+function proxyEnv(config: Config, token: string, advertiseHost?: string): Record<string, string> {
+  const host = advertiseHost ?? config.egressAdvertiseHost;
   // Token as BOTH user and password: many clients (pip/urllib3, some others) only
   // emit `Proxy-Authorization` on a CONNECT when the proxy URL has a non-empty
   // password. The gateway reads the username half, so the password value is moot.
@@ -854,8 +854,12 @@ async function createSandbox(
   }
   if (wantEgress || config.egressEnforce) {
     egressToken = SandboxStore.newEgressToken();
-    if (wantEgress) env = { ...env, ...egressEnv(config, egressToken) };
-    if (config.egressEnforce) env = { ...env, ...proxyEnv(config, egressToken) };
+    // microVM guests have no NIC: their route to the gateway is the in-guest
+    // loopback relay (agent listener on 127.0.0.1:<egressPort> → vsock → host),
+    // so their env points at localhost instead of the gateway's host address.
+    const advertiseHost = driverName !== "container" ? "127.0.0.1" : undefined;
+    if (wantEgress) env = { ...env, ...egressEnv(config, egressToken, advertiseHost) };
+    if (config.egressEnforce) env = { ...env, ...proxyEnv(config, egressToken, advertiseHost) };
   }
 
   try {

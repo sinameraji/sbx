@@ -91,6 +91,11 @@ export class DriverRouter implements Driver {
     const d = this.forId(id);
     return typeof d.snapshot === "function" ? d.snapshot(id) : d.stop(id);
   }
+  /** Whether the backing driver can memory-snapshot this sandbox right now. */
+  canSnapshot(id: string): boolean {
+    const d = this.forId(id);
+    return typeof d.snapshot === "function" && (d.canSnapshot ? d.canSnapshot(id) : true);
+  }
   destroy(id: string): Promise<void> {
     return this.forId(id).destroy(id);
   }

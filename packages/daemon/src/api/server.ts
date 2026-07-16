@@ -4,7 +4,7 @@ import { type BackupInfo, BackupRegistry } from "../backups.js";
 import { previewUrl, type Config } from "../config.js";
 import type { Driver, TerminalSession } from "../driver/types.js";
 import { kernelFor, type KernelLanguage } from "../kernels.js";
-import { resumeSandbox } from "../lifecycle.js";
+import { pauseSandbox, resumeSandbox } from "../lifecycle.js";
 import type { Capacity } from "../capacity.js";
 import { computeCost } from "../cost.js";
 import { log } from "../logger.js";
@@ -53,6 +53,7 @@ interface Deps {
  *   DELETE /sandboxes/:id                  -> destroy (removes volume too)
  *   GET    /sandboxes/:id/metrics          -> live stats + cumulative usage + cost
  *   POST   /sandboxes/:id/stop             -> stop (remove container, keep volume)
+ *   POST   /sandboxes/:id/pause            -> fast-pause (memory snapshot on microVM drivers; else stop-with-volume); any op auto-resumes
  *   POST   /sandboxes/:id/start            -> start (recreate container, reattach volume)
  *   POST   /sandboxes/:id/backups          -> back up /workspace, returns BackupInfo
  *   GET    /sandboxes/:id/backups          -> list this sandbox's backups
@@ -773,6 +774,11 @@ async function handle(
     return stopSandbox(res, { driver, store }, stopMatch[1]);
   }
 
+  const pauseMatch = path.match(/^\/sandboxes\/([^/]+)\/pause$/);
+  if (method === "POST" && pauseMatch) {
+    return pauseSandboxRoute(res, { driver, store }, pauseMatch[1]);
+  }
+
   const startMatch = path.match(/^\/sandboxes\/([^/]+)\/start$/);
   if (method === "POST" && startMatch) {
     return startSandbox(res, { driver, store }, startMatch[1]);
@@ -914,6 +920,27 @@ async function startSandbox(
   if (!record) return sendJson(res, 404, { error: "not found" });
   if (record.status === "running") return sendJson(res, 200, record);
   await resumeSandbox(driver, store, record);
+  sendJson(res, 200, record);
+}
+
+/**
+ * Manual fast-pause: the strongest pause the sandbox's driver offers (memory
+ * snapshot on microVM drivers — background processes come back alive; cold
+ * stop-with-volume otherwise). Unlike `stop`, any later operation transparently
+ * resumes the sandbox.
+ */
+async function pauseSandboxRoute(
+  res: ServerResponse,
+  { driver, store }: Pick<Deps, "driver" | "store">,
+  id: string,
+): Promise<void> {
+  const record = store.get(id);
+  if (!record) return sendJson(res, 404, { error: "not found" });
+  if (record.status === "paused") return sendJson(res, 200, record);
+  if (record.status === "stopped") {
+    return sendJson(res, 409, { error: "sandbox is stopped; start it first" });
+  }
+  await pauseSandbox(driver, store, record);
   sendJson(res, 200, record);
 }
 

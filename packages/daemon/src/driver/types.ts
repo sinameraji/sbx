@@ -163,6 +163,14 @@ export interface Driver {
   snapshot?(id: string): Promise<void>;
 
   /**
+   * Whether `snapshot` can fast-pause this sandbox *right now* (VM live, host
+   * OS supports save/restore). Callers use this to pick pause semantics up
+   * front — e.g. the idle reaper only pauses a sandbox with running background
+   * processes when they'll survive the resume.
+   */
+  canSnapshot?(id: string): boolean;
+
+  /**
    * Run a command inside the sandbox, streaming output via `onEvent`.
    * Resolves with the process exit code.
    */

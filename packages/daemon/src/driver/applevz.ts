@@ -10,6 +10,7 @@ import {
   rmSync,
   unlinkSync,
 } from "node:fs";
+import { release } from "node:os";
 import { dirname, join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { AgentConn } from "./agent.js";
@@ -361,6 +362,11 @@ export class AppleVzDriver extends AgentDriver {
     } catch {
       /* ignore */
     }
+  }
+
+  /** VZ save/restore needs macOS 14+ (Darwin 23+) and a live VM. */
+  canSnapshot(id: string): boolean {
+    return this.vms.has(id) && Number(release().split(".")[0]) >= 23;
   }
 
   /**

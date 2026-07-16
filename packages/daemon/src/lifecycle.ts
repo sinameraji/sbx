@@ -6,27 +6,46 @@ import type { SandboxRecord } from "./types.js";
 /**
  * Lifecycle FSM transitions and the idle reaper.
  *
- *   created ─▶ running ──(idle > sleepAfterMs)──▶ paused ──(any op)──▶ running
- *                  │                                  │
- *                  └────────── stop (manual) ─────────┴──▶ stopped ──(start)──▶ running
+ *   created ─▶ running ──(idle > sleepAfterMs, or POST /pause)──▶ paused ──(any op)──▶ running
+ *                  │                                                  │
+ *                  └────────────── stop (manual) ────────────────────┴──▶ stopped ──(start)──▶ running
  *
- * A `paused` sandbox has had its container removed (compute freed) but keeps its
- * workspace volume, so the next operation transparently resumes it. A `stopped`
- * sandbox is user-intent and is never auto-resumed nor auto-paused.
+ * A `paused` sandbox has had its compute freed but keeps its workspace, so the
+ * next operation transparently resumes it. Pause comes in two strengths, picked
+ * automatically per sandbox: on microVM drivers that support it, pause is a
+ * **memory snapshot** (guest RAM + devices saved; background processes come back
+ * alive on resume — nothing is lost by pausing); otherwise it's the cold
+ * stop-with-volume (workspace survives, processes don't). A `stopped` sandbox is
+ * user-intent and is never auto-resumed nor auto-paused.
  */
 
 /**
- * Pause a running sandbox: stop its container (keeping the workspace volume) and
- * drop now-dead runtime state, marking it `paused` so the next operation
- * auto-resumes it.
+ * Pause a running sandbox, preferring a memory snapshot (fast resume, live
+ * state preserved) and falling back to a cold stop. Runtime state (tracked
+ * processes, exposed ports) is only dropped on a cold pause — after a snapshot
+ * pause it stays valid, because resume restores those processes live.
  */
 export async function pauseSandbox(
   driver: Driver,
   store: SandboxStore,
   record: SandboxRecord,
 ): Promise<void> {
-  await driver.stop(record.id);
-  store.clearRuntimeState(record.id);
+  let hibernated = false;
+  if (typeof driver.snapshot === "function" && (driver.canSnapshot?.(record.id) ?? true)) {
+    try {
+      await driver.snapshot(record.id);
+      hibernated = true;
+    } catch (err) {
+      log.warn("snapshot pause failed; falling back to a cold stop", {
+        sandbox: record.id,
+        error: String(err),
+      });
+    }
+  }
+  if (!hibernated) {
+    await driver.stop(record.id);
+    store.clearRuntimeState(record.id); // processes/ports died with the compute
+  }
   record.status = "paused";
   store.add(record);
 }
@@ -56,9 +75,11 @@ export async function resumeSandbox(
 
 /**
  * Auto-pause sandboxes that have been idle past their `sleepAfterMs`. Sandboxes
- * advertising a service (an exposed port) or running a tracked background
- * process are skipped — pausing would kill that work, and the activity that
- * matters there flows through the proxy/process, not the control-plane API.
+ * advertising a service (an exposed port) are always skipped — the preview proxy
+ * doesn't auto-resume, so a paused port would break inbound requests. Sandboxes
+ * with running tracked background processes are paused only when the driver can
+ * memory-snapshot them (the processes come back alive on resume); on cold-pause
+ * drivers they're skipped, since pausing would kill that work.
  * Returns the ids that were paused.
  */
 export async function reapIdle(
@@ -71,7 +92,8 @@ export async function reapIdle(
     if (record.status !== "running") continue;
     if (!record.sleepAfterMs || record.sleepAfterMs <= 0) continue;
     if (store.listExposed(record.id).length > 0) continue;
-    if (store.listProcesses(record.id).some((p) => p.status === "running")) continue;
+    const hasLiveProcs = store.listProcesses(record.id).some((p) => p.status === "running");
+    if (hasLiveProcs && !driver.canSnapshot?.(record.id)) continue;
     if (now - Date.parse(record.lastActivityAt) < record.sleepAfterMs) continue;
     try {
       await pauseSandbox(driver, store, record);

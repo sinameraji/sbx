@@ -167,6 +167,14 @@ async function main(): Promise<number> {
     assert((await sandbox.readFile("/workspace/keep.txt")) === "in-backup", "workspace lost across stop/start");
     ok("workspace persists across stop/start");
 
+    // 11. Manual pause = memory snapshot: a background process survives the
+    //     pause → transparent auto-resume cycle (the FSM's fast-pause path).
+    const survivor = await sandbox.startProcess("while true; do sleep 1; done");
+    await sandbox.pause();
+    const back = await sandbox.exec(`kill -0 ${survivor.pid} 2>/dev/null && echo SURVIVED`);
+    assert(/SURVIVED/.test(back.stdout), "background process did not survive pause/resume");
+    ok("pause (memory snapshot) → auto-resume with background process alive");
+
     console.error(`\n[smoke-microvm] passed — ${passed} checks (full surface on the ${driverName} driver)`);
     return 0;
   } catch (err) {

@@ -4,7 +4,7 @@ import { listCommand } from "./list.js";
 import { removeCommand } from "./remove.js";
 import { filesCommand } from "./files.js";
 import { startCommand, psCommand, killCommand } from "./proc.js";
-import { stopCommand, startSandboxCommand } from "./lifecycle.js";
+import { pauseCommand, stopCommand, startSandboxCommand } from "./lifecycle.js";
 import { backupCommand, restoreCommand, backupsCommand } from "./backup.js";
 import { runCodeCommand } from "./code.js";
 import { watchCommand } from "./watch.js";
@@ -75,6 +75,8 @@ export async function cli(args: string[]): Promise<number> {
         : startSandboxCommand(positional, globals);
     case "stop":
       return stopCommand(positional, globals);
+    case "pause":
+      return pauseCommand(positional, globals);
     case "backup":
       return backupCommand(positional, globals);
     case "restore":
@@ -155,6 +157,10 @@ Commands:
 
   sb stop <id>
     Stop a sandbox, freeing compute but keeping its persistent workspace.
+
+  sb pause <id>
+    Fast-pause a sandbox; any later operation resumes it. On microVM sandboxes
+    this is a memory snapshot — background processes come back alive.
 
   sb start <id>
     Resume a stopped sandbox (workspace intact).

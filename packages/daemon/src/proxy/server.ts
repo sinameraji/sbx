@@ -1,6 +1,7 @@
 import { createServer, type Server, type Socket } from "node:net";
 import type { Config } from "../config.js";
 import type { Driver } from "../driver/types.js";
+import { resumeSandbox } from "../lifecycle.js";
 import type { RouteTarget, SandboxStore } from "../store.js";
 import { safeEqual } from "../util.js";
 
@@ -78,6 +79,22 @@ async function bridgeAndSplice(
   target: RouteTarget,
   { driver, store }: Deps,
 ): Promise<void> {
+  // Inbound preview traffic transparently wakes a paused sandbox — with a
+  // memory-snapshot pause the serving process comes back alive, which is what
+  // lets the idle reaper hibernate port-exposing sandboxes on snapshot-capable
+  // drivers (see lifecycle.reapIdle). A `stopped` sandbox is user intent and
+  // stays down.
+  const record = store.get(target.sandboxId);
+  if (record?.status === "stopped") {
+    return respond(socket, 502, "Sandbox is stopped; start it first");
+  }
+  if (record?.status === "paused") {
+    try {
+      await resumeSandbox(driver, store, record);
+    } catch {
+      return respond(socket, 502, "Failed to resume the paused sandbox");
+    }
+  }
   // Proxied traffic counts as activity so the idle reaper won't pause a sandbox
   // that's actively serving requests.
   store.touch(target.sandboxId);

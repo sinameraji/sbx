@@ -167,13 +167,21 @@ async function main(): Promise<number> {
     assert((await sandbox.readFile("/workspace/keep.txt")) === "in-backup", "workspace lost across stop/start");
     ok("workspace persists across stop/start");
 
-    // 11. Manual pause = memory snapshot: a background process survives the
-    //     pause → transparent auto-resume cycle (the FSM's fast-pause path).
+    // 11. Manual pause = memory snapshot: a background process AND an exposed
+    //     server survive, and an inbound preview request transparently WAKES the
+    //     paused sandbox (what lets the reaper hibernate port-exposing sandboxes).
     const survivor = await sandbox.startProcess("while true; do sleep 1; done");
+    await sandbox.startProcess(
+      "while true; do printf 'HTTP/1.0 200 OK\\r\\n\\r\\nwake-ok' | nc -l -p 9100 2>/dev/null; done",
+    );
+    assert(await sandbox.waitForPort(9100, { timeoutMs: 8000 }), "port 9100 never ready");
+    await sandbox.exposePort(9100);
     await sandbox.pause();
+    const woke = await fetch(`${proxyEndpoint}/_sbx/${sandbox.id}/9100/`);
+    assert(/wake-ok/.test(await woke.text()), "preview request did not wake the paused sandbox");
     const back = await sandbox.exec(`kill -0 ${survivor.pid} 2>/dev/null && echo SURVIVED`);
     assert(/SURVIVED/.test(back.stdout), "background process did not survive pause/resume");
-    ok("pause (memory snapshot) → auto-resume with background process alive");
+    ok("pause (memory snapshot) → preview request wakes the VM; processes alive");
 
     console.error(`\n[smoke-microvm] passed — ${passed} checks (full surface on the ${driverName} driver)`);
     return 0;

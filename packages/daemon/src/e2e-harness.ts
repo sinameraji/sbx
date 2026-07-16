@@ -11,7 +11,11 @@
  * Prereqs: a daemon whose environment has SBX_PROVIDER_KEY_OPENROUTER, Docker
  * (container driver), and internet egress for the gateway itself.
  * Env: SBX_ENDPOINT (default http://127.0.0.1:4750), SBX_API_KEY (if auth on),
- *      SBX_E2E_MODEL (OpenRouter slug; default anthropic/claude-3.5-haiku).
+ *      SBX_E2E_MODEL (OpenRouter slug; default anthropic/claude-3.5-haiku),
+ *      SBX_E2E_EXPECT — "completion" (default; needs a real provider key) or
+ *      "auth-fail": run with a dummy key and accept the provider's auth error
+ *      as proof the whole chain works (sandbox → token env → headless Claude
+ *      Code → gateway → key injection → real provider), minus the billing.
  * Run: npm run e2e:harness
  */
 import assert from "node:assert/strict";
@@ -73,24 +77,41 @@ async function main(): Promise<number> {
         `claude -p "Reply with exactly: SBX_E2E_OK" --model haiku 2>&1`,
       ].join(" && "),
     );
-    assert.match(
-      run.stdout,
-      /SBX_E2E_OK/,
-      `no completion came back through the gateway:\n${run.stdout.slice(-800)}`,
-    );
-    ok("★ headless Claude Code completed a real prompt through the egress gateway");
+    const expect = process.env.SBX_E2E_EXPECT ?? "completion";
+    if (expect === "auth-fail") {
+      // Dummy-key mode: the provider rejecting our injected key IS the proof —
+      // the request left headless Claude Code, crossed the gateway, had the
+      // (dummy) real key injected, and reached the provider over the internet.
+      assert.match(
+        run.stdout,
+        /401|unauthori[sz]ed|invalid.*(key|token)|authentication/i,
+        `expected a provider auth error, got:\n${run.stdout.slice(-800)}`,
+      );
+      ok("★ headless Claude Code → gateway → real provider (auth error as expected with a dummy key)");
+    } else {
+      assert.match(
+        run.stdout,
+        /SBX_E2E_OK/,
+        `no completion came back through the gateway:\n${run.stdout.slice(-800)}`,
+      );
+      ok("★ headless Claude Code completed a real prompt through the egress gateway");
+    }
 
-    // The gateway metered the call: provider requests + tokens on the record.
+    // The gateway metered the traffic: provider calls on the record.
     const metrics = await sandbox.metrics();
-    assert.ok(
-      (metrics.usage?.providerCalls ?? 0) > 0,
-      "gateway did not meter any provider call",
-    );
-    ok(
-      `gateway metered ${metrics.usage.providerCalls} provider call(s), ` +
-        `${metrics.usage.providerTokensIn}/${metrics.usage.providerTokensOut} tokens in/out, ` +
-        `provider cost $${metrics.usage.providerCost.toFixed(4)}`,
-    );
+    if (expect === "auth-fail") {
+      ok(`gateway saw ${metrics.usage?.providerCalls ?? 0} provider call(s) (auth-fail mode)`);
+    } else {
+      assert.ok(
+        (metrics.usage?.providerCalls ?? 0) > 0,
+        "gateway did not meter any provider call",
+      );
+      ok(
+        `gateway metered ${metrics.usage.providerCalls} provider call(s), ` +
+          `${metrics.usage.providerTokensIn}/${metrics.usage.providerTokensOut} tokens in/out, ` +
+          `provider cost $${metrics.usage.providerCost.toFixed(4)}`,
+      );
+    }
 
     console.log(`\ne2e-harness: ${passed} checks passed (real agent, real completion, key never in sandbox)`);
     return 0;

@@ -151,56 +151,87 @@ export class FirecrackerDriver extends AgentDriver {
       else ensureSparseFile(workspaceImg, this.cfg.diskGb * 1024 ** 3);
     }
 
+    const cpus = opts.limits?.cpus ? Math.max(1, Math.ceil(opts.limits.cpus)) : 2;
+    const memMib = opts.limits?.memoryMb && opts.limits.memoryMb > 0 ? opts.limits.memoryMb : 1024;
+    const pidsMax = opts.limits?.pidsLimit && opts.limits.pidsLimit > 0 ? opts.limits.pidsLimit : 0;
+    const bootArgs = pidsMax > 0 ? `${FC_DEFAULT_BOOT_ARGS} sbx.pids=${pidsMax}` : FC_DEFAULT_BOOT_ARGS;
+
+    const configureAndBoot = async (): Promise<FcVm> => {
+      const vm = await this.spawnVmm(stateDir);
+      try {
+        const api = new FcApi(vm.apiSock);
+        await api.applyAll(
+          buildFcApiCalls({
+            kernelPath: this.cfg.kernel,
+            rootfsPath: rootfs,
+            workspacePath: workspaceImg,
+            vcpus: cpus,
+            memMib,
+            vsockUds: vm.vsockUds,
+            bootArgs,
+          }),
+        );
+        await api.call(FC_START_ACTION);
+        return vm;
+      } catch (err) {
+        await killAndWait(vm.proc);
+        throw err;
+      }
+    };
+    const vm = await this.withOneRetry(id, configureAndBoot, "boot");
+
+    this.vms.set(id, vm);
+    try {
+      await this.waitForAgent(vm);
+      if (opts.env && Object.keys(opts.env).length) {
+        await this.withConn(id, (c) => c.setEnv(opts.env!));
+      }
+    } catch (err) {
+      this.vms.delete(id);
+      await killAndWait(vm.proc);
+      throw err;
+    }
+    log.info("firecracker VM up", { sandbox: id });
+  }
+
+  /** Spawn a fresh VMM process for `stateDir` and wait for its API socket. */
+  private async spawnVmm(stateDir: string): Promise<FcVm> {
     const apiSock = join(stateDir, "fc-api.sock");
     const vsockUds = join(stateDir, "vsock.sock");
-    for (const s of [apiSock, vsockUds]) {
-      try {
-        unlinkSync(s);
-      } catch {
-        /* not there */
-      }
-    }
-
-    // Spawn the VMM. It creates the API socket, then waits for configuration.
+    for (const s of [apiSock, vsockUds]) rmQuiet(s);
     const proc = spawn(this.cfg.fcBin, ["--api-sock", apiSock], { stdio: ["ignore", "pipe", "pipe"] });
     proc.stdout.pipe(createWriteStream(join(stateDir, "console.log"), { flags: "a" }));
     proc.stderr.pipe(createWriteStream(join(stateDir, "console.log"), { flags: "a" }));
-    const vm: FcVm = { proc, apiSock, vsockUds, workspaceImg, stateDir };
-    this.vms.set(id, vm);
-
+    const vm: FcVm = { proc, apiSock, vsockUds, workspaceImg: join(stateDir, "workspace.img"), stateDir };
     try {
       await waitForFile(apiSock, 5000); // firecracker creates the API socket on startup
-      const api = new FcApi(apiSock);
-
-      const cpus = opts.limits?.cpus ? Math.max(1, Math.ceil(opts.limits.cpus)) : 2;
-      const memMib = opts.limits?.memoryMb && opts.limits.memoryMb > 0 ? opts.limits.memoryMb : 1024;
-      const pidsMax = opts.limits?.pidsLimit && opts.limits.pidsLimit > 0 ? opts.limits.pidsLimit : 0;
-      const bootArgs = pidsMax > 0 ? `${FC_DEFAULT_BOOT_ARGS} sbx.pids=${pidsMax}` : FC_DEFAULT_BOOT_ARGS;
-
-      await api.applyAll(
-        buildFcApiCalls({
-          kernelPath: this.cfg.kernel,
-          rootfsPath: rootfs,
-          workspacePath: workspaceImg,
-          vcpus: cpus,
-          memMib,
-          vsockUds,
-          bootArgs,
-        }),
-      );
-      await api.call(FC_START_ACTION);
     } catch (err) {
-      proc.kill("SIGKILL");
-      this.vms.delete(id);
-      throw new Error(`firecracker: VM start failed: ${(err as Error).message}`);
+      await killAndWait(proc);
+      throw err;
     }
+    return vm;
+  }
 
-    await this.waitForAgent(vm);
-
-    if (opts.env && Object.keys(opts.env).length) {
-      await this.withConn(id, (c) => c.setEnv(opts.env!));
+  /**
+   * Run a VMM bring-up step, retrying once on a fresh process. Rationale: a VMM
+   * spawned immediately after the previous one's SIGKILL can die silently before
+   * serving its API (a transient KVM/VMM teardown race seen on nested-virt
+   * hosts, ~ECONNRESET mid-configure); a single respawn reliably clears it.
+   */
+  private async withOneRetry<T>(id: string, step: () => Promise<T>, what: string): Promise<T> {
+    try {
+      return await step();
+    } catch (err) {
+      log.warn(`firecracker ${what} failed; retrying once on a fresh VMM`, {
+        sandbox: id,
+        error: (err as Error).message,
+      });
+      try {
+        return await step();
+      } catch (err2) {
+        throw new Error(`firecracker: VM ${what} failed: ${(err2 as Error).message}`);
+      }
     }
-    log.info("firecracker VM up", { sandbox: id });
   }
 
   /** Poll the guest vsock until the agent answers its Hello, or time out. */
@@ -224,30 +255,33 @@ export class FirecrackerDriver extends AgentDriver {
     throw new Error(`firecracker: agent never came up: ${String((lastErr as Error)?.message ?? lastErr)}`);
   }
 
-  /** Boot a fresh VMM and load the saved snapshot into it (no kernel boot). */
+  /** Boot a fresh VMM and load the saved snapshot into it (no kernel boot). The
+   *  snapshot pins the vsock UDS path; firecracker re-binds it on load (stale
+   *  socket files are cleared by `spawnVmm`). */
   private async resumeFromSnapshot(
     id: string,
     stateDir: string,
     vmstate: string,
     memFile: string,
   ): Promise<void> {
-    const apiSock = join(stateDir, "fc-api.sock");
-    const vsockUds = join(stateDir, "vsock.sock");
-    // The snapshot pins the vsock UDS path; firecracker re-binds it on load, so
-    // stale socket files must be gone first.
-    for (const s of [apiSock, vsockUds]) rmQuiet(s);
-    const proc = spawn(this.cfg.fcBin, ["--api-sock", apiSock], { stdio: ["ignore", "pipe", "pipe"] });
-    proc.stdout.pipe(createWriteStream(join(stateDir, "console.log"), { flags: "a" }));
-    proc.stderr.pipe(createWriteStream(join(stateDir, "console.log"), { flags: "a" }));
-    const vm: FcVm = { proc, apiSock, vsockUds, workspaceImg: join(stateDir, "workspace.img"), stateDir };
+    const loadSnapshot = async (): Promise<FcVm> => {
+      const vm = await this.spawnVmm(stateDir);
+      try {
+        await new FcApi(vm.apiSock).call(buildSnapshotLoadCall(vmstate, memFile));
+        return vm;
+      } catch (err) {
+        await killAndWait(vm.proc);
+        throw err;
+      }
+    };
+    const vm = await this.withOneRetry(id, loadSnapshot, "snapshot load");
+
     this.vms.set(id, vm);
     try {
-      await waitForFile(apiSock, 5000);
-      await new FcApi(apiSock).call(buildSnapshotLoadCall(vmstate, memFile));
       await this.waitForAgent(vm);
     } catch (err) {
-      proc.kill("SIGKILL");
       this.vms.delete(id);
+      await killAndWait(vm.proc);
       throw err;
     }
     // One-shot: guest state diverges the moment the VM resumes, so a second load
@@ -273,8 +307,8 @@ export class FirecrackerDriver extends AgentDriver {
     await api.call(
       buildSnapshotCreateCall(join(vm.stateDir, "snapshot.vmstate"), join(vm.stateDir, "snapshot.mem")),
     );
-    vm.proc.kill("SIGKILL"); // state saved; free the compute
     this.vms.delete(id);
+    await killAndWait(vm.proc); // state saved; free the compute
     for (const s of [vm.apiSock, vm.vsockUds]) rmQuiet(s);
   }
 
@@ -283,8 +317,8 @@ export class FirecrackerDriver extends AgentDriver {
     if (!vm) return;
     // Flush the guest fs so workspace writes survive the abrupt teardown.
     await this.exec(id, "sync", {}, () => {}).catch(() => {});
-    vm.proc.kill("SIGKILL"); // tears down the microVM; workspace.img persists
     this.vms.delete(id);
+    await killAndWait(vm.proc); // tears down the microVM; workspace.img persists
     for (const s of [vm.apiSock, vm.vsockUds]) rmQuiet(s);
   }
 
@@ -349,6 +383,20 @@ function rmQuiet(path: string): void {
   } catch {
     /* not there */
   }
+}
+
+/** SIGKILL a VMM and wait until the process has actually exited, so the next
+ *  spawn never overlaps the previous VM's kernel-side teardown. */
+function killAndWait(proc: ChildProcess, timeoutMs = 3000): Promise<void> {
+  return new Promise((resolve) => {
+    if (proc.exitCode !== null || proc.signalCode !== null) return resolve();
+    const timer = setTimeout(resolve, timeoutMs);
+    proc.once("exit", () => {
+      clearTimeout(timer);
+      resolve();
+    });
+    proc.kill("SIGKILL");
+  });
 }
 
 /** Copy `src`→`dst`, preferring a CoW reflink (btrfs/xfs) and falling back to a

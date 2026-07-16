@@ -10,6 +10,7 @@
  */
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
+import { createServer as createHttpServer } from "node:http";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
@@ -18,6 +19,10 @@ import { FirecrackerDriver } from "./driver/firecracker.js";
 async function main(): Promise<void> {
   const stateDir = mkdtempSync(join(tmpdir(), "sbx-fc-smoke-"));
   const image = process.env.SBX_FC_SMOKE_IMAGE ?? "alpine:3.20";
+  // Mock egress gateway: guests reach it ONLY via the vsock relay (no NIC).
+  const EGRESS_PORT = 47523;
+  const gateway = createHttpServer((_req, res) => res.end("fc-egress-pong"));
+  await new Promise<void>((r) => gateway.listen(EGRESS_PORT, "127.0.0.1", r));
   const driver = new FirecrackerDriver({
     fcBin: process.env.SBX_FC_BIN ?? "firecracker",
     kernel: process.env.SBX_FC_KERNEL ?? "helpers/sbx-vz/guest/vmlinux-fc",
@@ -25,6 +30,8 @@ async function main(): Promise<void> {
     stateDir,
     diskGb: 2,
     imageCacheDir: process.env.SBX_FC_IMAGE_CACHE ?? join(homedir(), ".sbx", "fc", "images"),
+    egressPort: EGRESS_PORT,
+    egressHost: "127.0.0.1",
   });
   const id = "fcsmoke01";
   let passed = 0;
@@ -56,6 +63,16 @@ async function main(): Promise<void> {
     });
     assert.match(envOut, /fc-ok/, "sandbox env applied");
     ok("sandbox env applied to exec");
+
+    // Egress-over-vsock: the NIC-less guest reaches the (mock) gateway through
+    // its loopback relay — its only route out of the VM.
+    let egOut = "";
+    const egCode = await driver.exec(id, `wget -qO- http://127.0.0.1:${EGRESS_PORT}/ping`, {}, (e) => {
+      if (e.type === "stdout") egOut += e.data;
+    });
+    assert.equal(egCode, 0, "in-guest wget via the egress relay");
+    assert.match(egOut, /fc-egress-pong/, "egress relay reached the gateway");
+    ok("★ egress-over-vsock: guest loopback → vsock → gateway (no NIC)");
 
     await driver.writeFile(id, { path: "/workspace/persist.txt", content: "fc-persist-123" });
     assert.equal(await driver.readFile(id, { path: "/workspace/persist.txt" }), "fc-persist-123");
@@ -101,7 +118,14 @@ async function main(): Promise<void> {
     const alive = await driver.listProcesses(id, [{ procId: "p2", pid: survivor.pid }]);
     assert.ok(alive[0]?.running, "background process survived snapshot→resume");
     await driver.killProcess(id, survivor.pid);
-    ok(`★ snapshot fast-pause → resume, no kernel boot (save ${saveMs}ms, resume ${resumeMs}ms)`);
+    // The egress relay survives the cycle: the in-guest listener lives in
+    // restored RAM; the host relay is re-installed by the fresh VMM spawn.
+    let egResume = "";
+    await driver.exec(id, `wget -qO- http://127.0.0.1:${EGRESS_PORT}/after-resume`, {}, (e) => {
+      if (e.type === "stdout") egResume += e.data;
+    });
+    assert.match(egResume, /fc-egress-pong/, "egress relay must work after snapshot→resume");
+    ok(`★ snapshot fast-pause → resume, no kernel boot (save ${saveMs}ms, resume ${resumeMs}ms); egress relay survives`);
 
     // Persistence across stop/start (cold path: workspace survives, RAM doesn't).
     console.error("[smoke-fc] stop → start (workspace persistence)…");
@@ -171,6 +195,7 @@ async function main(): Promise<void> {
     console.log(`\nsmoke-fc: ${passed} checks passed (real Firecracker microVM)`);
   } finally {
     await driver.stop(id).catch(() => {});
+    await new Promise<void>((r) => gateway.close(() => r()));
     rmSync(stateDir, { recursive: true, force: true });
   }
 }

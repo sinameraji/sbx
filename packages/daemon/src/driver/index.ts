@@ -42,6 +42,9 @@ export function createNamedDriver(name: string, config: Config): Driver {
         warmPool: config.fcWarmPool,
         // A plain create of the daemon's default image adopts a spare.
         poolImage: config.defaultImage,
+        // Guest egress relay target: the gateway on this host.
+        egressPort: config.egressPort,
+        egressHost: config.host,
       });
     case "applevz":
       return new AppleVzDriver({
@@ -52,6 +55,9 @@ export function createNamedDriver(name: string, config: Config): Driver {
         diskGb: config.vzDiskGb,
         imageCacheDir: config.vzImageCacheDir,
         warmPool: config.vzWarmPool,
+        // Guest egress relay target: the gateway on this host.
+        egressPort: config.egressPort,
+        egressHost: config.host,
       });
     default:
       throw new Error(`unknown driver "${name}" (expected: ${DRIVER_NAMES.join(" | ")})`);

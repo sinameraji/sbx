@@ -23,7 +23,9 @@ func main() {
 	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
 	log.SetPrefix("sbx-agent ")
 
+	platformInit() // e.g. bring up loopback in slim guests (no ip/ifconfig)
 	ag := server.New()
+	ag.EgressDial = egressDial
 	ln, err := listen()
 	if err != nil {
 		log.Fatalf("listen: %v", err)

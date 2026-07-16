@@ -40,6 +40,12 @@ const Version = "0.1.0"
 type Agent struct {
 	mu  sync.RWMutex
 	env map[string]string
+
+	// EgressDial opens a fresh guest→host connection for the egress relay
+	// (AF_VSOCK to CID 2 in production; a test override via SBX_EGRESS_DIAL).
+	// Set by main at startup; nil means egressListen is unsupported.
+	EgressDial func(vsockPort uint32) (net.Conn, error)
+	egress     egressState
 }
 
 // New returns an Agent seeded with the current process environment as its
@@ -224,6 +230,8 @@ func (a *Agent) dispatch(ctx context.Context, w *proto.FrameWriter, id uint32, r
 		a.handleOpenPty(ctx, w, id, req, st, mu)
 	case "setEnv":
 		a.handleSetEnv(w, id, req)
+	case "egressListen":
+		a.handleEgressListen(w, id, req)
 	case "stats":
 		a.handleStats(w, id)
 	default:

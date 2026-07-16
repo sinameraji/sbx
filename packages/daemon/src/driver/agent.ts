@@ -241,6 +241,13 @@ export class AgentConn {
     await this.request({ method: "setEnv", env }).done;
   }
 
+  /** Start the in-guest loopback→vsock egress relay (idempotent per port): the
+   *  agent listens on 127.0.0.1:`port` and forwards each connection over vsock
+   *  to the host, which relays it to the egress gateway. */
+  async egressListen(port: number, vsockPort?: number): Promise<void> {
+    await this.request({ method: "egressListen", port, vsockPort }).done;
+  }
+
   /**
    * Watch `path` recursively, invoking `onEvent` per change until `signal`
    * aborts (which sends a Close frame; the agent stops and replies Result).

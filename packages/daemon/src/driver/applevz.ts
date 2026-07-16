@@ -30,6 +30,14 @@ export interface VzConfig {
   imageCacheDir: string;
   /** Pre-boot this many base-image microVMs for instant adopt (0 = off). */
   warmPool?: number;
+  /**
+   * Egress gateway port for the guest relay (0/unset = no relay). The guest gets
+   * a loopback listener on this port whose connections tunnel over vsock (helper
+   * listener) to `egressHost:egressPort` — the NIC-less guest's only way out.
+   */
+  egressPort?: number;
+  /** Host the egress gateway listens on (default 127.0.0.1). */
+  egressHost?: string;
 }
 
 /** Live per-sandbox VM: the `sbx-vz serve` process + its relay socket + disk. */
@@ -225,6 +233,12 @@ export class AppleVzDriver extends AgentDriver {
         // randomized) VZGenericMachineIdentifier. Lives in the stateDir so a
         // warm-pool slot rename carries it along.
         machineIdPath: join(p.stateDir, "machine-id.bin"),
+        // Guest egress relay: the helper listens on this vsock port and splices
+        // each guest-initiated connection to the egress gateway.
+        egressPort: this.cfg.egressPort ?? 0,
+        egressTarget: this.cfg.egressPort
+          ? `${this.cfg.egressHost ?? "127.0.0.1"}:${this.cfg.egressPort}`
+          : "",
       });
     } catch (err) {
       helper.kill();
@@ -232,6 +246,16 @@ export class AppleVzDriver extends AgentDriver {
     }
     // The VM has started, but the guest agent needs a moment to boot + bind vsock.
     await this.waitForAgentSocket(p.socketPath);
+    // Cold boots need the in-guest side of the egress relay started (after a
+    // snapshot resume it's already alive in the restored RAM).
+    if (this.cfg.egressPort && this.cfg.egressPort > 0) {
+      const conn = await AgentConn.connect({ path: p.socketPath, timeoutMs: 5000 });
+      try {
+        await conn.egressListen(this.cfg.egressPort);
+      } finally {
+        conn.close();
+      }
+    }
     return vm;
   }
 

@@ -7,6 +7,7 @@
  */
 import { spawn } from "node:child_process";
 import { existsSync, mkdtempSync } from "node:fs";
+import { createServer as createHttpServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import assert from "node:assert/strict";
@@ -18,8 +19,15 @@ async function main(): Promise<void> {
   const dir = mkdtempSync(join(tmpdir(), "sbx-agent-"));
   const sock = join(dir, "agent.sock");
 
+  const egressTargetSock = join(dir, "egress-target.sock");
   const proc = spawn(bin, [], {
-    env: { ...process.env, SBX_AGENT_LISTEN: `unix://${sock}` },
+    env: {
+      ...process.env,
+      SBX_AGENT_LISTEN: `unix://${sock}`,
+      // Egress relay test override: instead of vsock (no VM here), the agent
+      // dials this unix socket, where the check hosts a mock gateway.
+      SBX_EGRESS_DIAL: `unix://${egressTargetSock}`,
+    },
     stdio: ["ignore", "ignore", "inherit"],
   });
 
@@ -79,6 +87,21 @@ async function main(): Promise<void> {
     // stats returns (a stub off-Linux, but the RPC round-trips).
     assert.ok(await conn.stats(), "stats RPC returns");
     ok("stats RPC");
+
+    // Egress relay: the agent listens on guest-loopback and forwards each
+    // connection out its dialer (vsock in production; SBX_EGRESS_DIAL here).
+    // The check hosts the "gateway": an HTTP server on the dialed unix socket.
+    const gateway = createHttpServer((_req, res) => res.end("egress-pong"));
+    await new Promise<void>((r) => gateway.listen(egressTargetSock, r));
+    const egressPort = 47521;
+    await conn.egressListen(egressPort);
+    const pong = await fetch(`http://127.0.0.1:${egressPort}/anything`);
+    assert.equal(await pong.text(), "egress-pong", "egress relay round-trip");
+    await conn.egressListen(egressPort); // idempotent re-arm (driver re-sends per boot)
+    const pong2 = await fetch(`http://127.0.0.1:${egressPort}/again`);
+    assert.equal(await pong2.text(), "egress-pong", "relay still serves after re-arm");
+    await new Promise<void>((r) => gateway.close(() => r()));
+    ok("egress relay: loopback listener → dialer → mock gateway round-trip (idempotent)");
 
     conn.close();
     console.log(`\nagent-check: ${passed} checks passed`);

@@ -181,9 +181,26 @@ export class DriverRouter implements Driver {
   ping(): Promise<void> {
     return this.instance(this.defaultName).ping();
   }
-  /** Host capacity from the default driver (mixed-driver accounting is future work). */
-  hostInfo(): Promise<HostInfo> {
-    return this.instance(this.defaultName).hostInfo();
+  /**
+   * Host capacity for admission control. All drivers describe the same physical
+   * host, but each sees it differently — Docker Desktop on macOS reports its own
+   * VM's memory, not the Mac's — so ask every instantiated driver and take the
+   * most complete view (max). Committed-memory accounting is already
+   * driver-agnostic (it sums per-sandbox caps from the store).
+   */
+  async hostInfo(): Promise<HostInfo> {
+    const drivers = new Set<Driver>([this.instance(this.defaultName), ...this.instances.values()]);
+    let best: HostInfo = { memoryMb: 0, cpus: 0 };
+    for (const d of drivers) {
+      try {
+        const h = await d.hostInfo();
+        best = { memoryMb: Math.max(best.memoryMb, h.memoryMb), cpus: Math.max(best.cpus, h.cpus) };
+      } catch {
+        /* an unavailable driver (e.g. Docker down) shouldn't break capacity */
+      }
+    }
+    if (best.memoryMb === 0) return this.instance(this.defaultName).hostInfo();
+    return best;
   }
 
   /** Best-effort teardown of any driver-held background resources (e.g. the VZ

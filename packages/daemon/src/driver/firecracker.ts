@@ -4,9 +4,12 @@ import {
   createWriteStream,
   existsSync,
   ftruncateSync,
+  lstatSync,
   mkdirSync,
   openSync,
+  readlinkSync,
   rmSync,
+  symlinkSync,
   unlinkSync,
 } from "node:fs";
 import { totalmem, cpus as osCpus } from "node:os";
@@ -45,6 +48,10 @@ export interface FcConfig {
   imageCacheDir: string;
   /** Target platform for OCI→ext4 conversion (default matches the host arch). */
   platform?: string;
+  /** Warm-pool size: keep N pre-booted spare microVMs for instant adoption (0 = off). */
+  warmPool?: number;
+  /** Image the warm pool pre-boots (a plain create of this image adopts a spare). */
+  poolImage?: string;
 }
 
 /** Live per-sandbox microVM: the `firecracker` process + its API + vsock sockets. */
@@ -74,6 +81,12 @@ export class FirecrackerDriver extends AgentDriver {
   readonly name = "firecracker";
   private vms = new Map<string, FcVm>();
   private images: VzImageCache;
+  private pool: FcVm[] = [];
+  private poolTarget: number;
+  private poolSeq = 0;
+  private filling = false;
+  private readonly poolImage: string;
+  private readonly poolDir: string;
 
   constructor(private readonly cfg: FcConfig) {
     super();
@@ -87,6 +100,18 @@ export class FirecrackerDriver extends AgentDriver {
       // Convert OCI images for the host arch (the guest runs on this KVM host).
       platform: cfg.platform ?? (process.arch === "arm64" ? "linux/arm64" : "linux/amd64"),
     });
+    this.poolTarget = Math.max(0, cfg.warmPool ?? 0);
+    this.poolImage = cfg.poolImage ?? "base";
+    this.poolDir = join(cfg.stateDir, "_pool");
+    if (this.poolTarget > 0) {
+      // Clear stale slots from a previous run (their VMMs died with the daemon).
+      try {
+        rmSync(this.poolDir, { recursive: true, force: true });
+      } catch {
+        /* not there */
+      }
+      this.fillPool();
+    }
   }
 
   // --- lifecycle ------------------------------------------------------------
@@ -104,11 +129,23 @@ export class FirecrackerDriver extends AgentDriver {
     await this.launch(opts);
   }
 
-  /** Spawn firecracker, configure + boot the microVM, wait for the agent, apply env. */
+  /** Bring a sandbox live: adopt a warm-pool spare when eligible (instant), else
+   *  resume its snapshot, else cold-boot. Then apply the sandbox env. */
   private async launch(opts: CreateOptions): Promise<void> {
     const id = opts.id;
     if (this.vms.has(id)) return;
     const stateDir = join(this.cfg.stateDir, id);
+
+    // Warm-pool adoption — must run before the canonical dir is created, since
+    // adoption makes that path a symlink to the spare's slot dir.
+    if (this.tryAdopt(opts)) {
+      if (opts.env && Object.keys(opts.env).length) {
+        await this.withConn(id, (c) => c.setEnv(opts.env!));
+      }
+      log.info("firecracker VM up", { sandbox: id, warm: true });
+      return;
+    }
+
     mkdirSync(stateDir, { recursive: true });
 
     // If a snapshot exists from a fast-pause, resume from it (guest RAM + device
@@ -132,18 +169,44 @@ export class FirecrackerDriver extends AgentDriver {
       }
     }
 
-    const rootfs = await this.images.ensureRootfs(opts.image);
+    const vm = await this.bootMicroVm({ id, stateDir, image: opts.image, limits: opts.limits });
+    this.vms.set(id, vm);
+    try {
+      if (opts.env && Object.keys(opts.env).length) {
+        await this.withConn(id, (c) => c.setEnv(opts.env!));
+      }
+    } catch (err) {
+      this.vms.delete(id);
+      await killAndWait(vm.proc);
+      throw err;
+    }
+    log.info("firecracker VM up", { sandbox: id });
+  }
+
+  /**
+   * Cold-boot a microVM in `stateDir` and wait for its in-guest agent, returning
+   * the live FcVm. Shared by the launch path and the warm-pool filler. Does not
+   * touch `this.vms` or apply sandbox env — the caller owns those.
+   */
+  private async bootMicroVm(p: {
+    id: string;
+    stateDir: string;
+    image: string;
+    limits?: CreateOptions["limits"];
+  }): Promise<FcVm> {
+    mkdirSync(p.stateDir, { recursive: true });
+    const rootfs = await this.images.ensureRootfs(p.image);
 
     // First boot only: give the sandbox its own workspace disk (clone the blank
     // pre-formatted template; else a sparse file the guest formats).
-    const workspaceImg = join(stateDir, "workspace.img");
+    const workspaceImg = join(p.stateDir, "workspace.img");
     if (!existsSync(workspaceImg)) {
       let blank: string | null = null;
       try {
         blank = await this.images.ensureBlankWorkspace(this.cfg.diskGb);
       } catch (err) {
         log.warn("blank workspace build failed; guest will format a sparse disk", {
-          sandbox: id,
+          sandbox: p.id,
           error: (err as Error).message,
         });
       }
@@ -151,13 +214,13 @@ export class FirecrackerDriver extends AgentDriver {
       else ensureSparseFile(workspaceImg, this.cfg.diskGb * 1024 ** 3);
     }
 
-    const cpus = opts.limits?.cpus ? Math.max(1, Math.ceil(opts.limits.cpus)) : 2;
-    const memMib = opts.limits?.memoryMb && opts.limits.memoryMb > 0 ? opts.limits.memoryMb : 1024;
-    const pidsMax = opts.limits?.pidsLimit && opts.limits.pidsLimit > 0 ? opts.limits.pidsLimit : 0;
+    const cpus = p.limits?.cpus ? Math.max(1, Math.ceil(p.limits.cpus)) : 2;
+    const memMib = p.limits?.memoryMb && p.limits.memoryMb > 0 ? p.limits.memoryMb : 1024;
+    const pidsMax = p.limits?.pidsLimit && p.limits.pidsLimit > 0 ? p.limits.pidsLimit : 0;
     const bootArgs = pidsMax > 0 ? `${FC_DEFAULT_BOOT_ARGS} sbx.pids=${pidsMax}` : FC_DEFAULT_BOOT_ARGS;
 
     const configureAndBoot = async (): Promise<FcVm> => {
-      const vm = await this.spawnVmm(stateDir);
+      const vm = await this.spawnVmm(p.stateDir);
       try {
         const api = new FcApi(vm.apiSock);
         await api.applyAll(
@@ -178,20 +241,93 @@ export class FirecrackerDriver extends AgentDriver {
         throw err;
       }
     };
-    const vm = await this.withOneRetry(id, configureAndBoot, "boot");
-
-    this.vms.set(id, vm);
+    const vm = await this.withOneRetry(p.id, configureAndBoot, "boot");
     try {
       await this.waitForAgent(vm);
-      if (opts.env && Object.keys(opts.env).length) {
-        await this.withConn(id, (c) => c.setEnv(opts.env!));
-      }
     } catch (err) {
-      this.vms.delete(id);
       await killAndWait(vm.proc);
       throw err;
     }
-    log.info("firecracker VM up", { sandbox: id });
+    return vm;
+  }
+
+  // --- warm pool --------------------------------------------------------------
+
+  /** Spares currently ready for adoption (used by checks). */
+  poolSize(): number {
+    return this.pool.length;
+  }
+
+  /**
+   * Adopt a pre-booted spare for `opts` when eligible — a plain create of the
+   * pool image with default limits and no prior state. Adoption moves nothing:
+   * the canonical state dir becomes a **symlink** to the spare's slot dir, so
+   * every path the daemon joins under it resolves correctly while the absolute
+   * slot paths Firecracker recorded at boot (drives, vsock UDS) stay real — which
+   * keeps a later `snapshot()`/restore of the adopted VM loadable (`/snapshot/load`
+   * re-opens the boot-time paths embedded in the vmstate).
+   */
+  private tryAdopt(opts: CreateOptions): boolean {
+    if (this.poolTarget <= 0) return false;
+    const noLimits =
+      !opts.limits || (!opts.limits.memoryMb && !opts.limits.cpus && !opts.limits.pidsLimit);
+    const canonical = join(this.cfg.stateDir, opts.id);
+    if (opts.image !== this.poolImage || !noLimits || existsSync(canonical)) return false;
+
+    const spare = this.pool.shift();
+    if (!spare) {
+      this.fillPool(); // none ready — warm up for next time
+      return false;
+    }
+    mkdirSync(dirname(canonical), { recursive: true });
+    symlinkSync(spare.stateDir, canonical);
+    this.vms.set(opts.id, spare);
+    this.fillPool(); // replenish in the background
+    log.info("firecracker adopted a warm-pool microVM", { sandbox: opts.id });
+    return true;
+  }
+
+  /** Top the pool up to its target in the background (one filler at a time). */
+  private fillPool(): void {
+    if (this.poolTarget <= 0 || this.filling) return;
+    void this.doFill();
+  }
+
+  private async doFill(): Promise<void> {
+    this.filling = true;
+    try {
+      while (this.pool.length < this.poolTarget) {
+        const n = ++this.poolSeq;
+        try {
+          const vm = await this.bootMicroVm({
+            id: `pool-${n}`,
+            stateDir: join(this.poolDir, `slot-${n}`),
+            image: this.poolImage,
+          });
+          this.pool.push(vm);
+          log.info("warm pool: spare microVM ready", { size: this.pool.length, target: this.poolTarget });
+        } catch (err) {
+          log.warn("warm pool: spare boot failed (will retry on next claim)", {
+            error: (err as Error).message,
+          });
+          break; // don't hot-loop on a persistent failure
+        }
+      }
+    } finally {
+      this.filling = false;
+    }
+  }
+
+  /** Tear down all spare microVMs (e.g. on daemon shutdown). Idempotent. */
+  async drainPool(): Promise<void> {
+    this.poolTarget = 0;
+    const spares = this.pool.splice(0);
+    for (const vm of spares) await killAndWait(vm.proc);
+    try {
+      rmSync(this.poolDir, { recursive: true, force: true });
+    } catch {
+      /* ignore */
+    }
   }
 
   /** Spawn a fresh VMM process for `stateDir` and wait for its API socket. */
@@ -329,8 +465,16 @@ export class FirecrackerDriver extends AgentDriver {
 
   async destroy(id: string): Promise<void> {
     await this.stop(id);
+    const canonical = join(this.cfg.stateDir, id);
     try {
-      rmSync(join(this.cfg.stateDir, id), { recursive: true, force: true });
+      // An adopted sandbox's canonical dir is a symlink to its warm-pool slot:
+      // remove the real slot dir first, then the link itself.
+      if (lstatSync(canonical).isSymbolicLink()) {
+        rmSync(readlinkSync(canonical), { recursive: true, force: true });
+        unlinkSync(canonical);
+      } else {
+        rmSync(canonical, { recursive: true, force: true });
+      }
     } catch {
       /* ignore */
     }

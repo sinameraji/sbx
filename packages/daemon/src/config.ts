@@ -186,6 +186,12 @@ export interface Config {
   fcStateDir: string;
   /** Default workspace disk size in GiB for a new Firecracker sandbox (`SBX_FC_DISK_GB`). */
   fcDiskGb: number;
+  /**
+   * Warm-pool size for the Firecracker driver (`SBX_FC_WARM_POOL`, default 0 = off):
+   * keep N pre-booted spare microVMs of the default image so a plain create
+   * adopts one instantly instead of cold-booting.
+   */
+  fcWarmPool: number;
   /** Converted OCI→ext4 rootfs cache for the Firecracker driver (`SBX_FC_IMAGE_CACHE`). */
   fcImageCacheDir: string;
   /** Minimum level emitted by the structured logger. */
@@ -286,6 +292,7 @@ export function loadConfig(): Config {
     fcRootfs: process.env.SBX_FC_ROOTFS ?? "helpers/sbx-vz/guest/rootfs.img",
     fcStateDir: process.env.SBX_FC_STATE_DIR ?? join(homedir(), ".sbx", "fc"),
     fcDiskGb: Number(process.env.SBX_FC_DISK_GB ?? 8),
+    fcWarmPool: Number(process.env.SBX_FC_WARM_POOL ?? 0),
     fcImageCacheDir: process.env.SBX_FC_IMAGE_CACHE ?? join(homedir(), ".sbx", "fc", "images"),
     logLevel: parseLogLevel(process.env.SBX_LOG_LEVEL),
     logFormat: process.env.SBX_LOG_FORMAT === "json" ? "json" : "pretty",

@@ -39,6 +39,9 @@ export function createNamedDriver(name: string, config: Config): Driver {
         stateDir: config.fcStateDir,
         diskGb: config.fcDiskGb,
         imageCacheDir: config.fcImageCacheDir,
+        warmPool: config.fcWarmPool,
+        // A plain create of the daemon's default image adopts a spare.
+        poolImage: config.defaultImage,
       });
     case "applevz":
       return new AppleVzDriver({

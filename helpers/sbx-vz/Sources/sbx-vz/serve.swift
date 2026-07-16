@@ -85,6 +85,7 @@ private func setNonBlocking(_ fd: Int32) {
 
 final class VmServer: NSObject, VZVirtualMachineDelegate {
     private var vm: VZVirtualMachine?
+    private var vmConfig: VZVirtualMachineConfiguration?
     private var vsockPort: UInt32 = 1024
     private var socketPath: String = ""
     private var listenFD: Int32 = -1
@@ -175,6 +176,22 @@ final class VmServer: NSObject, VZVirtualMachineDelegate {
             config.cpuCount = max(1, cpus)
             config.memorySize = memMb * 1024 * 1024
 
+            // Pin the machine identity across helper processes: VZ refuses to
+            // restore saved state under a different VZGenericMachineIdentifier,
+            // and a fresh config gets a *randomized* one per process — the cause
+            // of the bare-EINVAL restore failures. Mint once per sandbox on first
+            // boot, persist beside the VM state, reload forever after.
+            let platform = VZGenericPlatformConfiguration()
+            if let midPath = params["machineIdPath"] as? String {
+                if let data = FileManager.default.contents(atPath: midPath),
+                   let mid = VZGenericMachineIdentifier(dataRepresentation: data) {
+                    platform.machineIdentifier = mid
+                } else {
+                    try platform.machineIdentifier.dataRepresentation.write(to: URL(fileURLWithPath: midPath))
+                }
+            }
+            config.platform = platform
+
             let bootLoader = VZLinuxBootLoader(kernelURL: URL(fileURLWithPath: kernel))
             // Memory + CPU are hard-capped by the VM config above (the guest can't
             // see beyond them). pidsLimit has no VM-config analogue, so it rides in
@@ -214,6 +231,7 @@ final class VmServer: NSObject, VZVirtualMachineDelegate {
             let machine = VZVirtualMachine(configuration: config)
             machine.delegate = self
             self.vm = machine
+            self.vmConfig = config
 
             // Either restore a saved snapshot (fast resume: RAM + device state come
             // back, no kernel boot) or cold-boot the VM.
@@ -235,7 +253,12 @@ final class VmServer: NSObject, VZVirtualMachineDelegate {
                 }
                 machine.restoreMachineStateFrom(url: URL(fileURLWithPath: restoreFrom)) { rerr in
                     if let rerr = rerr {
-                        return self.fail(id, "restore: \(rerr.localizedDescription)")
+                        // Surface the full NSError — VZ restore failures are often a
+                        // bare "invalid argument" whose domain/code/reason are the
+                        // only clues (e.g. VZErrorDomain#12 = config/state mismatch).
+                        let ns = rerr as NSError
+                        let reason = ns.localizedFailureReason ?? ""
+                        return self.fail(id, "restore: \(rerr.localizedDescription) [\(ns.domain)#\(ns.code)] \(reason)")
                     }
                     machine.resume(completionHandler: onRunning)
                 }
@@ -255,6 +278,13 @@ final class VmServer: NSObject, VZVirtualMachineDelegate {
         guard let path = params["path"] as? String else { return fail(id, "snapshot: path required") }
         guard let vm = self.vm else { return fail(id, "snapshot: no running vm") }
         guard #available(macOS 14.0, *) else { return fail(id, "snapshot needs macOS 14+") }
+        // Preflight: name the offending device up front instead of a bare EINVAL
+        // at save time if a config change ever breaks save/restore support.
+        if let cfg = self.vmConfig {
+            do { try cfg.validateSaveRestoreSupport() } catch {
+                return fail(id, "saveRestoreSupport: \(error.localizedDescription)")
+            }
+        }
         vm.pause { presult in
             switch presult {
             case .failure(let e):

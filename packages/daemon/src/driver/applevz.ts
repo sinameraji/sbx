@@ -219,6 +219,11 @@ export class AppleVzDriver extends AgentDriver {
         socketPath: p.socketPath,
         vsockPort: 1024,
         restoreFrom: p.restoreFrom,
+        // Per-sandbox pinned machine identity (minted on first boot, reloaded
+        // after): VZ refuses to restore saved state under a different (fresh,
+        // randomized) VZGenericMachineIdentifier. Lives in the stateDir so a
+        // warm-pool slot rename carries it along.
+        machineIdPath: join(p.stateDir, "machine-id.bin"),
       });
     } catch (err) {
       helper.kill();

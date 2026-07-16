@@ -8,7 +8,10 @@
 import assert from "node:assert/strict";
 import {
   buildFcApiCalls,
+  buildSnapshotCreateCall,
+  buildSnapshotLoadCall,
   FC_DEFAULT_BOOT_ARGS,
+  FC_PAUSE_VM,
   FC_START_ACTION,
   parseVsockHandshake,
 } from "./driver/fc-api.js";
@@ -56,6 +59,29 @@ async function main(): Promise<void> {
 
   assert.equal((FC_START_ACTION.body as { action_type: string }).action_type, "InstanceStart");
   ok("FC_START_ACTION boots the VM");
+
+  // 1b. Snapshot API calls: pause → create(Full) → load(File mem backend, resume).
+  assert.equal(FC_PAUSE_VM.method, "PATCH");
+  assert.equal(FC_PAUSE_VM.path, "/vm");
+  assert.equal((FC_PAUSE_VM.body as { state: string }).state, "Paused");
+  const snapCreate = buildSnapshotCreateCall("/s/x.vmstate", "/s/x.mem");
+  assert.equal(snapCreate.path, "/snapshot/create");
+  const scBody = snapCreate.body as { snapshot_type: string; snapshot_path: string; mem_file_path: string };
+  assert.equal(scBody.snapshot_type, "Full");
+  assert.equal(scBody.snapshot_path, "/s/x.vmstate");
+  assert.equal(scBody.mem_file_path, "/s/x.mem");
+  const snapLoad = buildSnapshotLoadCall("/s/x.vmstate", "/s/x.mem");
+  assert.equal(snapLoad.path, "/snapshot/load");
+  const slBody = snapLoad.body as {
+    snapshot_path: string;
+    mem_backend: { backend_type: string; backend_path: string };
+    resume_vm: boolean;
+  };
+  assert.equal(slBody.snapshot_path, "/s/x.vmstate");
+  assert.equal(slBody.mem_backend.backend_type, "File");
+  assert.equal(slBody.mem_backend.backend_path, "/s/x.mem");
+  assert.equal(slBody.resume_vm, true);
+  ok("snapshot API calls: PATCH /vm Paused → /snapshot/create(Full) → /snapshot/load(resume)");
 
   // 2. Custom boot args (e.g. the pidsLimit cmdline) pass through.
   const withPids = buildFcApiCalls({

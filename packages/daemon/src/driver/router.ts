@@ -84,6 +84,13 @@ export class DriverRouter implements Driver {
   stop(id: string): Promise<void> {
     return this.forId(id).stop(id);
   }
+  /** Fast-pause via the backing driver, or `stop` when it doesn't support
+   *  snapshots — so callers can always call `snapshot` through the router and
+   *  get the strongest pause the sandbox's isolation tier offers. */
+  snapshot(id: string): Promise<void> {
+    const d = this.forId(id);
+    return typeof d.snapshot === "function" ? d.snapshot(id) : d.stop(id);
+  }
   destroy(id: string): Promise<void> {
     return this.forId(id).destroy(id);
   }

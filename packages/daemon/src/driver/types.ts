@@ -151,6 +151,18 @@ export interface Driver {
   start(opts: CreateOptions): Promise<void>;
 
   /**
+   * Optional fast-pause: save the sandbox's full live state (guest RAM + device
+   * state) to disk and free its compute, such that the next `start` resumes
+   * **without a kernel boot** — background processes/servers come back live.
+   * Only microVM drivers can implement this; callers must feature-detect
+   * (`typeof driver.snapshot === "function"`) and fall back to `stop`, whose
+   * contract (workspace survives, processes don't) is the lowest common
+   * denominator. Implementations must sync the guest fs first so a restore
+   * failure can safely degrade to a cold boot with the workspace intact.
+   */
+  snapshot?(id: string): Promise<void>;
+
+  /**
    * Run a command inside the sandbox, streaming output via `onEvent`.
    * Resolves with the process exit code.
    */

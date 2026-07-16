@@ -244,7 +244,9 @@ async function main(): Promise<void> {
       await driver.exec(snapId, "echo SNAPSHOT_RAM_OK > /run/marker", {}, () => {}); // /run = tmpfs
       await driver.snapshot(snapId); // pause + saveMachineStateTo + tear down
       ok("snapshot saved (VZ saveMachineStateTo)");
+      const tResume = Date.now();
       await driver.start({ id: snapId, image: "base", persist: true }); // restore (or cold-fallback)
+      const resumeMs = Date.now() - tResume;
       assert.equal(
         await driver.readFile(snapId, { path: "/workspace/disk.txt" }),
         "on-disk",
@@ -254,8 +256,12 @@ async function main(): Promise<void> {
       await driver.exec(snapId, "cat /run/marker 2>/dev/null", {}, (e) => {
         if (e.type === "stdout") ram += e.data;
       });
-      if (/SNAPSHOT_RAM_OK/.test(ram)) ok("★ instant restore: in-RAM state resumed (no cold boot)");
-      else ok("resume works (in-RAM restore WIP — cold-boot fallback; see plan M7a)");
+      assert.match(
+        ram,
+        /SNAPSHOT_RAM_OK/,
+        "in-RAM tmpfs marker lost — restore silently fell back to a cold boot",
+      );
+      ok(`★ instant restore: in-RAM state resumed in ${resumeMs}ms (no cold boot)`);
     } finally {
       await driver.destroy(snapId).catch(() => {});
     }

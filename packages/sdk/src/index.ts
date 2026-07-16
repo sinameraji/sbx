@@ -530,6 +530,20 @@ export class Sandbox {
   }
 
   /**
+   * Pause the sandbox, freeing its compute; any later operation transparently
+   * resumes it. On microVM drivers (firecracker/applevz) this saves a full
+   * memory snapshot — background processes come back **alive** on resume, in
+   * ~tens of milliseconds instead of a boot. On the container driver it
+   * degrades to stop-with-volume (workspace survives, processes don't).
+   */
+  async pause(): Promise<void> {
+    this.info = await this.client.request<SandboxInfo>(
+      "POST",
+      `/sandboxes/${this.info.id}/pause`,
+    );
+  }
+
+  /**
    * Fetch live resource stats, cumulative usage, and cost. `live` is null when
    * the sandbox isn't running. Reading metrics does not count as activity, so it
    * won't keep an idle sandbox from auto-pausing.

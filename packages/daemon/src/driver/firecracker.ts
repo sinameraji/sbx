@@ -290,6 +290,11 @@ export class FirecrackerDriver extends AgentDriver {
     for (const f of [vmstate, memFile]) rmQuiet(f);
   }
 
+  /** A live VM can always be snapshot-paused (KVM snapshots have no OS gate). */
+  canSnapshot(id: string): boolean {
+    return this.vms.has(id);
+  }
+
   /**
    * Fast-pause (B7): pause the vCPUs, write a Full Firecracker snapshot (device
    * state + guest RAM) into the sandbox's state dir, and tear the VMM down. The

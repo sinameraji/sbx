@@ -24,6 +24,28 @@ export async function stopCommand(
   }
 }
 
+export async function pauseCommand(
+  positional: string[],
+  globals: GlobalArgs,
+): Promise<number> {
+  const id = positional[0];
+  if (!id) {
+    console.error("Usage: sb pause <id>");
+    return 1;
+  }
+
+  const client = new SbxClient({ endpoint: globals.endpoint, apiKey: globals.apiKey });
+  try {
+    const sandbox = await client.getSandbox(id);
+    await sandbox.pause();
+    console.log(`Paused sandbox ${id} (any operation resumes it).`);
+    return 0;
+  } catch (err) {
+    console.error(`Failed to pause sandbox: ${formatError(err)}`);
+    return 1;
+  }
+}
+
 export async function startSandboxCommand(
   positional: string[],
   globals: GlobalArgs,

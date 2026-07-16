@@ -124,6 +124,50 @@ async function main(): Promise<void> {
     await driver.destroy(id);
     ok("destroy");
 
+    // Warm pool (B7): a pre-booted spare is adopted near-instantly, and a
+    // snapshot → resume of the ADOPTED VM still works — the no-move symlink
+    // adoption keeps Firecracker's recorded boot-time paths valid.
+    console.error("[smoke-fc] warm pool…");
+    const poolStateDir = mkdtempSync(join(tmpdir(), "sbx-fc-pool-"));
+    const pooled = new FirecrackerDriver({
+      fcBin: process.env.SBX_FC_BIN ?? "firecracker",
+      kernel: process.env.SBX_FC_KERNEL ?? "helpers/sbx-vz/guest/vmlinux-fc",
+      rootfs: "helpers/sbx-vz/guest/rootfs.img",
+      stateDir: poolStateDir,
+      diskGb: 2,
+      imageCacheDir: process.env.SBX_FC_IMAGE_CACHE ?? join(homedir(), ".sbx", "fc", "images"),
+      warmPool: 1,
+      poolImage: image,
+    });
+    const wid = "fcwarm01";
+    try {
+      const deadline = Date.now() + 60000;
+      while (pooled.poolSize() < 1 && Date.now() < deadline) await sleep(250);
+      assert.ok(pooled.poolSize() >= 1, "warm pool failed to pre-boot a spare");
+      const tAdopt = Date.now();
+      await pooled.create({ id: wid, image, env: {}, persist: true });
+      const adoptMs = Date.now() - tAdopt;
+      let wout = "";
+      await pooled.exec(wid, "echo WARM_OK", {}, (e) => {
+        if (e.type === "stdout") wout += e.data;
+      });
+      assert.match(wout, /WARM_OK/, "adopted microVM must serve exec");
+      // Cross-feature: the adopted VM must still snapshot → resume with RAM intact.
+      await pooled.exec(wid, "echo warm-ram > /tmp/warm-marker", {}, () => {});
+      await pooled.snapshot(wid);
+      await pooled.start({ id: wid, image, env: {}, persist: true });
+      assert.match(
+        await pooled.readFile(wid, { path: "/tmp/warm-marker" }),
+        /warm-ram/,
+        "adopted VM lost RAM across snapshot→resume (symlink adoption broken?)",
+      );
+      ok(`★ warm pool: adopt ${adoptMs}ms; adopted VM snapshot→resume keeps RAM`);
+    } finally {
+      await pooled.destroy(wid).catch(() => {});
+      await pooled.drainPool().catch(() => {});
+      rmSync(poolStateDir, { recursive: true, force: true });
+    }
+
     console.log(`\nsmoke-fc: ${passed} checks passed (real Firecracker microVM)`);
   } finally {
     await driver.stop(id).catch(() => {});

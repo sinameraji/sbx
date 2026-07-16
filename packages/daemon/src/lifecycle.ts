@@ -74,12 +74,12 @@ export async function resumeSandbox(
 }
 
 /**
- * Auto-pause sandboxes that have been idle past their `sleepAfterMs`. Sandboxes
- * advertising a service (an exposed port) are always skipped — the preview proxy
- * doesn't auto-resume, so a paused port would break inbound requests. Sandboxes
- * with running tracked background processes are paused only when the driver can
- * memory-snapshot them (the processes come back alive on resume); on cold-pause
- * drivers they're skipped, since pausing would kill that work.
+ * Auto-pause sandboxes that have been idle past their `sleepAfterMs`. A sandbox
+ * advertising a service (an exposed port) or running a tracked background
+ * process is paused only when the driver can **memory-snapshot** it — the
+ * processes come back alive, and the preview proxy wakes a paused sandbox on
+ * inbound traffic, so nothing is lost by hibernating. On cold-pause drivers
+ * such sandboxes are skipped, since pausing would kill that work.
  * Returns the ids that were paused.
  */
 export async function reapIdle(
@@ -91,9 +91,9 @@ export async function reapIdle(
   for (const record of store.list()) {
     if (record.status !== "running") continue;
     if (!record.sleepAfterMs || record.sleepAfterMs <= 0) continue;
-    if (store.listExposed(record.id).length > 0) continue;
+    const hasService = store.listExposed(record.id).length > 0;
     const hasLiveProcs = store.listProcesses(record.id).some((p) => p.status === "running");
-    if (hasLiveProcs && !driver.canSnapshot?.(record.id)) continue;
+    if ((hasService || hasLiveProcs) && !driver.canSnapshot?.(record.id)) continue;
     if (now - Date.parse(record.lastActivityAt) < record.sleepAfterMs) continue;
     try {
       await pauseSandbox(driver, store, record);

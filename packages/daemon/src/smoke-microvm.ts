@@ -1,17 +1,20 @@
 /**
- * Apple VZ parity smoke. Boots an in-process daemon backed by the **Apple VZ
- * microVM driver** (`SBX_DRIVER=applevz`) and drives the full sandbox surface
- * through the daemon's HTTP/SSE stack via the public TypeScript SDK — the same
- * `npm run smoke` exercises against the container driver. This is the plan's
- * parity gate: the *same* end-to-end flow must work on both drivers, proving the
- * driver abstraction holds from REST → SSE → SDK down to a real microVM.
+ * MicroVM parity smoke. Boots an in-process daemon backed by a **microVM
+ * driver** — Apple VZ (default) or Firecracker via `SBX_SMOKE_DRIVER` — and
+ * drives the full sandbox surface through the daemon's HTTP/SSE stack via the
+ * public TypeScript SDK — the same flow `npm run smoke` exercises against the
+ * container driver. This is the plan's parity gate: the *same* end-to-end flow
+ * must work on every driver, proving the driver abstraction holds from
+ * REST → SSE → SDK down to a real microVM.
  *
- * Unlike `applevz-check.ts` (which calls the driver directly), this goes through
- * the daemon server, the preview proxy, and the SDK — so it covers the
- * integration the direct check doesn't. Needs a Mac with the VZ helper + guest
- * artifacts built (`npm run build:vz`, `build:agent`, `build-guest.sh`).
- *
- * Usage: npm run smoke:vz
+ * Unlike the driver-direct checks (`applevz-check.ts`, `smoke-fc.ts`), this goes
+ * through the daemon server, the preview proxy, and the SDK — so it covers the
+ * integration those don't.
+ *  - applevz: needs a Mac with the VZ helper + guest artifacts built
+ *    (`npm run build:vz`, `build:agent`, `build-guest.sh`). `npm run smoke:vz`.
+ *  - firecracker: needs a Linux KVM host with `firecracker`, a guest kernel at
+ *    `helpers/sbx-vz/guest/vmlinux-fc`, and the amd64 agent staged (see plan
+ *    Appendix B). `npm run smoke:fc:full`.
  */
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir, homedir } from "node:os";
@@ -27,18 +30,28 @@ import { createProxyServer } from "./proxy/server.js";
 import { SbxClient, type Sandbox } from "@sbx/sdk";
 
 async function main(): Promise<number> {
-  // Force the VZ driver + isolated ports/state so the run leaves nothing behind
-  // and never collides with a dev daemon on the default ports.
-  process.env.SBX_DRIVER = "applevz";
+  // Force the microVM driver + isolated ports/state so the run leaves nothing
+  // behind and never collides with a dev daemon on the default ports.
+  const driverName = process.env.SBX_SMOKE_DRIVER ?? "applevz";
+  process.env.SBX_DRIVER = driverName;
   const config = loadConfig();
-  config.driver = "applevz";
+  config.driver = driverName;
   config.port = 4790;
   config.proxyPort = 4791;
-  config.backupDir = await mkdtemp(join(tmpdir(), "sbx-vz-backups-"));
-  const dbDir = await mkdtemp(join(tmpdir(), "sbx-vz-db-"));
+  config.backupDir = await mkdtemp(join(tmpdir(), "sbx-mvm-backups-"));
+  const dbDir = await mkdtemp(join(tmpdir(), "sbx-mvm-db-"));
   config.dbPath = join(dbDir, "state.db");
-  config.vzStateDir = await mkdtemp(join(tmpdir(), "sbx-vz-state-"));
-  config.vzImageCacheDir = join(homedir(), ".sbx", "vz", "images"); // stable cache
+  const stateDir = await mkdtemp(join(tmpdir(), "sbx-mvm-state-"));
+  if (driverName === "firecracker") {
+    config.fcStateDir = stateDir; // image cache stays at the stable default
+  } else {
+    config.vzStateDir = stateDir;
+    config.vzImageCacheDir = join(homedir(), ".sbx", "vz", "images"); // stable cache
+  }
+  // The prebuilt "base" rootfs sentinel is an arm64 VZ artifact; Firecracker
+  // hosts convert an OCI image for the host arch instead (cached after first use).
+  const image =
+    process.env.SBX_SMOKE_IMAGE ?? (driverName === "firecracker" ? "alpine:3.20" : "base");
 
   const store = new SandboxStore(config.dbPath);
   const driver = new DriverRouter(config, store, config.driver);
@@ -65,22 +78,22 @@ async function main(): Promise<number> {
 
   let sandbox: Sandbox | undefined;
   try {
-    // 1. Health + info: the daemon reports the VZ driver.
+    // 1. Health + info: the daemon reports the microVM driver.
     const health = await client.health();
     assert(health.ok, "daemon health not ok");
     const info = await client.info();
-    assert(info.driver === "applevz", `expected driver=applevz, got ${info.driver}`);
-    ok(`daemon up on the applevz driver (${endpoint})`);
+    assert(info.driver === driverName, `expected driver=${driverName}, got ${info.driver}`);
+    ok(`daemon up on the ${driverName} driver (${endpoint})`);
 
-    // 2. Create a microVM sandbox (Alpine base — fast, no image conversion).
-    sandbox = await client.getSandbox(undefined, { image: "base" });
-    ok(`created microVM sandbox ${sandbox.id}`);
+    // 2. Create a microVM sandbox.
+    sandbox = await client.getSandbox(undefined, { image });
+    ok(`created microVM sandbox ${sandbox.id} (${image})`);
 
-    // 3. exec streams stdout/exit over SSE and runs in a real arm64 Linux VM.
+    // 3. exec streams stdout/exit over SSE and runs in a real Linux VM.
     const uname = await sandbox.exec("echo hi-from-vm && uname -sm");
     assert(uname.exitCode === 0, `exec exit ${uname.exitCode}`);
     assert(/hi-from-vm/.test(uname.stdout), "exec stdout missing");
-    assert(/Linux aarch64/.test(uname.stdout), "not a real arm64 Linux VM");
+    assert(/Linux (aarch64|x86_64)/.test(uname.stdout), "not a real Linux VM");
     ok(`exec over SSE → ${uname.stdout.trim().replace(/\n/g, " | ")}`);
 
     // 4. Files: write/read/mkdir/list through REST.
@@ -93,8 +106,8 @@ async function main(): Promise<number> {
     ok("files: write / read / mkdir / list");
 
     // 5. Sandbox env + session cwd persistence.
-    await sandbox.setEnvVars({ SBX_VZ_SMOKE: "env-ok" });
-    const envOut = await sandbox.exec("echo $SBX_VZ_SMOKE");
+    await sandbox.setEnvVars({ SBX_MVM_SMOKE: "env-ok" });
+    const envOut = await sandbox.exec("echo $SBX_MVM_SMOKE");
     assert(/env-ok/.test(envOut.stdout), "sandbox env not applied");
     const session = await sandbox.createSession({ cwd: "/workspace/sub" });
     await session.exec("echo cwd-marker > here.txt");
@@ -104,7 +117,7 @@ async function main(): Promise<number> {
 
     // 6. Background process + port readiness + preview proxy fetch.
     const proc = await sandbox.startProcess(
-      "while true; do printf 'HTTP/1.0 200 OK\\r\\n\\r\\nvz-preview-ok' | nc -l -p 9000 2>/dev/null; done",
+      "while true; do printf 'HTTP/1.0 200 OK\\r\\n\\r\\nmvm-preview-ok' | nc -l -p 9000 2>/dev/null; done",
     );
     assert(Number.isFinite(proc.pid), "startProcess returned no pid");
     const ready = await sandbox.waitForPort(9000, { timeoutMs: 8000 });
@@ -112,7 +125,7 @@ async function main(): Promise<number> {
     await sandbox.exposePort(9000);
     const preview = await fetch(`${proxyEndpoint}/_sbx/${sandbox.id}/9000/`);
     const previewBody = await preview.text();
-    assert(/vz-preview-ok/.test(previewBody), `preview proxy did not serve: ${previewBody.slice(0, 60)}`);
+    assert(/mvm-preview-ok/.test(previewBody), `preview proxy did not serve: ${previewBody.slice(0, 60)}`);
     ok("background process → waitForPort → preview proxy round-trip");
 
     // 7. watch: open the stream, create a file, see the event. The SDK watch is
@@ -154,10 +167,10 @@ async function main(): Promise<number> {
     assert((await sandbox.readFile("/workspace/keep.txt")) === "in-backup", "workspace lost across stop/start");
     ok("workspace persists across stop/start");
 
-    console.error(`\n[smoke-vz] passed — ${passed} checks (full surface on the applevz driver)`);
+    console.error(`\n[smoke-microvm] passed — ${passed} checks (full surface on the ${driverName} driver)`);
     return 0;
   } catch (err) {
-    console.error(`[smoke-vz] FAILED: ${err instanceof Error ? err.message : String(err)}`);
+    console.error(`[smoke-microvm] FAILED: ${err instanceof Error ? err.message : String(err)}`);
     return 1;
   } finally {
     if (sandbox) await sandbox.destroy().catch(() => {});
@@ -166,7 +179,7 @@ async function main(): Promise<number> {
     store.close();
     await rm(config.backupDir, { recursive: true, force: true }).catch(() => {});
     await rm(dbDir, { recursive: true, force: true }).catch(() => {});
-    await rm(config.vzStateDir, { recursive: true, force: true }).catch(() => {});
+    await rm(stateDir, { recursive: true, force: true }).catch(() => {});
   }
 }
 

@@ -68,7 +68,7 @@ async function main(): Promise<void> {
     });
   });
 
-  const proxy = createProxyServer({ config, driver, store });
+  const proxy = createProxyServer({ config, driver, store, capacity });
   proxy.listen(config.proxyPort, config.proxyHost, () => {
     log.info("preview proxy listening", {
       url: `http://${config.proxyHost}:${config.proxyPort}`,

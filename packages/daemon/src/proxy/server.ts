@@ -1,4 +1,5 @@
 import { createServer, type Server, type Socket } from "node:net";
+import { CapacityError, type Capacity } from "../capacity.js";
 import type { Config } from "../config.js";
 import type { Driver } from "../driver/types.js";
 import { resumeSandbox } from "../lifecycle.js";
@@ -9,6 +10,7 @@ interface Deps {
   config: Config;
   driver: Driver;
   store: SandboxStore;
+  capacity?: Capacity;
 }
 
 /**
@@ -26,9 +28,9 @@ interface Deps {
  *   - path (curl): GET /_hotcell/<id>/<port>/...  (prefix rewritten on the first
  *     request line; absolute-path assets won't resolve, so subdomain is primary)
  */
-export function createProxyServer({ config, driver, store }: Deps): Server {
+export function createProxyServer(deps: Deps): Server {
   return createServer((socket) => {
-    handleConnection(socket, { config, driver, store }).catch(() => {
+    handleConnection(socket, deps).catch(() => {
       socket.destroy();
     });
   });
@@ -77,7 +79,7 @@ async function bridgeAndSplice(
   socket: Socket,
   initial: Buffer,
   target: RouteTarget,
-  { driver, store }: Deps,
+  { driver, store, capacity }: Deps,
 ): Promise<void> {
   // Inbound preview traffic transparently wakes a paused sandbox — with a
   // memory-snapshot pause the serving process comes back alive, which is what
@@ -90,8 +92,10 @@ async function bridgeAndSplice(
   }
   if (record?.status === "paused") {
     try {
-      await resumeSandbox(driver, store, record);
-    } catch {
+      await resumeSandbox(driver, store, record, capacity);
+    } catch (err) {
+      // An admission refusal is back-pressure (host budget), not a broken hop.
+      if (err instanceof CapacityError) return respond(socket, 503, err.reason);
       return respond(socket, 502, "Failed to resume the paused sandbox");
     }
   }
@@ -235,6 +239,8 @@ function statusText(status: number): string {
       return "Request Header Fields Too Large";
     case 502:
       return "Bad Gateway";
+    case 503:
+      return "Service Unavailable";
     default:
       return "Error";
   }

@@ -5,6 +5,7 @@ import { previewUrl, type Config } from "../config.js";
 import type { Driver, TerminalSession } from "../driver/types.js";
 import { kernelFor, type KernelLanguage } from "../kernels.js";
 import { pauseSandbox, resumeSandbox } from "../lifecycle.js";
+import { CapacityError } from "../capacity.js";
 import type { Capacity } from "../capacity.js";
 import { computeCost } from "../cost.js";
 import { log } from "../logger.js";
@@ -151,7 +152,7 @@ async function handleTerminalUpgrade(
   head: Buffer,
   deps: Deps,
 ): Promise<void> {
-  const { config, driver, store } = deps;
+  const { config, driver, store, capacity } = deps;
   const url = new URL(req.url ?? "/", `http://${req.headers.host}`);
   const match = url.pathname.match(/^\/sandboxes\/([^/]+)\/terminal$/);
   if (!match) {
@@ -183,8 +184,20 @@ async function handleTerminalUpgrade(
     socket.destroy();
     return;
   }
-  if (record.status === "paused") await resumeSandbox(driver, store, record);
-  else store.touch(id);
+  if (record.status === "paused") {
+    try {
+      await resumeSandbox(driver, store, record, capacity);
+    } catch (err) {
+      if (err instanceof CapacityError) {
+        socket.write("HTTP/1.1 503 Service Unavailable\r\n\r\n");
+        socket.destroy();
+        return;
+      }
+      throw err;
+    }
+  } else {
+    store.touch(id);
+  }
 
   const ws = acceptWebSocket(req, socket, head);
   if (!ws) return;
@@ -565,7 +578,7 @@ async function handle(
   const execMatch = path.match(/^\/sandboxes\/([^/]+)\/exec$/);
   if (method === "POST" && execMatch) {
     const body = await readJson(req, config.maxBodyBytes);
-    return execInSandbox(res, { driver, store }, execMatch[1], body);
+    return execInSandbox(res, deps, execMatch[1], body);
   }
 
   const fileActionMatch = path.match(/^\/sandboxes\/([^/]+)\/files\/(write|read|mkdir|list)$/);
@@ -573,7 +586,7 @@ async function handle(
     const body = await readJson(req, config.maxBodyBytes);
     return handleFileAction(
       res,
-      { driver, store },
+      deps,
       fileActionMatch[1],
       fileActionMatch[2] as "write" | "read" | "mkdir" | "list",
       body,
@@ -584,7 +597,7 @@ async function handle(
   if (method === "GET" && watchMatch) {
     const watchPath = url.searchParams.get("path") ?? "/workspace";
     const intervalMs = Number(url.searchParams.get("interval") ?? "") || undefined;
-    return watchFiles(req, res, { driver, store }, watchMatch[1], watchPath, intervalMs);
+    return watchFiles(req, res, deps, watchMatch[1], watchPath, intervalMs);
   }
 
   const procLogsMatch = path.match(
@@ -612,7 +625,7 @@ async function handle(
   if (procMatch) {
     if (method === "POST") {
       const body = await readJson(req, config.maxBodyBytes);
-      return startProcess(res, { driver, store }, procMatch[1], body);
+      return startProcess(res, deps, procMatch[1], body);
     }
     if (method === "GET") {
       return listProcesses(res, { driver, store }, procMatch[1]);
@@ -622,7 +635,7 @@ async function handle(
   const waitPortMatch = path.match(/^\/sandboxes\/([^/]+)\/wait-port$/);
   if (method === "POST" && waitPortMatch) {
     const body = await readJson(req, config.maxBodyBytes);
-    return waitForPort(res, { driver, store }, waitPortMatch[1], body);
+    return waitForPort(res, deps, waitPortMatch[1], body);
   }
 
   const exposePortMatch = path.match(/^\/sandboxes\/([^/]+)\/expose\/(\d+)$/);
@@ -639,7 +652,7 @@ async function handle(
   if (exposeMatch) {
     if (method === "POST") {
       const body = await readJson(req, config.maxBodyBytes);
-      return exposePort(res, { config, driver, store }, exposeMatch[1], body);
+      return exposePort(res, deps, exposeMatch[1], body);
     }
     if (method === "GET") {
       const record = store.get(exposeMatch[1]);
@@ -741,7 +754,7 @@ async function handle(
   if (ctxMatch) {
     if (method === "POST") {
       const body = await readJson(req, config.maxBodyBytes);
-      return createCodeContext(res, { driver, store }, ctxMatch[1], body);
+      return createCodeContext(res, deps, ctxMatch[1], body);
     }
     if (method === "GET") {
       if (!store.get(ctxMatch[1])) return sendJson(res, 404, { error: "not found" });
@@ -754,7 +767,7 @@ async function handle(
   const runCodeMatch = path.match(/^\/sandboxes\/([^/]+)\/run-code$/);
   if (method === "POST" && runCodeMatch) {
     const body = await readJson(req, config.maxBodyBytes);
-    return runCode(res, { driver, store }, runCodeMatch[1], body);
+    return runCode(res, deps, runCodeMatch[1], body);
   }
 
   const historyMatch = path.match(/^\/sandboxes\/([^/]+)\/metrics\/history$/);
@@ -781,7 +794,7 @@ async function handle(
 
   const startMatch = path.match(/^\/sandboxes\/([^/]+)\/start$/);
   if (method === "POST" && startMatch) {
-    return startSandbox(res, { driver, store }, startMatch[1]);
+    return startSandbox(res, deps, startMatch[1]);
   }
 
   const idMatch = path.match(/^\/sandboxes\/([^/]+)$/);
@@ -838,8 +851,13 @@ async function createSandbox(
   if ("error" in resolved) return sendJson(res, 400, { error: resolved.error });
   const limits = resolved.limits;
 
-  // Admission control: refuse to over-subscribe the host's memory budget.
-  const admitted = capacity?.admit(limits.memoryMb) ?? { ok: true };
+  // Admission control: refuse to over-subscribe the host's memory budget. The
+  // reservation pends until the record is written (or provisioning fails), so
+  // concurrent creates/resumes can't all pass the same check.
+  const admitted = capacity?.admitAndReserve(limits.memoryMb) ?? {
+    ok: true as const,
+    release: () => {},
+  };
   if (!admitted.ok) return sendJson(res, 503, { error: admitted.reason });
 
   // Egress wiring. `egress: true` (or a policy object) opts the sandbox's LLM SDKs
@@ -852,7 +870,10 @@ async function createSandbox(
   const wantEgress = body.egress === true || (!!body.egress && typeof body.egress === "object");
   if (typeof body.egress === "object" && body.egress) {
     const parsed = parseEgressPolicy(body.egress as Record<string, unknown>);
-    if ("error" in parsed) return sendJson(res, 400, { error: parsed.error });
+    if ("error" in parsed) {
+      admitted.release();
+      return sendJson(res, 400, { error: parsed.error });
+    }
     egressPolicy = parsed.policy;
   }
   if (wantEgress || config.egressEnforce) {
@@ -868,8 +889,10 @@ async function createSandbox(
   try {
     await driver.create({ id, image, driver: driverName, env, labels, persist, setup, repo, repoRef, limits, networked, writableRootfs, cpuset });
   } catch (err) {
-    // Provisioning failed (e.g. repo clone) — tear down the half-built container
-    // so it doesn't orphan, and report the failure instead of leaking it.
+    // Provisioning failed (e.g. repo clone) — release the pending reservation,
+    // tear down the half-built container so it doesn't orphan, and report the
+    // failure instead of leaking it.
+    admitted.release();
     await driver.destroy(id).catch(() => {});
     return sendJson(res, 422, { error: `sandbox provisioning failed: ${errorMessage(err)}` });
   }
@@ -898,6 +921,9 @@ async function createSandbox(
     usage: emptyUsage(),
   };
   store.add(record);
+  // The record is now `running` and counted by the meter itself, so drop the
+  // pending reservation synchronously (no await between the write and this).
+  admitted.release();
   if (egressToken) store.addEgressToken(egressToken, id, egressPolicy);
   sendJson(res, 201, record);
 }
@@ -920,13 +946,18 @@ async function stopSandbox(
 
 async function startSandbox(
   res: ServerResponse,
-  { driver, store }: Pick<Deps, "driver" | "store">,
+  { driver, store, capacity }: Pick<Deps, "driver" | "store" | "capacity">,
   id: string,
 ): Promise<void> {
   const record = store.get(id);
   if (!record) return sendJson(res, 404, { error: "not found" });
   if (record.status === "running") return sendJson(res, 200, record);
-  await resumeSandbox(driver, store, record);
+  try {
+    await resumeSandbox(driver, store, record, capacity);
+  } catch (err) {
+    if (err instanceof CapacityError) return sendJson(res, 503, { error: err.reason });
+    throw err;
+  }
   sendJson(res, 200, record);
 }
 
@@ -953,15 +984,17 @@ async function pauseSandboxRoute(
 
 /**
  * Resolve a sandbox that must be live to do work. Records the activity (so the
- * idle reaper sees recent use), transparently resumes a `paused` sandbox, and
- * rejects a manually `stopped` one (409 — the user must `start` it). Sends the
- * error response itself and returns null on failure.
+ * idle reaper sees recent use), transparently resumes a `paused` sandbox
+ * (admission-gated — an over-budget wake is a 503), and rejects a manually
+ * `stopped` one (409 — the user must `start` it). Sends the error response
+ * itself and returns null on failure.
  */
 async function ensureLive(
   res: ServerResponse,
   driver: Driver,
   store: SandboxStore,
   id: string,
+  capacity?: Capacity,
 ): Promise<SandboxRecord | null> {
   const record = store.get(id);
   if (!record) {
@@ -973,7 +1006,15 @@ async function ensureLive(
     return null;
   }
   if (record.status === "paused") {
-    await resumeSandbox(driver, store, record);
+    try {
+      await resumeSandbox(driver, store, record, capacity);
+    } catch (err) {
+      if (err instanceof CapacityError) {
+        sendJson(res, 503, { error: err.reason });
+        return null;
+      }
+      throw err;
+    }
   } else {
     store.touch(id);
   }
@@ -1012,10 +1053,10 @@ async function getMetrics(
 
 async function createBackup(
   res: ServerResponse,
-  { driver, store, backups }: Deps,
+  { driver, store, backups, capacity }: Deps,
   id: string,
 ): Promise<void> {
-  const record = await ensureLive(res, driver, store, id);
+  const record = await ensureLive(res, driver, store, id, capacity);
   if (!record) return;
   const backupId = SandboxStore.newBackupId();
   await backups.ensureDir();
@@ -1032,7 +1073,7 @@ async function createBackup(
 
 async function restoreBackup(
   res: ServerResponse,
-  { driver, store, backups }: Deps,
+  { driver, store, backups, capacity }: Deps,
   id: string,
   body: Record<string, unknown>,
 ): Promise<void> {
@@ -1043,7 +1084,7 @@ async function restoreBackup(
   }
   const info = await backups.get(backupId);
   if (!info) return sendJson(res, 404, { error: "backup not found" });
-  if (!(await ensureLive(res, driver, store, id))) return;
+  if (!(await ensureLive(res, driver, store, id, capacity))) return;
   await driver.restoreBackup(id, backups.tarPath(backupId));
   sendJson(res, 200, { id, restored: backupId });
 }
@@ -1121,11 +1162,11 @@ async function teardownKernel(
 
 async function createCodeContext(
   res: ServerResponse,
-  { driver, store }: Pick<Deps, "driver" | "store">,
+  { driver, store, capacity }: Pick<Deps, "driver" | "store" | "capacity">,
   id: string,
   body: Record<string, unknown>,
 ): Promise<void> {
-  if (!(await ensureLive(res, driver, store, id))) return;
+  if (!(await ensureLive(res, driver, store, id, capacity))) return;
   const language = parseLanguage(body.language ?? "python");
   if (!language) {
     return sendJson(res, 400, { error: "language must be 'python' or 'javascript'" });
@@ -1149,11 +1190,11 @@ async function deleteCodeContext(
 
 async function runCode(
   res: ServerResponse,
-  { driver, store }: Pick<Deps, "driver" | "store">,
+  { driver, store, capacity }: Pick<Deps, "driver" | "store" | "capacity">,
   id: string,
   body: Record<string, unknown>,
 ): Promise<void> {
-  if (!(await ensureLive(res, driver, store, id))) return;
+  if (!(await ensureLive(res, driver, store, id, capacity))) return;
   const code = body.code;
   if (typeof code !== "string") {
     return sendJson(res, 400, { error: "code is required" });
@@ -1229,11 +1270,11 @@ function publicContext(ctx: CodeContextInfo) {
 
 async function execInSandbox(
   res: ServerResponse,
-  { driver, store }: Pick<Deps, "driver" | "store">,
+  { driver, store, capacity }: Pick<Deps, "driver" | "store" | "capacity">,
   id: string,
   body: Record<string, unknown>,
 ): Promise<void> {
-  const record = await ensureLive(res, driver, store, id);
+  const record = await ensureLive(res, driver, store, id, capacity);
   if (!record) return;
 
   const command = body.command;
@@ -1301,12 +1342,12 @@ async function execInSandbox(
 async function watchFiles(
   req: IncomingMessage,
   res: ServerResponse,
-  { driver, store }: Pick<Deps, "driver" | "store">,
+  { driver, store, capacity }: Pick<Deps, "driver" | "store" | "capacity">,
   id: string,
   watchPath: string,
   intervalMs: number | undefined,
 ): Promise<void> {
-  if (!(await ensureLive(res, driver, store, id))) return;
+  if (!(await ensureLive(res, driver, store, id, capacity))) return;
 
   res.writeHead(200, {
     "Content-Type": "text/event-stream",
@@ -1337,12 +1378,12 @@ async function watchFiles(
 
 async function handleFileAction(
   res: ServerResponse,
-  { driver, store }: Pick<Deps, "driver" | "store">,
+  { driver, store, capacity }: Pick<Deps, "driver" | "store" | "capacity">,
   id: string,
   action: "write" | "read" | "mkdir" | "list",
   body: Record<string, unknown>,
 ): Promise<void> {
-  if (!(await ensureLive(res, driver, store, id))) return;
+  if (!(await ensureLive(res, driver, store, id, capacity))) return;
 
   const path = typeof body.path === "string" ? body.path : "";
   if (!path) return sendJson(res, 400, { error: "path is required" });
@@ -1381,11 +1422,11 @@ async function handleFileAction(
 
 async function startProcess(
   res: ServerResponse,
-  { driver, store }: Pick<Deps, "driver" | "store">,
+  { driver, store, capacity }: Pick<Deps, "driver" | "store" | "capacity">,
   id: string,
   body: Record<string, unknown>,
 ): Promise<void> {
-  const record = await ensureLive(res, driver, store, id);
+  const record = await ensureLive(res, driver, store, id, capacity);
   if (!record) return;
 
   const command = body.command;
@@ -1504,11 +1545,11 @@ async function streamLogs(
 
 async function waitForPort(
   res: ServerResponse,
-  { driver, store }: Pick<Deps, "driver" | "store">,
+  { driver, store, capacity }: Pick<Deps, "driver" | "store" | "capacity">,
   id: string,
   body: Record<string, unknown>,
 ): Promise<void> {
-  if (!(await ensureLive(res, driver, store, id))) return;
+  if (!(await ensureLive(res, driver, store, id, capacity))) return;
   const port = Number(body.port);
   if (!Number.isInteger(port) || port <= 0) {
     return sendJson(res, 400, { error: "port is required" });
@@ -1527,11 +1568,11 @@ async function waitForPort(
 
 async function exposePort(
   res: ServerResponse,
-  { config, driver, store }: Pick<Deps, "config" | "driver" | "store">,
+  { config, driver, store, capacity }: Pick<Deps, "config" | "driver" | "store" | "capacity">,
   id: string,
   body: Record<string, unknown>,
 ): Promise<void> {
-  if (!(await ensureLive(res, driver, store, id))) return;
+  if (!(await ensureLive(res, driver, store, id, capacity))) return;
   const port = Number(body.port);
   if (!Number.isInteger(port) || port <= 0) {
     return sendJson(res, 400, { error: "port is required" });

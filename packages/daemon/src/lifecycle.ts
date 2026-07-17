@@ -1,3 +1,4 @@
+import { CapacityError, type Capacity } from "./capacity.js";
 import type { Driver } from "./driver/types.js";
 import { log } from "./logger.js";
 import type { SandboxStore } from "./store.js";
@@ -17,6 +18,11 @@ import type { SandboxRecord } from "./types.js";
  * alive on resume — nothing is lost by pausing); otherwise it's the cold
  * stop-with-volume (workspace survives, processes don't). A `stopped` sandbox is
  * user-intent and is never auto-resumed nor auto-paused.
+ *
+ * The paused/stopped → running edge is **admission-gated**: a resume re-commits
+ * the sandbox's memory, so it must fit the host budget just like a create
+ * (`Capacity.admitAndReserve`); an over-budget resume throws `CapacityError`,
+ * which API/proxy callers surface as 503.
  */
 
 /**
@@ -52,25 +58,42 @@ export async function pauseSandbox(
 
 /**
  * Resume a paused (or stopped) sandbox: recreate its container, reattaching the
- * persistent volume, and mark it running + active.
+ * persistent volume, and mark it running + active. When a `capacity` meter is
+ * given the resume is admission-gated — an over-budget wake throws
+ * `CapacityError` instead of over-subscribing the host.
  */
 export async function resumeSandbox(
   driver: Driver,
   store: SandboxStore,
   record: SandboxRecord,
+  capacity?: Capacity,
 ): Promise<void> {
-  await driver.start({
-    id: record.id,
-    image: record.image,
-    driver: record.driver,
-    env: record.env,
-    labels: record.labels,
-    persist: record.persist,
-    limits: record.limits,
-  });
+  // Reserve the sandbox's memory for the duration of the start: once the record
+  // is written back as `running` it's counted by the meter itself, so the
+  // pending reservation is released synchronously after the status write.
+  const admitted = capacity?.admitAndReserve(record.limits.memoryMb) ?? {
+    ok: true as const,
+    release: () => {},
+  };
+  if (!admitted.ok) throw new CapacityError(admitted.reason);
+  try {
+    await driver.start({
+      id: record.id,
+      image: record.image,
+      driver: record.driver,
+      env: record.env,
+      labels: record.labels,
+      persist: record.persist,
+      limits: record.limits,
+    });
+  } catch (err) {
+    admitted.release();
+    throw err;
+  }
   record.status = "running";
   record.lastActivityAt = new Date().toISOString();
   store.add(record);
+  admitted.release();
 }
 
 /**

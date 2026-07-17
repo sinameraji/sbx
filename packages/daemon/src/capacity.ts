@@ -18,6 +18,13 @@ export interface CapacitySnapshot {
   fits: number;
 }
 
+/** An admission refusal, thrown by gated paths (resume/start) so callers can 503. */
+export class CapacityError extends Error {
+  constructor(public readonly reason: string) {
+    super(reason);
+  }
+}
+
 /**
  * Capacity meter + admission control — **usage-based**, so light and heavy
  * sandboxes size themselves without anyone declaring a tier:
@@ -34,6 +41,8 @@ export class Capacity {
   /** Effective memory budget (MiB) after overcommit; 0 = unknown → admission off. */
   private readonly budgetMemMb: number;
   private readonly budgetCpus: number;
+  /** MiB reserved by in-flight admissions (create/resume) not yet `running`. */
+  private pendingMb = 0;
 
   constructor(
     private readonly store: SandboxStore,
@@ -93,6 +102,41 @@ export class Capacity {
       };
     }
     return { ok: true };
+  }
+
+  /**
+   * `admit()` plus a pending reservation: the request is counted against the
+   * budget until `release()` is called, so concurrent admissions can't all pass
+   * the same check before any of them shows up as `running`. Call `release()`
+   * once the sandbox's record is written as running (it's then counted by
+   * `committed()`) or when the start fails.
+   */
+  admitAndReserve(
+    requestMemoryMb?: number,
+  ): { ok: true; release: () => void } | { ok: false; reason: string } {
+    if (!this.enforced) return { ok: true, release: () => {} };
+    const { mem } = this.committed();
+    // A new sandbox hasn't run yet: charge its cap if set, else the floor.
+    const req = requestMemoryMb && requestMemoryMb > 0 ? requestMemoryMb : this.floorMb;
+    if (mem + this.pendingMb + req > this.budgetMemMb) {
+      return {
+        ok: false,
+        reason:
+          `host memory budget exhausted: ${mem + this.pendingMb}/${this.budgetMemMb} MiB committed, ` +
+          `this sandbox needs ${req} MiB. Free a sandbox, set a smaller --memory, ` +
+          `or raise SBX_OVERCOMMIT / SBX_HOST_MEMORY_MB.`,
+      };
+    }
+    this.pendingMb += req;
+    let released = false;
+    return {
+      ok: true,
+      release: () => {
+        if (released) return;
+        released = true;
+        this.pendingMb -= req;
+      },
+    };
   }
 
   snapshot(): CapacitySnapshot {

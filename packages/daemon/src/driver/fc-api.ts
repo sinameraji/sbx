@@ -33,6 +33,27 @@ export interface FcVmSpec {
   guestCid?: number;
   /** Override the kernel command line (mainly for tests). */
   bootArgs?: string;
+  /**
+   * Opt-in guest networking. When set, the microVM gets an eth0 backed by the
+   * host TAP device, auto-configured at boot via the kernel `ip=` param (no
+   * in-guest tooling needed). Off by default — the flagship posture is a guest
+   * with NO network device (egress only over vsock).
+   */
+  net?: FcNetSpec;
+}
+
+/** TAP-backed guest networking parameters (host side sets up the TAP + NAT). */
+export interface FcNetSpec {
+  /** Host TAP device name (e.g. `hctap0`). */
+  tap: string;
+  /** Guest MAC address. */
+  guestMac: string;
+  /** Guest IP (e.g. `172.16.0.2`). */
+  guestIp: string;
+  /** Gateway = the host TAP IP (e.g. `172.16.0.1`). */
+  gatewayIp: string;
+  /** Netmask (e.g. `255.255.255.0`). */
+  mask: string;
 }
 
 /** Default kernel cmdline: serial console, no PCI, our agent as init, ro root. */
@@ -46,11 +67,17 @@ export const FC_DEFAULT_BOOT_ARGS =
  * (matching the shared guest init, which mounts /dev/vdb at /workspace).
  */
 export function buildFcApiCalls(spec: FcVmSpec): FcApiCall[] {
-  return [
+  // With networking, auto-configure eth0 via the kernel `ip=` param at boot:
+  //   ip=<guest>::<gw>:<mask>::eth0:off   (no in-guest tooling required).
+  const baseArgs = spec.bootArgs ?? FC_DEFAULT_BOOT_ARGS;
+  const bootArgs = spec.net
+    ? `${baseArgs} ip=${spec.net.guestIp}::${spec.net.gatewayIp}:${spec.net.mask}::eth0:off`
+    : baseArgs;
+  const calls: FcApiCall[] = [
     {
       method: "PUT",
       path: "/boot-source",
-      body: { kernel_image_path: spec.kernelPath, boot_args: spec.bootArgs ?? FC_DEFAULT_BOOT_ARGS },
+      body: { kernel_image_path: spec.kernelPath, boot_args: bootArgs },
     },
     {
       method: "PUT",
@@ -83,6 +110,14 @@ export function buildFcApiCalls(spec: FcVmSpec): FcApiCall[] {
       body: { guest_cid: spec.guestCid ?? 3, uds_path: spec.vsockUds },
     },
   ];
+  if (spec.net) {
+    calls.push({
+      method: "PUT",
+      path: "/network-interfaces/eth0",
+      body: { iface_id: "eth0", host_dev_name: spec.net.tap, guest_mac: spec.net.guestMac },
+    });
+  }
+  return calls;
 }
 
 /** The action that boots a configured VM. */

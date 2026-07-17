@@ -27,6 +27,7 @@ import {
   FC_PAUSE_VM,
   FC_START_ACTION,
   FcApi,
+  type FcNetSpec,
   fcVsockConnect,
 } from "./fc-api.js";
 import { VzImageCache } from "./vz-image.js";
@@ -70,6 +71,8 @@ interface FcVm {
   vsockUds: string;
   workspaceImg: string;
   stateDir: string;
+  /** TAP/NAT networking parameters, when the sandbox opted into a NIC. */
+  net?: FcNetSpec;
 }
 
 const AGENT_VSOCK_PORT = 1024; // the in-guest agent listens here (matches VZ)
@@ -93,6 +96,7 @@ export class FirecrackerDriver extends AgentDriver {
   private pool: FcVm[] = [];
   private poolTarget: number;
   private poolSeq = 0;
+  private tapSeq = 0;
   private filling = false;
   private readonly poolImage: string;
   private readonly poolDir: string;
@@ -178,7 +182,13 @@ export class FirecrackerDriver extends AgentDriver {
       }
     }
 
-    const vm = await this.bootMicroVm({ id, stateDir, image: opts.image, limits: opts.limits });
+    const vm = await this.bootMicroVm({
+      id,
+      stateDir,
+      image: opts.image,
+      limits: opts.limits,
+      networked: opts.networked,
+    });
     this.vms.set(id, vm);
     try {
       if (opts.env && Object.keys(opts.env).length) {
@@ -202,9 +212,14 @@ export class FirecrackerDriver extends AgentDriver {
     stateDir: string;
     image: string;
     limits?: CreateOptions["limits"];
+    networked?: boolean;
   }): Promise<FcVm> {
     mkdirSync(p.stateDir, { recursive: true });
     const rootfs = await this.images.ensureRootfs(p.image);
+
+    // Opt-in NAT networking: give the guest a real eth0 (host TAP + masquerade).
+    // Default posture is no NIC (egress over vsock only).
+    const net = p.networked ? this.setupTap(p.id) : undefined;
 
     // First boot only: give the sandbox its own workspace disk (clone the blank
     // pre-formatted template; else a sparse file the guest formats).
@@ -241,9 +256,11 @@ export class FirecrackerDriver extends AgentDriver {
             memMib,
             vsockUds: vm.vsockUds,
             bootArgs,
+            net,
           }),
         );
         await api.call(FC_START_ACTION);
+        vm.net = net;
         return vm;
       } catch (err) {
         await killAndWait(vm.proc);
@@ -269,6 +286,73 @@ export class FirecrackerDriver extends AgentDriver {
       throw err;
     }
     return vm;
+  }
+
+  // --- opt-in NAT networking --------------------------------------------------
+
+  /**
+   * Create a host TAP device + masquerade NAT for a networked sandbox and return
+   * its `FcNetSpec`. Each sandbox gets a private /30 (gateway .1 = host TAP, guest
+   * .2). Requires the daemon to run with CAP_NET_ADMIN (root). Idempotent per id.
+   */
+  private setupTap(id: string): FcNetSpec {
+    const idx = (this.tapSeq++ % 250) + 2; // 2..251, avoids .0/.1 collisions
+    const tap = `hct${idx}`;
+    const net: FcNetSpec = {
+      tap,
+      guestMac: `02:fc:00:00:00:${idx.toString(16).padStart(2, "0")}`,
+      guestIp: `172.16.${idx}.2`,
+      gatewayIp: `172.16.${idx}.1`,
+      mask: "255.255.255.252",
+    };
+    const ext = this.defaultRouteIface();
+    const subnet = `172.16.${idx}.0/30`;
+    const sh = (cmd: string) => execFileSync("bash", ["-lc", cmd], { stdio: "ignore" });
+    try {
+      sh(`ip tuntap add dev ${tap} mode tap 2>/dev/null || true`);
+      sh(`ip addr add ${net.gatewayIp}/30 dev ${tap} 2>/dev/null || true`);
+      sh(`ip link set ${tap} up`);
+      sh(`sysctl -wq net.ipv4.ip_forward=1`);
+      sh(`iptables -t nat -C POSTROUTING -s ${subnet} -o ${ext} -j MASQUERADE 2>/dev/null || iptables -t nat -A POSTROUTING -s ${subnet} -o ${ext} -j MASQUERADE`);
+      sh(`iptables -C FORWARD -i ${tap} -o ${ext} -j ACCEPT 2>/dev/null || iptables -A FORWARD -i ${tap} -o ${ext} -j ACCEPT`);
+      sh(`iptables -C FORWARD -i ${ext} -o ${tap} -m state --state RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || iptables -A FORWARD -i ${ext} -o ${tap} -m state --state RELATED,ESTABLISHED -j ACCEPT`);
+      log.info("firecracker: NAT networking up", { sandbox: id, tap, guestIp: net.guestIp });
+    } catch (err) {
+      throw new Error(`firecracker: TAP/NAT setup failed (needs root/CAP_NET_ADMIN): ${(err as Error).message}`);
+    }
+    return net;
+  }
+
+  /** Tear down a sandbox's TAP device + NAT rules. Best-effort. */
+  private teardownTap(net: FcNetSpec): void {
+    const ext = this.defaultRouteIface();
+    const subnet = net.guestIp.replace(/\.\d+$/, ".0") + "/30";
+    const sh = (cmd: string) => {
+      try {
+        execFileSync("bash", ["-lc", cmd], { stdio: "ignore" });
+      } catch {
+        /* best-effort */
+      }
+    };
+    sh(`iptables -t nat -D POSTROUTING -s ${subnet} -o ${ext} -j MASQUERADE 2>/dev/null || true`);
+    sh(`iptables -D FORWARD -i ${net.tap} -o ${ext} -j ACCEPT 2>/dev/null || true`);
+    sh(`iptables -D FORWARD -i ${ext} -o ${net.tap} -m state --state RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || true`);
+    sh(`ip link del ${net.tap} 2>/dev/null || true`);
+  }
+
+  private _extIface?: string;
+  /** The host's default-route interface (for NAT masquerade), cached. */
+  private defaultRouteIface(): string {
+    if (this._extIface) return this._extIface;
+    try {
+      const out = execFileSync("bash", ["-lc", "ip -o -4 route show to default | awk '{print $5; exit}'"])
+        .toString()
+        .trim();
+      this._extIface = out || "eth0";
+    } catch {
+      this._extIface = "eth0";
+    }
+    return this._extIface;
   }
 
   // --- warm pool --------------------------------------------------------------
@@ -517,6 +601,7 @@ export class FirecrackerDriver extends AgentDriver {
     this.vms.delete(id);
     await killAndWait(vm.proc); // tears down the microVM; workspace.img persists
     for (const s of [vm.apiSock, vm.vsockUds]) rmQuiet(s);
+    if (vm.net) this.teardownTap(vm.net);
   }
 
   async destroy(id: string): Promise<void> {

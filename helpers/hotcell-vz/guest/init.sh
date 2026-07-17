@@ -20,6 +20,12 @@ for d in /tmp /run; do mount -t tmpfs tmpfs "$d" 2>/dev/null; done
 # Loopback up so 127.0.0.1 (waitForPort, preview bridge to local servers) routes.
 ip link set lo up 2>/dev/null || ifconfig lo up 2>/dev/null || true
 
+# Opt-in NAT networking: the kernel `ip=` param auto-configures eth0 (IP+route)
+# but not DNS. When an eth0 is present, write a resolver so name lookups work.
+if [ -d /sys/class/net/eth0 ]; then
+  printf 'nameserver 8.8.8.8\nnameserver 1.1.1.1\n' > /etc/resolv.conf 2>/dev/null || true
+fi
+
 # cgroup v2 (resource limits): mount the unified hierarchy if the kernel did not.
 mkdir -p /sys/fs/cgroup 2>/dev/null
 mountpoint -q /sys/fs/cgroup 2>/dev/null || mount -t cgroup2 none /sys/fs/cgroup 2>/dev/null

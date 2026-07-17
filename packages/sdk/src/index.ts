@@ -221,6 +221,13 @@ export interface CreateOptions {
    * all three side by side. Omit for the daemon default.
    */
   driver?: string;
+  /**
+   * Opt-in outbound networking for a microVM sandbox (Firecracker): give the
+   * guest a real NAT'd NIC instead of the default no-network-device posture.
+   * For trusted workloads that need general internet (apt/git/pip). The default
+   * (false) keeps the hardened posture: no NIC, egress only over the gateway.
+   */
+  networked?: boolean;
   /** Hard memory cap in MiB (overrides the daemon default; 0 = unlimited). */
   memoryMb?: number;
   /** Hard CPU cap in fractional cores, e.g. 0.5 (overrides the daemon default). */

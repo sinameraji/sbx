@@ -96,6 +96,32 @@ async function main(): Promise<void> {
   assert.match((withPids[0]!.body as { boot_args: string }).boot_args, /hotcell\.pids=64/);
   ok("custom boot args (pidsLimit cmdline) flow through");
 
+  // 2b. Opt-in networking adds a network-interface + the kernel ip= autoconfig.
+  const withNet = buildFcApiCalls({
+    kernelPath: "/k",
+    rootfsPath: "/r",
+    workspacePath: "/w",
+    vcpus: 1,
+    memMib: 256,
+    vsockUds: "/v",
+    net: {
+      tap: "hct2",
+      guestMac: "02:fc:00:00:00:02",
+      guestIp: "172.16.2.2",
+      gatewayIp: "172.16.2.1",
+      mask: "255.255.255.252",
+    },
+  });
+  const nic = withNet.find((c) => c.path === "/network-interfaces/eth0");
+  assert.ok(nic, "network-interface call is present when networked");
+  assert.equal((nic!.body as { host_dev_name: string }).host_dev_name, "hct2");
+  assert.match(
+    (withNet[0]!.body as { boot_args: string }).boot_args,
+    /ip=172\.16\.2\.2::172\.16\.2\.1:255\.255\.255\.252::eth0:off/,
+  );
+  assert.ok(!buildFcApiCalls({ kernelPath: "/k", rootfsPath: "/r", workspacePath: "/w", vcpus: 1, memMib: 256, vsockUds: "/v" }).some((c) => c.path.includes("network-interfaces")), "no NIC by default");
+  ok("opt-in networking: eth0 NIC + kernel ip= autoconfig (none by default)");
+
   // 3. vsock handshake parser: incomplete → null; OK line → split leftover; bad → not ok.
   assert.equal(parseVsockHandshake(Buffer.from("OK 1024")), null, "no newline yet → null");
   const okParse = parseVsockHandshake(Buffer.from("OK 1024\nHELLOBYTES"));

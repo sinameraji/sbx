@@ -119,6 +119,13 @@ export interface CreateOptions {
   repoRef?: string;
   /** Hard CPU/memory/PID caps for the sandbox (resolved effective values). */
   limits?: ResourceLimits;
+  /**
+   * Opt-in outbound networking for a microVM sandbox (Firecracker): give the
+   * guest a real NAT'd NIC instead of the default no-network-device posture.
+   * For trusted workloads that need general internet (apt/git/pip/benchmarks).
+   * Ignored by the container driver (containers are networked already).
+   */
+  networked?: boolean;
 }
 
 /**

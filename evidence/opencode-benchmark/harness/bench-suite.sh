@@ -104,8 +104,8 @@ for cfg in $CONFIGS; do
       if echo "$SB" | grep -qE '^ERR|^$'; then
         echo "CREATE_FAILED $RESP"; tail -25 /tmp/hotcelld.log
       else
-        FCPID=$(pgrep -f "firecracker --api-sock" | tail -1)
-        [ -n "$FCPID" ] && echo "fc_pin: $(taskset -cp "$FCPID" 2>/dev/null)"
+        FCPID=$(pgrep -x firecracker | tail -1)
+        [ -n "$FCPID" ] && echo "fc_pin: cpus_allowed=$(awk '/Cpus_allowed_list/{print $2}' /proc/$FCPID/status 2>/dev/null) requested=${CPUSET}"
         exj "$SB" '{"command":"echo mem=$(awk \"/MemTotal/{printf \\$2}\" /proc/meminfo)kib cpus=$(nproc); getent hosts registry.npmjs.org >/dev/null 2>&1 && echo DNS_OK || echo DNS_FAIL"}'
         exj "$SB" "{\"command\":\"echo $PB64 | base64 -d > /root/pb.sh; echo $RB64 | base64 -d > /root/runbench.sh; chmod +x /root/runbench.sh\"}"
         echo "############### BENCHMARK (${MEM}MB/${CPUS}cpu rep${REP}) ###############"

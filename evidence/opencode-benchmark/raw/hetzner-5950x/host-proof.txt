@@ -1,0 +1,24 @@
+Hetzner Server Auction #3038181 — bare-metal proof (captured in rescue, 2026-07-17)
+IPv4 65.108.143.105 / Finland HEL1
+
+systemd-detect-virt: none            <- bare metal (not nested)
+hypervisor cpuid flag: ABSENT        <- not virtualized
+AMD-V (svm) flag: present
+/dev/kvm: crw-rw---- root kvm 10,232  <- KVM live
+
+CPU:  AMD Ryzen 9 5950X 16-Core, 32 threads (2 CCDs x 8 cores, each with 32MB L3)
+      Rated boost 4.9 GHz (lscpu's "max 5084 MHz" is the kernel freq table, NOT an
+      achieved clock — achieved clock is measured under load per run, not quoted here).
+RAM:  125 GiB
+DISK: 2x SAMSUNG MZQLB3T8HALS-00007  U.2 NVMe 3.5TB (TRAN=nvme, ROTA=0, in-chassis)
+KERNEL(rescue): Linux 6.12.67 x86_64
+
+NOTE on the guest CPU model in the benchmark table: dax's script reads the GUEST's
+/proc/cpuinfo model name, which under Firecracker's default AMD CPUID reports a
+generic "AMD EPYC" brand. The physical host is the Ryzen 9 5950X above (this file);
+we did not modify the guest CPUID. So a table row saying "AMD EPYC" IS this 5950X.
+
+CPU PINNING: each microVM's firecracker vCPU threads are pinned via taskset to
+physical cores only (no SMT siblings): logical 0-7 = CCD0 (shared 32MB L3), 8-15 =
+CCD1. Rungs: 2->0-1, 4->0-3, 8->0-7 (one CCD), 16->0-15 (both CCDs, labeled).
+Verified per run via /proc/<fc>/status Cpus_allowed_list (see fc_pin lines in raw).

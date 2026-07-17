@@ -30,6 +30,7 @@ jobs:
       - uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: dist/
+          skip-existing: true # re-triggered tags shouldn't fail on an already-uploaded version
 
   publish:
     runs-on: ubuntu-latest
@@ -43,6 +44,8 @@ jobs:
         with:
           node-version: 22
           registry-url: https://registry.npmjs.org
+      # OIDC trusted publishing needs npm >= 11.5; node 22 bundles npm 10.
+      - run: npm install -g npm@latest
       - run: npm ci
       - run: npm run build
       - name: publish (dependency order, provenance)

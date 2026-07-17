@@ -13,21 +13,22 @@
     }
   },
   "files": [
-    "dist",
-    "README.md"
+    "dist"
   ],
   "keywords": [
-    "mastra",
     "sandbox",
     "ai-agents",
-    "sbx",
-    "workspace"
+    "firecracker",
+    "microvm",
+    "apple-virtualization",
+    "code-execution",
+    "llm-gateway",
+    "self-hosted"
   ],
-  "homepage": "https://github.com/sinameraji/sbx#readme",
+  "homepage": "https://hotcell-bw3.pages.dev",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/sinameraji/sbx.git",
-    "directory": "packages/mastra"
+    "url": "git+https://github.com/sinameraji/hotcell.git"
   },
   "publishConfig": {
     "access": "public"
@@ -45,5 +46,11 @@
     "@mastra/core": "1.43.0",
     "@types/node": "^22.5.0",
     "typescript": "^5.5.0"
+  },
+  "bugs": {
+    "url": "https://github.com/sinameraji/hotcell/issues"
+  },
+  "engines": {
+    "node": ">=18"
   }
 }

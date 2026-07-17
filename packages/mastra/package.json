@@ -1,6 +1,6 @@
 {
   "name": "@hotcell/mastra",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Mastra Workspace sandbox provider backed by self-hosted hotcell",
   "license": "Apache-2.0",
   "type": "module",
@@ -25,7 +25,7 @@
     "llm-gateway",
     "self-hosted"
   ],
-  "homepage": "https://hotcell-bw3.pages.dev",
+  "homepage": "https://hotcell.sh",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/sinameraji/hotcell.git"

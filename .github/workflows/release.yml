@@ -12,6 +12,25 @@ on:
     tags: ["v*"]
 
 jobs:
+  # PyPI trusted publishing (OIDC). Prerequisite (once): pypi.org → Account →
+  # Publishing → "Add a pending publisher" → project `hotcell`, owner
+  # `sinameraji`, repo `hotcell`, workflow `release.yml`, environment blank.
+  pypi:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install build && python -m build sdk/python -o dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/
+
   publish:
     runs-on: ubuntu-latest
     timeout-minutes: 20

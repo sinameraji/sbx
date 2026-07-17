@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "hotcell"
-version = "0.0.1"
+version = "0.1.1"
 description = "Python client for the hotcell self-hostable agent sandbox daemon"
 readme = "README.md"
 license = { text = "Apache-2.0" }
@@ -13,7 +13,8 @@ dependencies = []
 keywords = ["sandbox", "ai-agents", "hotcell"]
 
 [project.urls]
-Homepage = "https://github.com/sinameraji/hotcell"
+Homepage = "https://hotcell.sh"
+Repository = "https://github.com/sinameraji/hotcell"
 
 [tool.setuptools.packages.find]
 where = ["."]

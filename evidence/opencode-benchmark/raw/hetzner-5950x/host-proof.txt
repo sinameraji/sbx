@@ -1,5 +1,5 @@
-Hetzner Server Auction #3038181 — bare-metal proof (captured in rescue, 2026-07-17)
-IPv4 65.108.143.105 / Finland HEL1
+Hetzner Server Auction — bare-metal proof (captured in rescue, 2026-07-17)
+Location: Finland, HEL1 (public IP redacted — throwaway box, key-only SSH)
 
 systemd-detect-virt: none            <- bare metal (not nested)
 hypervisor cpuid flag: ABSENT        <- not virtualized

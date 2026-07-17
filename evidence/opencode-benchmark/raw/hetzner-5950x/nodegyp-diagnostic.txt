@@ -1,0 +1,29 @@
+node-gyp crash — root-cause diagnostic (Hetzner 5950X, 2026-07-17)
+
+SYMPTOM: in the hotcell microVM guest, the full OpenCode `bun install` source-builds
+tree-sitter-powershell instead of using the shipped prebuilt, then crashes because
+node-gyp isn't on PATH. The bare host running the IDENTICAL stock script completes.
+
+WHAT WE RULED OUT (measured, not guessed):
+- Package ships a prebuilt: `prebuilds/linux-x64/tree-sitter-powershell.node` IS in
+  the 0.26.4 tarball, and IS present in the guest after install (952976 bytes).
+- Four discriminators IDENTICAL host vs guest:
+    platform=linux  arch=x64  process.versions.modules=137 (Node ABI)
+    glibcRuntime=2.39  glibcCompiler=2.28   ldd=GLIBC 2.39   getconf=glibc 2.39   musl=none
+  => NOT libc/arch/ABI/platform. The "rootfs is musl/Alpine" theory is FALSE (glibc Ubuntu).
+- node-gyp is NOT on the host PATH either -> the control is not contaminated; the host
+  genuinely passes by USING the prebuilt.
+- Standalone `bun add tree-sitter-powershell` in the guest SUCCEEDS because bun BLOCKS
+  the untrusted postinstall ("Blocked 1 postinstall"); only the full OpenCode install
+  (which runs that postinstall) source-builds — in the guest but not the host.
+
+CONCLUSION: real, GUEST-SPECIFIC hotcell product bug — the same `bun install` completes
+on the bare host and fails in the microVM, with the prebuilt present in both and every
+discriminator identical. Cause is a subtler in-guest interaction in bun's full-install
+run of node-gyp-build (suspected install-ordering/timing: node-gyp-build resolves
+"no prebuilt -> source build" even though the file lands). ROOT CAUSE OPEN — not claimed.
+
+IMPACT ON BENCHMARK: floor band (12-16 GiB) is UNAFFECTED — the source build is
+install-phase (~100-300 MB), the floor OOM is typecheck-phase (tsgo ~13 GiB), <3% and
+different phases. Install TIME is inflated ~2-3s (our 13s vs host 12s vs Cocoon 11.3s).
+WORKAROUND for the runs: expose npm's bundled node-gyp in the guest (disclosed).

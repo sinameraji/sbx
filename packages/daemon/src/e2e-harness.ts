@@ -19,12 +19,12 @@
  * Run: npm run e2e:harness
  */
 import assert from "node:assert/strict";
-import { SbxClient, type Sandbox } from "@sbx/sdk";
+import { HotcellClient, type Sandbox } from "@hotcell/sdk";
 
 async function main(): Promise<number> {
   const endpoint = process.env.SBX_ENDPOINT ?? "http://127.0.0.1:4750";
   const model = process.env.SBX_E2E_MODEL ?? "anthropic/claude-3.5-haiku";
-  const client = new SbxClient({ endpoint, apiKey: process.env.SBX_API_KEY });
+  const client = new HotcellClient({ endpoint, apiKey: process.env.SBX_API_KEY });
 
   let passed = 0;
   const ok = (l: string) => {

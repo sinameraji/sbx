@@ -1,4 +1,4 @@
-import { SbxClient } from "@sbx/sdk";
+import { HotcellClient } from "@hotcell/sdk";
 import { formatError } from "./util.js";
 import type { GlobalArgs } from "./cli.js";
 
@@ -16,7 +16,7 @@ export async function watchCommand(
   const intervalMs =
     typeof flags.interval === "string" ? Number(flags.interval) : undefined;
 
-  const client = new SbxClient({ endpoint: globals.endpoint, apiKey: globals.apiKey });
+  const client = new HotcellClient({ endpoint: globals.endpoint, apiKey: globals.apiKey });
   try {
     const sandbox = await client.getSandbox(id);
     console.error(`[sb] watching ${path} in ${id} (Ctrl-C to stop)`);

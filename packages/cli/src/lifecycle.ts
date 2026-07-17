@@ -1,4 +1,4 @@
-import { SbxClient } from "@sbx/sdk";
+import { HotcellClient } from "@hotcell/sdk";
 import { formatError } from "./util.js";
 import type { GlobalArgs } from "./cli.js";
 
@@ -12,7 +12,7 @@ export async function stopCommand(
     return 1;
   }
 
-  const client = new SbxClient({ endpoint: globals.endpoint, apiKey: globals.apiKey });
+  const client = new HotcellClient({ endpoint: globals.endpoint, apiKey: globals.apiKey });
   try {
     const sandbox = await client.getSandbox(id);
     await sandbox.stop();
@@ -34,7 +34,7 @@ export async function pauseCommand(
     return 1;
   }
 
-  const client = new SbxClient({ endpoint: globals.endpoint, apiKey: globals.apiKey });
+  const client = new HotcellClient({ endpoint: globals.endpoint, apiKey: globals.apiKey });
   try {
     const sandbox = await client.getSandbox(id);
     await sandbox.pause();
@@ -56,7 +56,7 @@ export async function startSandboxCommand(
     return 1;
   }
 
-  const client = new SbxClient({ endpoint: globals.endpoint, apiKey: globals.apiKey });
+  const client = new HotcellClient({ endpoint: globals.endpoint, apiKey: globals.apiKey });
   try {
     const sandbox = await client.getSandbox(id);
     await sandbox.start();

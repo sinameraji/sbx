@@ -1,4 +1,4 @@
-import { SbxClient } from "@sbx/sdk";
+import { HotcellClient } from "@hotcell/sdk";
 import type { GlobalArgs } from "./cli.js";
 import { parseEnvPairs } from "./env.js";
 import { parseLimitFlags } from "./util.js";
@@ -16,7 +16,7 @@ export async function createCommand(
   globals: GlobalArgs,
   flags: Record<string, string | boolean>,
 ): Promise<number> {
-  const client = new SbxClient({ endpoint: globals.endpoint, apiKey: globals.apiKey });
+  const client = new HotcellClient({ endpoint: globals.endpoint, apiKey: globals.apiKey });
 
   const image = typeof flags.image === "string" ? flags.image : undefined;
   const egress = flags.egress === true;

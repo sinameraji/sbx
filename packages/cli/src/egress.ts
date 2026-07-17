@@ -1,4 +1,4 @@
-import { SbxClient, type EgressPolicy } from "@sbx/sdk";
+import { HotcellClient, type EgressPolicy } from "@hotcell/sdk";
 import type { GlobalArgs } from "./cli.js";
 
 /**
@@ -29,7 +29,7 @@ export async function egressCommand(
     console.error("Usage: sb egress <id> [--list] [--revoke <token>] [policy flags]");
     return 1;
   }
-  const client = new SbxClient({ endpoint: globals.endpoint, apiKey: globals.apiKey });
+  const client = new HotcellClient({ endpoint: globals.endpoint, apiKey: globals.apiKey });
   try {
     const sandbox = await client.getSandbox(id);
 

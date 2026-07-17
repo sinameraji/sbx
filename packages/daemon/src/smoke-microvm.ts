@@ -27,7 +27,7 @@ import { MetricsHistory } from "./metrics.js";
 import { SandboxStore } from "./store.js";
 import { createApiServer } from "./api/server.js";
 import { createProxyServer } from "./proxy/server.js";
-import { SbxClient, type Sandbox } from "@sbx/sdk";
+import { HotcellClient, type Sandbox } from "@hotcell/sdk";
 
 async function main(): Promise<number> {
   // Force the microVM driver + isolated ports/state so the run leaves nothing
@@ -65,7 +65,7 @@ async function main(): Promise<number> {
   await new Promise<void>((r) => proxy.listen(config.proxyPort, config.proxyHost, r));
   const endpoint = `http://${config.host}:${config.port}`;
   const proxyEndpoint = `http://${config.proxyHost}:${config.proxyPort}`;
-  const client = new SbxClient({ endpoint });
+  const client = new HotcellClient({ endpoint });
 
   let passed = 0;
   const ok = (l: string) => {

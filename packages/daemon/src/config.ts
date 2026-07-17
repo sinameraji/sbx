@@ -1,5 +1,27 @@
+import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+
+/**
+ * Read a daemon env var with legacy fallback: `HOTCELL_<name>` wins, then the
+ * pre-rename `SBX_<name>` — so deployments configured before the hotcell
+ * rename keep working unchanged.
+ */
+function env(name: string): string | undefined {
+  return process.env[`HOTCELL_${name}`] ?? process.env[`SBX_${name}`];
+}
+
+/**
+ * Root for daemon state (db, backups, VM state, image caches): `~/.hotcell`,
+ * except when a pre-rename `~/.sbx` already exists and `~/.hotcell` doesn't —
+ * then the legacy root keeps being used so existing installs keep their data.
+ */
+function stateRoot(): string {
+  const modern = join(homedir(), ".hotcell");
+  const legacy = join(homedir(), ".sbx");
+  if (!existsSync(modern) && existsSync(legacy)) return legacy;
+  return modern;
+}
 
 // Daemon configuration, all overridable via environment variables.
 export interface Config {
@@ -241,67 +263,67 @@ export interface ProviderConfig {
 
 export function loadConfig(): Config {
   return {
-    host: process.env.SBX_HOST ?? "127.0.0.1",
-    port: Number(process.env.SBX_PORT ?? 4750),
-    defaultImage: process.env.SBX_IMAGE ?? "python:3.11-slim-bookworm",
-    driver: process.env.SBX_DRIVER ?? "container",
-    defaultMemoryMb: Number(process.env.SBX_DEFAULT_MEMORY_MB ?? 0),
-    defaultCpus: Number(process.env.SBX_DEFAULT_CPUS ?? 0),
-    defaultPidsLimit: Number(process.env.SBX_DEFAULT_PIDS ?? 0),
-    admission: process.env.SBX_ADMISSION === "off" ? "off" : "enforce",
-    hostMemoryMb: Number(process.env.SBX_HOST_MEMORY_MB ?? 0),
-    hostCpus: Number(process.env.SBX_HOST_CPUS ?? 0),
-    overcommit: Number(process.env.SBX_OVERCOMMIT ?? 1),
-    defaultReservationMb: Number(process.env.SBX_DEFAULT_RESERVATION_MB ?? 256),
-    proxyHost: process.env.SBX_PROXY_HOST ?? "127.0.0.1",
-    proxyPort: Number(process.env.SBX_PROXY_PORT ?? 4751),
-    egressHost: process.env.SBX_EGRESS_HOST ?? "127.0.0.1",
-    egressPort: Number(process.env.SBX_EGRESS_PORT ?? 4752),
-    egressAdvertiseHost: process.env.SBX_EGRESS_ADVERTISE_HOST ?? "host.docker.internal",
-    egressEnforce: process.env.SBX_EGRESS_ENFORCE === "true",
-    egressNetwork: process.env.SBX_EGRESS_NETWORK ?? "sbx-egress",
-    egressSubnet: process.env.SBX_EGRESS_SUBNET ?? "10.200.0.0/24",
-    egressDnsResolver: process.env.SBX_EGRESS_DNS ?? "",
-    allowlistFile: process.env.SBX_ALLOWLIST_FILE ?? "",
-    allowlistExtra: (process.env.SBX_ALLOWLIST_EXTRA ?? "")
+    host: env("HOST") ?? "127.0.0.1",
+    port: Number(env("PORT") ?? 4750),
+    defaultImage: env("IMAGE") ?? "python:3.11-slim-bookworm",
+    driver: env("DRIVER") ?? "container",
+    defaultMemoryMb: Number(env("DEFAULT_MEMORY_MB") ?? 0),
+    defaultCpus: Number(env("DEFAULT_CPUS") ?? 0),
+    defaultPidsLimit: Number(env("DEFAULT_PIDS") ?? 0),
+    admission: env("ADMISSION") === "off" ? "off" : "enforce",
+    hostMemoryMb: Number(env("HOST_MEMORY_MB") ?? 0),
+    hostCpus: Number(env("HOST_CPUS") ?? 0),
+    overcommit: Number(env("OVERCOMMIT") ?? 1),
+    defaultReservationMb: Number(env("DEFAULT_RESERVATION_MB") ?? 256),
+    proxyHost: env("PROXY_HOST") ?? "127.0.0.1",
+    proxyPort: Number(env("PROXY_PORT") ?? 4751),
+    egressHost: env("EGRESS_HOST") ?? "127.0.0.1",
+    egressPort: Number(env("EGRESS_PORT") ?? 4752),
+    egressAdvertiseHost: env("EGRESS_ADVERTISE_HOST") ?? "host.docker.internal",
+    egressEnforce: env("EGRESS_ENFORCE") === "true",
+    egressNetwork: env("EGRESS_NETWORK") ?? "sbx-egress",
+    egressSubnet: env("EGRESS_SUBNET") ?? "10.200.0.0/24",
+    egressDnsResolver: env("EGRESS_DNS") ?? "",
+    allowlistFile: env("ALLOWLIST_FILE") ?? "",
+    allowlistExtra: (env("ALLOWLIST_EXTRA") ?? "")
       .split(",")
       .map((h) => h.trim())
       .filter(Boolean),
-    allowSourceControl: process.env.SBX_ALLOW_SOURCE_CONTROL !== "false",
-    egressSpendCapUsd: Number(process.env.SBX_EGRESS_SPEND_CAP ?? 0),
+    allowSourceControl: env("ALLOW_SOURCE_CONTROL") !== "false",
+    egressSpendCapUsd: Number(env("EGRESS_SPEND_CAP") ?? 0),
     providerKeys: loadProviderKeys(),
     providerConfigs: loadProviderConfigs(),
-    backupDir: process.env.SBX_BACKUP_DIR ?? join(homedir(), ".sbx", "backups"),
-    dbPath: process.env.SBX_DB ?? join(homedir(), ".sbx", "state.db"),
-    defaultSleepAfterMs: Number(process.env.SBX_SLEEP_AFTER_MS ?? 0),
-    reapIntervalMs: Number(process.env.SBX_REAP_INTERVAL_MS ?? 15000),
-    metricsIntervalMs: Number(process.env.SBX_METRICS_INTERVAL_MS ?? 10000),
-    costCpuPerHour: Number(process.env.SBX_COST_CPU_PER_HOUR ?? 0.05),
-    costMemGbPerHour: Number(process.env.SBX_COST_MEM_GB_PER_HOUR ?? 0.005),
-    costEgressPerGb: Number(process.env.SBX_COST_EGRESS_PER_GB ?? 0.01),
-    modelPricesPath: process.env.SBX_MODEL_PRICES ?? "",
-    vzHelperPath: process.env.SBX_VZ_HELPER_PATH ?? "helpers/sbx-vz/dist/sbx-vz",
-    vzKernel: process.env.SBX_VZ_KERNEL ?? "helpers/sbx-vz/guest/vmlinux-vz",
-    vzRootfs: process.env.SBX_VZ_ROOTFS ?? "helpers/sbx-vz/guest/rootfs.img",
-    vzStateDir: process.env.SBX_VZ_STATE_DIR ?? join(homedir(), ".sbx", "vz"),
-    vzDiskGb: Number(process.env.SBX_VZ_DISK_GB ?? 4),
-    vzImageCacheDir: process.env.SBX_VZ_IMAGE_CACHE ?? join(homedir(), ".sbx", "vz", "images"),
-    vzWarmPool: Number(process.env.SBX_VZ_WARM_POOL ?? 0),
-    fcBin: process.env.SBX_FC_BIN ?? "firecracker",
-    fcKernel: process.env.SBX_FC_KERNEL ?? "helpers/sbx-vz/guest/vmlinux-fc",
-    fcRootfs: process.env.SBX_FC_ROOTFS ?? "helpers/sbx-vz/guest/rootfs.img",
-    fcStateDir: process.env.SBX_FC_STATE_DIR ?? join(homedir(), ".sbx", "fc"),
-    fcDiskGb: Number(process.env.SBX_FC_DISK_GB ?? 8),
-    fcWarmPool: Number(process.env.SBX_FC_WARM_POOL ?? 0),
-    fcImageCacheDir: process.env.SBX_FC_IMAGE_CACHE ?? join(homedir(), ".sbx", "fc", "images"),
-    logLevel: parseLogLevel(process.env.SBX_LOG_LEVEL),
-    logFormat: process.env.SBX_LOG_FORMAT === "json" ? "json" : "pretty",
-    apiKey: process.env.SBX_API_KEY ?? "",
-    otlpEndpoint: (process.env.SBX_OTLP_ENDPOINT ?? "").replace(/\/$/, ""),
-    metricsHistory: Number(process.env.SBX_METRICS_HISTORY ?? 60),
-    traceRing: Number(process.env.SBX_TRACE_RING ?? 200),
-    maxBodyBytes: Number(process.env.SBX_MAX_BODY_BYTES ?? 32 * 1024 * 1024),
-    allowedHosts: (process.env.SBX_ALLOWED_HOSTS ?? "")
+    backupDir: env("BACKUP_DIR") ?? join(stateRoot(), "backups"),
+    dbPath: env("DB") ?? join(stateRoot(), "state.db"),
+    defaultSleepAfterMs: Number(env("SLEEP_AFTER_MS") ?? 0),
+    reapIntervalMs: Number(env("REAP_INTERVAL_MS") ?? 15000),
+    metricsIntervalMs: Number(env("METRICS_INTERVAL_MS") ?? 10000),
+    costCpuPerHour: Number(env("COST_CPU_PER_HOUR") ?? 0.05),
+    costMemGbPerHour: Number(env("COST_MEM_GB_PER_HOUR") ?? 0.005),
+    costEgressPerGb: Number(env("COST_EGRESS_PER_GB") ?? 0.01),
+    modelPricesPath: env("MODEL_PRICES") ?? "",
+    vzHelperPath: env("VZ_HELPER_PATH") ?? "helpers/sbx-vz/dist/sbx-vz",
+    vzKernel: env("VZ_KERNEL") ?? "helpers/sbx-vz/guest/vmlinux-vz",
+    vzRootfs: env("VZ_ROOTFS") ?? "helpers/sbx-vz/guest/rootfs.img",
+    vzStateDir: env("VZ_STATE_DIR") ?? join(stateRoot(), "vz"),
+    vzDiskGb: Number(env("VZ_DISK_GB") ?? 4),
+    vzImageCacheDir: env("VZ_IMAGE_CACHE") ?? join(stateRoot(), "vz", "images"),
+    vzWarmPool: Number(env("VZ_WARM_POOL") ?? 0),
+    fcBin: env("FC_BIN") ?? "firecracker",
+    fcKernel: env("FC_KERNEL") ?? "helpers/sbx-vz/guest/vmlinux-fc",
+    fcRootfs: env("FC_ROOTFS") ?? "helpers/sbx-vz/guest/rootfs.img",
+    fcStateDir: env("FC_STATE_DIR") ?? join(stateRoot(), "fc"),
+    fcDiskGb: Number(env("FC_DISK_GB") ?? 8),
+    fcWarmPool: Number(env("FC_WARM_POOL") ?? 0),
+    fcImageCacheDir: env("FC_IMAGE_CACHE") ?? join(stateRoot(), "fc", "images"),
+    logLevel: parseLogLevel(env("LOG_LEVEL")),
+    logFormat: env("LOG_FORMAT") === "json" ? "json" : "pretty",
+    apiKey: env("API_KEY") ?? "",
+    otlpEndpoint: (env("OTLP_ENDPOINT") ?? "").replace(/\/$/, ""),
+    metricsHistory: Number(env("METRICS_HISTORY") ?? 60),
+    traceRing: Number(env("TRACE_RING") ?? 200),
+    maxBodyBytes: Number(env("MAX_BODY_BYTES") ?? 32 * 1024 * 1024),
+    allowedHosts: (env("ALLOWED_HOSTS") ?? "")
       .split(",")
       .map((h) => h.trim())
       .filter(Boolean),

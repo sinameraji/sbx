@@ -1,0 +1,20 @@
+evidence/opencode-benchmark/harness/bench-egress-token.sh: line 24: 36164 Killed                  sudo pkill -9 -f "daemon/dist" 2> /dev/null
+evidence/opencode-benchmark/harness/bench-egress-token.sh: line 24: 36166 Killed                  sudo pkill -9 -f firecracker 2> /dev/null
+sandbox=877725918fa6
+mint response: {"token":"hc-7dc54d0cdbf904b2ee4365aa623540622836e91fe3bc2bbf","policy":{"expiresAt":"2026-07-17T18:57:47.311Z","spendCapUsd":0.5},"providers":[]}
+=== STATE BEFORE (right after mint) ===
+[{"token":"hc-7dc54d0cdbf904b2ee4365aa623540622836e91fe3bc2bbf","sandboxId":"877725918fa6","spendUsd":0,"policy":"{\"expiresAt\":\"2026-07-17T18:57:47.311Z\",\"spendCapUsd\":0.5}"}]
+
+pausing; token TTL=20s, we wait 25s PAUSED so it lapses while suspended...
+resuming after 25s (a reset TTL would make it valid again; an absolute TTL stays expired)...
+=== STATE AFTER (post-resume) ===
+[{"token":"hc-7dc54d0cdbf904b2ee4365aa623540622836e91fe3bc2bbf","sandboxId":"877725918fa6","spendUsd":0,"policy":"{\"expiresAt\":\"2026-07-17T18:57:47.311Z\",\"spendCapUsd\":0.5}"}]
+
+token count before/after : 1 / 1
+token string identical   : true
+spendUsd before/after    : 0 / 0 (reset? false)
+expiresAt before/after   : 2026-07-17T18:57:47.311Z / 2026-07-17T18:57:47.311Z (extended? false)
+spendCapUsd before/after : 0.5 / 0.5
+token EXPIRED after resume (now > expiresAt): true
+RESULT egress-token: PASS — pause/resume did NOT re-mint, reset spend, or extend TTL; a 20s-TTL token is EXPIRED after a 25s pause+resume. No TTL/spend-cap bypass.
+EGRESSTOKENDONE

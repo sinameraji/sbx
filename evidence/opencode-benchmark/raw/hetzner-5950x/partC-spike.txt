@@ -1,0 +1,14 @@
+Part C — spike / thundering-herd (Hetzner 5950X bare metal)
+
+[C 16:48:39]   ...10 paused (MemAvailable=126840MB)
+[C 16:49:28]   ...20 paused (MemAvailable=126783MB)
+[C 16:50:16]   ...30 paused (MemAvailable=126744MB)
+[C 16:51:05]   ...40 paused (MemAvailable=126649MB)
+[C 16:51:54]   ...50 paused (MemAvailable=126614MB)
+[C 16:52:43]   ...60 paused (MemAvailable=126578MB)
+[C 16:53:32]   ...70 paused (MemAvailable=126571MB)
+[C 16:54:21]   ...80 paused (MemAvailable=126583MB)
+RESULT C at-rest: 80 paused 2048MB sandboxes -> MemAvailable=126583MB, snapshot disk=177617MB
+RESULT C failure codes: 
+RESULT C resume_ms under herd: n=80 min=137 p50=265 p95=350 p99=357 max=357
+RESULT C spike: woke 80 at once -> 80 resumed / 0 failed; wall=381ms; MemAvailable_after=124819MB; oom_kills=0

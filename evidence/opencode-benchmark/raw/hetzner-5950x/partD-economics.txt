@@ -1,0 +1,24 @@
+Part D — economics. Hetzner 5950X Server Auction, €0.36/hr, 3.4 TB NVMe root (2nd NVMe unused).
+All figures MEASURED from Parts B/C; the one derivation is labeled.
+
+AT REST (paused sandbox):
+- Host RAM ≈ 0. MEASURED: 80 paused 2GiB sandboxes dropped host MemAvailable by ~500MB
+  total (127100 -> 126583) = ~6MB each. Pause kills the VMM; state lives on disk.
+- Disk ≈ guest RAM + workspace. MEASURED: 80 × 2GiB = 177617MB total => 2.22 GB/sandbox
+  (2GiB guest). A 24GiB guest = 24.6 GB snapshot (Part B).
+- Density (disk-bound, on the 3.4TB root NVMe): ~1500 paused 2GiB sandboxes, or ~140
+  paused 24GiB. The 2nd unused NVMe doubles it.
+- $/paused-sandbox/hr: €0.36 / 1500 = €0.00024/hr (2GiB); €0.36 / 140 = €0.0026/hr (24GiB).
+
+CONCURRENT WAKE (thundering herd, MEASURED):
+- 80 paused sandboxes woken AT ONCE: 80/80 resumed, 0 failed, 0 OOM, whole herd 381ms.
+- Per-resume under herd: p50 265ms / p95 350 / p99 357.
+- No breaking point at 80. Resume is lazy-paged (file-backed mmap) so idle resumed guests
+  cost their WORKING SET, not their allocation — host MemAvailable barely moved.
+
+NOT MEASURED (honest):
+- The actual breaking point (did not push N past 80).
+- Active-concurrent ceiling. DERIVED (not measured): bounded by the ~12–16 GiB memory
+  floor => ~7–8 concurrent HEAVY typechecks on a 125 GiB host. Flagged as a derivation.
+
+Workload footprint (from the benchmark BENCH_DISK): after_install ≈ 3.2 GB node_modules.

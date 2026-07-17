@@ -3,7 +3,7 @@ import { formatError } from "./util.js";
 import type { GlobalArgs } from "./cli.js";
 import { parseEnvPairs } from "./env.js";
 
-/** sb exec <id> "<command>" [--session <sid>] [--cwd <dir>] [--env KEY=VAL,...] */
+/** hotcell exec <id> "<command>" [--session <sid>] [--cwd <dir>] [--env KEY=VAL,...] */
 export async function execCommand(
   positional: string[],
   globals: GlobalArgs,
@@ -12,7 +12,7 @@ export async function execCommand(
   const [id, command] = positional;
   if (!id || !command) {
     console.error(
-      'Usage: sb exec <id> "<command>" [--session <sid>] [--cwd <dir>] [--env KEY=VAL,...]',
+      'Usage: hotcell exec <id> "<command>" [--session <sid>] [--cwd <dir>] [--env KEY=VAL,...]',
     );
     return 1;
   }

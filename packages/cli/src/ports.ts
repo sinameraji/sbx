@@ -2,7 +2,7 @@ import { HotcellClient } from "@hotcell/sdk";
 import { formatError } from "./util.js";
 import type { GlobalArgs } from "./cli.js";
 
-/** sb wait-port <id> <port> [--timeout <ms>] */
+/** hotcell wait-port <id> <port> [--timeout <ms>] */
 export async function waitPortCommand(
   positional: string[],
   globals: GlobalArgs,
@@ -11,7 +11,7 @@ export async function waitPortCommand(
   const [id, portArg] = positional;
   const port = Number(portArg);
   if (!id || !Number.isInteger(port) || port <= 0) {
-    console.error("Usage: sb wait-port <id> <port> [--timeout <ms>]");
+    console.error("Usage: hotcell wait-port <id> <port> [--timeout <ms>]");
     return 1;
   }
   const client = new HotcellClient({ endpoint: globals.endpoint, apiKey: globals.apiKey });
@@ -32,7 +32,7 @@ export async function waitPortCommand(
   }
 }
 
-/** sb expose <id> <port> [--token <token>] */
+/** hotcell expose <id> <port> [--token <token>] */
 export async function exposeCommand(
   positional: string[],
   globals: GlobalArgs,
@@ -41,7 +41,7 @@ export async function exposeCommand(
   const [id, portArg] = positional;
   const port = Number(portArg);
   if (!id || !Number.isInteger(port) || port <= 0) {
-    console.error("Usage: sb expose <id> <port> [--token <token>]");
+    console.error("Usage: hotcell expose <id> <port> [--token <token>]");
     return 1;
   }
   const client = new HotcellClient({ endpoint: globals.endpoint, apiKey: globals.apiKey });

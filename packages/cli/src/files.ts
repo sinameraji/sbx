@@ -21,7 +21,7 @@ export async function filesCommand(
     switch (subcommand) {
       case "write": {
         if (!path) {
-          console.error("Usage: sb files write <id> <path> --content <string> [--mode <mode>]");
+          console.error("Usage: hotcell files write <id> <path> --content <string> [--mode <mode>]");
           return 1;
         }
         const content = typeof flags.content === "string" ? flags.content : "";
@@ -33,7 +33,7 @@ export async function filesCommand(
       }
       case "read": {
         if (!path) {
-          console.error("Usage: sb files read <id> <path>");
+          console.error("Usage: hotcell files read <id> <path>");
           return 1;
         }
         const content = await sandbox.readFile(path);
@@ -42,7 +42,7 @@ export async function filesCommand(
       }
       case "mkdir": {
         if (!path) {
-          console.error("Usage: sb files mkdir <id> <path> [--parents]");
+          console.error("Usage: hotcell files mkdir <id> <path> [--parents]");
           return 1;
         }
         await sandbox.mkdir(path, { parents: flags.parents === true });
@@ -77,18 +77,18 @@ export async function filesCommand(
 function printHelp(): void {
   console.log(`sb files — manage files inside a sandbox
 
-Usage: sb files <subcommand> [args]
+Usage: hotcell files <subcommand> [args]
 
 Subcommands:
-  sb files write <id> <path> --content <string> [--mode <mode>]
+  hotcell files write <id> <path> --content <string> [--mode <mode>]
     Write a file inside the sandbox.
 
-  sb files read <id> <path>
+  hotcell files read <id> <path>
     Read a file from the sandbox.
 
-  sb files mkdir <id> <path> [--parents]
+  hotcell files mkdir <id> <path> [--parents]
     Create a directory inside the sandbox.
 
-  sb files ls <id> [path]
+  hotcell files ls <id> [path]
     List files and directories (defaults to /workspace).`);
 }

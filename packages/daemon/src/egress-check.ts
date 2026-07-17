@@ -90,7 +90,7 @@ async function main(): Promise<void> {
   ): Promise<{ status: number; json: any }> => {
     const res = await fetch(`${base}/mock/v1/chat/completions`, {
       method: "POST",
-      headers: { "content-type": "application/json", "x-sbx-egress": token, ...headers },
+      headers: { "content-type": "application/json", "x-hotcell-egress": token, ...headers },
       body: JSON.stringify(body),
     });
     const text = await res.text();
@@ -280,13 +280,13 @@ async function main(): Promise<void> {
     store.addEgressToken(token, sb2.id); // no per-token policy
     const first = await fetch(`${base}/mock/v1/chat`, {
       method: "POST",
-      headers: { "content-type": "application/json", "x-sbx-egress": token, "x-mock-cost": "1" },
+      headers: { "content-type": "application/json", "x-hotcell-egress": token, "x-mock-cost": "1" },
       body: JSON.stringify({ model: "gpt-4o" }),
     });
     assert.equal(first.status, 200, "first call under sandbox cap should 200");
     const second = await fetch(`${base}/mock/v1/chat`, {
       method: "POST",
-      headers: { "content-type": "application/json", "x-sbx-egress": token, "x-mock-cost": "1" },
+      headers: { "content-type": "application/json", "x-hotcell-egress": token, "x-mock-cost": "1" },
       body: JSON.stringify({ model: "gpt-4o" }),
     });
     assert.equal(second.status, 402, "second call over sandbox cap should 402");

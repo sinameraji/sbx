@@ -1,12 +1,12 @@
-"""sbx — Python client for the sbx self-hostable agent sandbox daemon.
+"""hotcell — Python client for the hotcell self-hostable agent sandbox daemon.
 
 Mirrors the TypeScript SDK (and, by extension, the Cloudflare Sandbox surface)
 so existing harnesses port with minimal changes, but points at *your* self-hosted
 daemon instead of the edge. Dependency-free: standard library only.
 
-    from sbx import SbxClient
+    from hotcell import HotcellClient
 
-    client = SbxClient(endpoint="http://127.0.0.1:4750")
+    client = HotcellClient(endpoint="http://127.0.0.1:4750")
     sandbox = client.get_sandbox()
     result = sandbox.exec("python3 -c 'print(2+2)'")
     print(result.stdout)            # "4\n"
@@ -24,11 +24,11 @@ from dataclasses import dataclass
 from typing import Any, Dict, Iterator, List, Optional
 
 __all__ = [
-    "SbxClient",
+    "HotcellClient",
     "Sandbox",
     "Session",
     "CodeContext",
-    "SbxError",
+    "HotcellError",
     "ExecResult",
     "ExecEvent",
     "SandboxInfo",
@@ -50,11 +50,11 @@ __all__ = [
 DEFAULT_ENDPOINT = "http://127.0.0.1:4750"
 
 
-class SbxError(RuntimeError):
+class HotcellError(RuntimeError):
     """Raised when the daemon returns a non-2xx response."""
 
     def __init__(self, method: str, path: str, status: int, body: str):
-        super().__init__(f"sbx {method} {path} -> {status}: {body}")
+        super().__init__(f"hotcell {method} {path} -> {status}: {body}")
         self.status = status
         self.body = body
 
@@ -321,16 +321,16 @@ class FileChangeEvent:
 # --- client ----------------------------------------------------------------
 
 
-class SbxClient:
-    """Entry point. Talks to one sbx daemon over its REST API."""
+class HotcellClient:
+    """Entry point. Talks to one hotcell daemon over its REST API."""
 
     def __init__(self, endpoint: Optional[str] = None,
                  api_key: Optional[str] = None):
-        self.endpoint = (endpoint or os.environ.get("SBX_ENDPOINT")
+        self.endpoint = (endpoint or os.environ.get("HOTCELL_ENDPOINT")
                          or DEFAULT_ENDPOINT).rstrip("/")
         # API key sent as `Authorization: Bearer <key>`; required when the daemon
-        # runs with SBX_API_KEY. Falls back to the SBX_API_KEY env var.
-        self.api_key = api_key if api_key is not None else os.environ.get("SBX_API_KEY", "")
+        # runs with HOTCELL_API_KEY. Falls back to the HOTCELL_API_KEY env var.
+        self.api_key = api_key if api_key is not None else os.environ.get("HOTCELL_API_KEY", "")
 
     def get_sandbox(
         self,
@@ -450,13 +450,13 @@ class SbxClient:
             return urllib.request.urlopen(req)
         except urllib.error.HTTPError as e:
             detail = e.read().decode("utf-8", "replace")
-            raise SbxError(method, path, e.code, detail) from None
+            raise HotcellError(method, path, e.code, detail) from None
 
 
 class Sandbox:
     """A single sandbox. Mirrors the TS `Sandbox` class, snake_cased."""
 
-    def __init__(self, client: SbxClient, info: SandboxInfo):
+    def __init__(self, client: HotcellClient, info: SandboxInfo):
         self._client = client
         self._info = info
 
@@ -790,7 +790,7 @@ class CodeContext:
 
 
 def get_sandbox(
-    client: SbxClient, id: Optional[str] = None, **options: Any
+    client: HotcellClient, id: Optional[str] = None, **options: Any
 ) -> Sandbox:
     """Convenience matching the Cloudflare `getSandbox(binding, id)` shape."""
     return client.get_sandbox(id, **options)

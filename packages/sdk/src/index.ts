@@ -1,5 +1,5 @@
 /**
- * @sbx/sdk — TypeScript client for the sbx daemon.
+ * @hotcell/sdk — TypeScript client for the hotcell daemon.
  *
  * Mirrors the Cloudflare Sandbox SDK surface so existing harnesses port with
  * minimal changes, but points at *your* self-hosted daemon instead of the edge.
@@ -437,7 +437,7 @@ export class HotcellClient {
     });
     if (!res.ok) {
       const text = await res.text();
-      throw new Error(`sbx ${method} ${path} -> ${res.status}: ${text}`);
+      throw new Error(`hotcell ${method} ${path} -> ${res.status}: ${text}`);
     }
     return (await res.json()) as T;
   }
@@ -496,7 +496,7 @@ export class Sandbox {
     );
     if (!res.ok || !res.body) {
       const text = await res.text().catch(() => "");
-      throw new Error(`sbx exec -> ${res.status}: ${text}`);
+      throw new Error(`hotcell exec -> ${res.status}: ${text}`);
     }
     for await (const event of parseSSE<ExecEvent>(res.body)) {
       if (

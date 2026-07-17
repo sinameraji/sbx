@@ -2,9 +2,9 @@ import { HotcellClient, type EgressPolicy } from "@hotcell/sdk";
 import type { GlobalArgs } from "./cli.js";
 
 /**
- * sb egress <id>                 — mint an egress token, print provider env exports
- * sb egress <id> --list          — list this sandbox's egress tokens + policies
- * sb egress <id> --revoke <tok>  — revoke a token
+ * hotcell egress <id>                 — mint an egress token, print provider env exports
+ * hotcell egress <id> --list          — list this sandbox's egress tokens + policies
+ * hotcell egress <id> --revoke <tok>  — revoke a token
  *
  * Policy flags on mint (omit for an unlimited token):
  *   --ttl <dur>        token expiry (e.g. 30m, 24h, 7d)
@@ -26,7 +26,7 @@ export async function egressCommand(
 ): Promise<number> {
   const id = positional[0];
   if (!id) {
-    console.error("Usage: sb egress <id> [--list] [--revoke <token>] [policy flags]");
+    console.error("Usage: hotcell egress <id> [--list] [--revoke <token>] [policy flags]");
     return 1;
   }
   const client = new HotcellClient({ endpoint: globals.endpoint, apiKey: globals.apiKey });

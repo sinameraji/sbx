@@ -1,7 +1,7 @@
 import { HotcellClient } from "@hotcell/sdk";
 import type { GlobalArgs } from "./cli.js";
 
-/** sb info — print daemon driver/providers/auth/cost configuration. */
+/** hotcell info — print daemon driver/providers/auth/cost configuration. */
 export async function infoCommand(
   _positional: string[],
   globals: GlobalArgs,

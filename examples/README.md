@@ -1,20 +1,20 @@
-# Running AI agents on sbx
+# Running AI agents on hotcell
 
-sbx is built to *run agents*, not just containers: each sandbox can come up with a **repo cloned in** (`--repo`), **LLM access wired without keys inside** (`--egress`), **hard resource caps**, and **per-agent cost/observability**. Two ways to use it:
+hotcell is built to *run agents*, not just containers: each sandbox can come up with a **repo cloned in** (`--repo`), **LLM access wired without keys inside** (`--egress`), **hard resource caps**, and **per-agent cost/observability**. Two ways to use it:
 
-## 1. Mastra (first-class) — [`@sbx/mastra`](../packages/mastra)
+## 1. Mastra (first-class) — [`@hotcell/mastra`](../packages/mastra)
 
-A Mastra `Workspace` sandbox provider backed by sbx. Drop `SbxSandbox` in where you'd use Mastra's `E2BSandbox`/`ModalSandbox`, and your agent runs on your own hardware:
+A Mastra `Workspace` sandbox provider backed by hotcell. Drop `HotcellSandbox` in where you'd use Mastra's `E2BSandbox`/`ModalSandbox`, and your agent runs on your own hardware:
 
 ```ts
 import { Agent, Workspace } from "@mastra/core";
-import { SbxSandbox } from "@sbx/mastra";
+import { HotcellSandbox } from "@hotcell/mastra";
 
 const agent = new Agent({
   name: "coder",
   model: "openai/gpt-5",
   workspace: new Workspace({
-    sandbox: new SbxSandbox({ repo: "https://github.com/me/app", memoryMb: 2048 }),
+    sandbox: new HotcellSandbox({ repo: "https://github.com/me/app", memoryMb: 2048 }),
   }),
 });
 await agent.generate("Add a /health route and run the tests.");
@@ -28,9 +28,9 @@ Launch a sandbox, clone a repo, run a headless [OpenCode](https://opencode.ai) t
 
 ```bash
 # 1. start the daemon with your OpenRouter key (the key lives only here):
-SBX_PROVIDER_KEY_OPENROUTER=sk-or-... node packages/daemon/dist/index.js
+HOTCELL_PROVIDER_KEY_OPENROUTER=sk-or-... node packages/daemon/dist/index.js
 # 2. build the base image once (gives the sandbox node + git):
-docker build -t sbx/base:latest images/base
+docker build -t hotcell/base:latest images/base
 # 3. one command — create → clone → run OpenCode → destroy:
 examples/opencode.sh https://github.com/you/app "add a /health route and run the tests"
 ```
@@ -44,11 +44,11 @@ Added a /health route in src/server.js and a test in test/health.test.js. Tests 
 ✓ app · done in 41s · 18.2k tokens · $0.02 · 2 files changed, 23 insertions(+)
 ```
 
-Flags: `[model]` (3rd arg, default `openrouter/moonshotai/kimi-k2.7-code`), `--keep` (don't destroy; print `sb terminal`/`sb rm` hints), `--verbose` (show the raw OpenCode stream). The answer goes to **stdout** and all chrome to **stderr**, so `examples/opencode.sh … > out.md` captures just the answer.
+Flags: `[model]` (3rd arg, default `openrouter/moonshotai/kimi-k2.7-code`), `--keep` (don't destroy; print `hotcell terminal`/`hotcell rm` hints), `--verbose` (show the raw OpenCode stream). The answer goes to **stdout** and all chrome to **stderr**, so `examples/opencode.sh … > out.md` captures just the answer.
 
-The launcher is a thin shim over [`examples/agent.mjs`](./agent.mjs), which drives the sandbox via `@sbx/sdk`. Under the hood: `--egress` injects `OPENROUTER_BASE_URL` (→ the gateway) + a per-sandbox `OPENROUTER_API_KEY` **token**; the OpenCode config points OpenRouter at that base URL; the daemon swaps the token for your real key, forwards, and meters tokens + $ (which the runner reads live from the egress meter).
+The launcher is a thin shim over [`examples/agent.mjs`](./agent.mjs), which drives the sandbox via `@hotcell/sdk`. Under the hood: `--egress` injects `OPENROUTER_BASE_URL` (→ the gateway) + a per-sandbox `OPENROUTER_API_KEY` **token**; the OpenCode config points OpenRouter at that base URL; the daemon swaps the token for your real key, forwards, and meters tokens + $ (which the runner reads live from the egress meter).
 
-> Verified: `opencode-ai` installs + runs headless in the sandbox and the egress key-injection/forwarding is covered by `npm run smoke`; the runner's output filter + chrome are tested offline. The model call needs *your* OpenRouter key — run it with step 1 above. (`SBX_AGENT_CMD="<cmd>"` runs any other harness instead of OpenCode.)
+> Verified: `opencode-ai` installs + runs headless in the sandbox and the egress key-injection/forwarding is covered by `npm run smoke`; the runner's output filter + chrome are tested offline. The model call needs *your* OpenRouter key — run it with step 1 above. (`HOTCELL_AGENT_CMD="<cmd>"` runs any other harness instead of OpenCode.)
 
 ### Other harnesses (same shape)
 

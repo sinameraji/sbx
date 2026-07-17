@@ -2,14 +2,14 @@ import { HotcellClient } from "@hotcell/sdk";
 import { formatError } from "./util.js";
 import type { GlobalArgs } from "./cli.js";
 
-/** sb env <id> [KEY=VALUE ...] — set sandbox env vars, or print them if none given. */
+/** hotcell env <id> [KEY=VALUE ...] — set sandbox env vars, or print them if none given. */
 export async function envCommand(
   positional: string[],
   globals: GlobalArgs,
 ): Promise<number> {
   const [id, ...pairs] = positional;
   if (!id) {
-    console.error("Usage: sb env <id> [KEY=VALUE ...]");
+    console.error("Usage: hotcell env <id> [KEY=VALUE ...]");
     return 1;
   }
   const client = new HotcellClient({ endpoint: globals.endpoint, apiKey: globals.apiKey });

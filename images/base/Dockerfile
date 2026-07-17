@@ -1,4 +1,4 @@
-# Base sandbox image for sbx — a general-purpose agent workspace.
+# Base sandbox image for hotcell — a general-purpose agent workspace.
 # Python 3.11 + Node 20 + git/bash and common build tools.
 FROM python:3.11-slim-bookworm
 

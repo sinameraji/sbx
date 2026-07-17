@@ -8,7 +8,7 @@ export async function stopCommand(
 ): Promise<number> {
   const id = positional[0];
   if (!id) {
-    console.error("Usage: sb stop <id>");
+    console.error("Usage: hotcell stop <id>");
     return 1;
   }
 
@@ -30,7 +30,7 @@ export async function pauseCommand(
 ): Promise<number> {
   const id = positional[0];
   if (!id) {
-    console.error("Usage: sb pause <id>");
+    console.error("Usage: hotcell pause <id>");
     return 1;
   }
 
@@ -52,7 +52,7 @@ export async function startSandboxCommand(
 ): Promise<number> {
   const id = positional[0];
   if (!id) {
-    console.error("Usage: sb start <id>");
+    console.error("Usage: hotcell start <id>");
     return 1;
   }
 

@@ -23,7 +23,7 @@ interface Deps {
  *
  * Routing (resolved once per connection from the first request):
  *   - subdomain:   Host: <id>-<port>.localhost[:proxyPort]
- *   - path (curl): GET /_sbx/<id>/<port>/...  (prefix rewritten on the first
+ *   - path (curl): GET /_hotcell/<id>/<port>/...  (prefix rewritten on the first
  *     request line; absolute-path assets won't resolve, so subdomain is primary)
  */
 export function createProxyServer({ config, driver, store }: Deps): Server {
@@ -54,7 +54,7 @@ async function handleConnection(socket: Socket, deps: Deps): Promise<void> {
     const headerText = buffer.subarray(0, headerEnd).toString("utf8");
     const resolved = resolveRoute(headerText, deps.store);
     if (!resolved) {
-      return respond(socket, 404, "No sbx preview route for this host");
+      return respond(socket, 404, "No hotcell preview route for this host");
     }
     if (resolved.target.token && !hasToken(headerText, resolved.target.token)) {
       return respond(socket, 403, "Missing or invalid preview token");
@@ -155,13 +155,13 @@ function resolveRoute(
     if (route) return { target: route };
   }
 
-  // 2) Path-based fallback: /_sbx/<id>/<port>/...
-  const pathMatch = target.match(/^\/_sbx\/([^/]+)\/(\d+)(\/.*)?$/);
+  // 2) Path-based fallback: /_hotcell/<id>/<port>/... (legacy /_sbx/ accepted).
+  const pathMatch = target.match(/^\/(_hotcell|_sbx)\/([^/]+)\/(\d+)(\/.*)?$/);
   if (pathMatch) {
-    const exposeId = `${pathMatch[1]}-${pathMatch[2]}`;
+    const exposeId = `${pathMatch[2]}-${pathMatch[3]}`;
     const route = store.resolveRoute(exposeId);
     if (route) {
-      const prefix = `/_sbx/${pathMatch[1]}/${pathMatch[2]}`;
+      const prefix = `/${pathMatch[1]}/${pathMatch[2]}/${pathMatch[3]}`;
       return { target: route, rewrite: { from: prefix, to: "" } };
     }
   }
@@ -169,7 +169,7 @@ function resolveRoute(
   return undefined;
 }
 
-/** Strip the `/_sbx/<id>/<port>` prefix from the first request line's target. */
+/** Strip the `/_hotcell/<id>/<port>` prefix from the first request line's target. */
 function rewriteFirstLine(buffer: Buffer, from: string, _to: string): Buffer {
   const lineEnd = buffer.indexOf("\r\n");
   if (lineEnd === -1) return buffer;

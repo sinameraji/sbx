@@ -16,7 +16,7 @@ import { AgentConn } from "./driver/agent.js";
 
 async function main(): Promise<void> {
   const bin = process.env.HOTCELL_AGENT_BIN ?? "/tmp/hotcell-agent-check";
-  const dir = mkdtempSync(join(tmpdir(), "sbx-agent-"));
+  const dir = mkdtempSync(join(tmpdir(), "hotcell-agent-"));
   const sock = join(dir, "agent.sock");
 
   const egressTargetSock = join(dir, "egress-target.sock");

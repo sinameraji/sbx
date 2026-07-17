@@ -2,7 +2,7 @@
 """End-to-end smoke test for the Python SDK.
 
 Spins up the compiled daemon on isolated ports + throwaway state, drives it
-entirely through the `sbx` Python client, then tears everything down. Mirrors
+entirely through the `hotcell` Python client, then tears everything down. Mirrors
 the Node smoke's coverage for the surface the Python SDK exposes.
 
 Run:  npm run smoke:py   (builds the daemon first)
@@ -23,7 +23,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(HERE, "..", ".."))
 sys.path.insert(0, HERE)
 
-from sbx import SbxClient, SbxError  # noqa: E402
+from hotcell import HotcellClient, HotcellError  # noqa: E402
 
 PORT = 4760
 PROXY_PORT = 4761
@@ -53,22 +53,22 @@ def main() -> int:
         log("daemon not built — run `npm run build` first")
         return 1
 
-    db_dir = tempfile.mkdtemp(prefix="sbx-pysmoke-db-")
-    backup_dir = tempfile.mkdtemp(prefix="sbx-pysmoke-backups-")
+    db_dir = tempfile.mkdtemp(prefix="hotcell-pysmoke-db-")
+    backup_dir = tempfile.mkdtemp(prefix="hotcell-pysmoke-backups-")
     env = {
         **os.environ,
-        "SBX_PORT": str(PORT),
-        "SBX_PROXY_PORT": str(PROXY_PORT),
-        "SBX_DB": os.path.join(db_dir, "state.db"),
-        "SBX_BACKUP_DIR": backup_dir,
-        "SBX_REAP_INTERVAL_MS": "0",  # no idle reaper during the test
+        "HOTCELL_PORT": str(PORT),
+        "HOTCELL_PROXY_PORT": str(PROXY_PORT),
+        "HOTCELL_DB": os.path.join(db_dir, "state.db"),
+        "HOTCELL_BACKUP_DIR": backup_dir,
+        "HOTCELL_REAP_INTERVAL_MS": "0",  # no idle reaper during the test
     }
     daemon = subprocess.Popen(["node", daemon_path], env=env)
 
     try:
         wait_healthy()
         log(f"daemon up at {ENDPOINT}")
-        client = SbxClient(endpoint=ENDPOINT)
+        client = HotcellClient(endpoint=ENDPOINT)
 
         # create-time `setup` provisioning (parity with the TS smoke)
         provisioned = client.get_sandbox(
@@ -153,7 +153,7 @@ def main() -> int:
         try:
             client.get_sandbox(sb.id)
             raise AssertionError("sandbox still exists after destroy")
-        except SbxError as e:
+        except HotcellError as e:
             assert e.status == 404
         log("destroy works")
 

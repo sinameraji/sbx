@@ -165,7 +165,7 @@ function toOtlp(spans: SpanData[], serviceName: string) {
         },
         scopeSpans: [
           {
-            scope: { name: "sbx", version: "0.0.1" },
+            scope: { name: "hotcell", version: "0.1.0" },
             spans: spans.map((s) => ({
               traceId: s.traceId,
               spanId: s.spanId,

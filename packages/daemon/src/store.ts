@@ -222,7 +222,7 @@ export class SandboxStore {
 
   /** Mint an opaque per-sandbox egress token (used as the gateway's API key). */
   static newEgressToken(): string {
-    return "sbx-" + randomBytes(24).toString("hex");
+    return "hc-" + randomBytes(24).toString("hex");
   }
 
   // --- sandboxes -----------------------------------------------------------

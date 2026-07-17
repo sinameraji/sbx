@@ -38,10 +38,10 @@ async function main(): Promise<number> {
   config.driver = driverName;
   config.port = 4790;
   config.proxyPort = 4791;
-  config.backupDir = await mkdtemp(join(tmpdir(), "sbx-mvm-backups-"));
-  const dbDir = await mkdtemp(join(tmpdir(), "sbx-mvm-db-"));
+  config.backupDir = await mkdtemp(join(tmpdir(), "hotcell-mvm-backups-"));
+  const dbDir = await mkdtemp(join(tmpdir(), "hotcell-mvm-db-"));
   config.dbPath = join(dbDir, "state.db");
-  const stateDir = await mkdtemp(join(tmpdir(), "sbx-mvm-state-"));
+  const stateDir = await mkdtemp(join(tmpdir(), "hotcell-mvm-state-"));
   if (driverName === "firecracker") {
     config.fcStateDir = stateDir; // image cache stays at the stable default
   } else {
@@ -123,7 +123,7 @@ async function main(): Promise<number> {
     const ready = await sandbox.waitForPort(9000, { timeoutMs: 8000 });
     assert(ready, "port 9000 never became ready");
     await sandbox.exposePort(9000);
-    const preview = await fetch(`${proxyEndpoint}/_sbx/${sandbox.id}/9000/`);
+    const preview = await fetch(`${proxyEndpoint}/_hotcell/${sandbox.id}/9000/`);
     const previewBody = await preview.text();
     assert(/mvm-preview-ok/.test(previewBody), `preview proxy did not serve: ${previewBody.slice(0, 60)}`);
     ok("background process → waitForPort → preview proxy round-trip");
@@ -177,7 +177,7 @@ async function main(): Promise<number> {
     assert(await sandbox.waitForPort(9100, { timeoutMs: 8000 }), "port 9100 never ready");
     await sandbox.exposePort(9100);
     await sandbox.pause();
-    const woke = await fetch(`${proxyEndpoint}/_sbx/${sandbox.id}/9100/`);
+    const woke = await fetch(`${proxyEndpoint}/_hotcell/${sandbox.id}/9100/`);
     assert(/wake-ok/.test(await woke.text()), "preview request did not wake the paused sandbox");
     const back = await sandbox.exec(`kill -0 ${survivor.pid} 2>/dev/null && echo SURVIVED`);
     assert(/SURVIVED/.test(back.stdout), "background process did not survive pause/resume");

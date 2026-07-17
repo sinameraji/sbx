@@ -8,7 +8,7 @@ export async function removeCommand(
 ): Promise<number> {
   const id = positional[0];
   if (!id) {
-    console.error("Usage: sb rm <id>");
+    console.error("Usage: hotcell rm <id>");
     return 1;
   }
 

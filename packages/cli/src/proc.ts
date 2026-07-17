@@ -3,7 +3,7 @@ import { formatError } from "./util.js";
 import type { GlobalArgs } from "./cli.js";
 import { parseEnvPairs } from "./env.js";
 
-/** sb start <id> "<command>" [--cwd <dir>] [--env KEY=VAL,...] */
+/** hotcell start <id> "<command>" [--cwd <dir>] [--env KEY=VAL,...] */
 export async function startCommand(
   positional: string[],
   globals: GlobalArgs,
@@ -11,7 +11,7 @@ export async function startCommand(
 ): Promise<number> {
   const [id, command] = positional;
   if (!id || !command) {
-    console.error('Usage: sb start <id> "<command>" [--cwd <dir>] [--env KEY=VAL,...]');
+    console.error('Usage: hotcell start <id> "<command>" [--cwd <dir>] [--env KEY=VAL,...]');
     return 1;
   }
   const client = new HotcellClient({ endpoint: globals.endpoint, apiKey: globals.apiKey });
@@ -31,14 +31,14 @@ export async function startCommand(
   }
 }
 
-/** sb ps <id> */
+/** hotcell ps <id> */
 export async function psCommand(
   positional: string[],
   globals: GlobalArgs,
 ): Promise<number> {
   const [id] = positional;
   if (!id) {
-    console.error("Usage: sb ps <id>");
+    console.error("Usage: hotcell ps <id>");
     return 1;
   }
   const client = new HotcellClient({ endpoint: globals.endpoint, apiKey: globals.apiKey });
@@ -64,7 +64,7 @@ export async function psCommand(
   }
 }
 
-/** sb kill <id> <procId> [--signal <SIG>] */
+/** hotcell kill <id> <procId> [--signal <SIG>] */
 export async function killCommand(
   positional: string[],
   globals: GlobalArgs,
@@ -72,7 +72,7 @@ export async function killCommand(
 ): Promise<number> {
   const [id, procId] = positional;
   if (!id || !procId) {
-    console.error("Usage: sb kill <id> <procId> [--signal <SIG>]");
+    console.error("Usage: hotcell kill <id> <procId> [--signal <SIG>]");
     return 1;
   }
   const client = new HotcellClient({ endpoint: globals.endpoint, apiKey: globals.apiKey });

@@ -25,7 +25,7 @@ function pct(sorted: number[], p: number): number {
 }
 
 async function main(): Promise<number> {
-  const stateDir = mkdtempSync(join(tmpdir(), "sbx-density-"));
+  const stateDir = mkdtempSync(join(tmpdir(), "hotcell-density-"));
   const image = process.env.SBX_FC_SMOKE_IMAGE ?? "alpine:3.20";
   const driver = new FirecrackerDriver({
     fcBin: process.env.SBX_FC_BIN ?? "firecracker",

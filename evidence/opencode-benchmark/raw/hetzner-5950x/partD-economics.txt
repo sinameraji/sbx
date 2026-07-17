@@ -1,24 +1,48 @@
-Part D — economics. Hetzner 5950X Server Auction, €0.36/hr, 3.4 TB NVMe root (2nd NVMe unused).
-All figures MEASURED from Parts B/C; the one derivation is labeled.
+Part D — economics (v2, measured-only). Hetzner 5950X Server Auction, €0.36/hr,
+125 GiB RAM, no swap, 3.4 TB NVMe root (2nd NVMe unused).
 
-AT REST (paused sandbox):
-- Host RAM ≈ 0. MEASURED: 80 paused 2GiB sandboxes dropped host MemAvailable by ~500MB
-  total (127100 -> 126583) = ~6MB each. Pause kills the VMM; state lives on disk.
-- Disk ≈ guest RAM + workspace. MEASURED: 80 × 2GiB = 177617MB total => 2.22 GB/sandbox
-  (2GiB guest). A 24GiB guest = 24.6 GB snapshot (Part B).
-- Density (disk-bound, on the 3.4TB root NVMe): ~1500 paused 2GiB sandboxes, or ~140
-  paused 24GiB. The 2nd unused NVMe doubles it.
-- $/paused-sandbox/hr: €0.36 / 1500 = €0.00024/hr (2GiB); €0.36 / 140 = €0.0026/hr (24GiB).
+Every number below is either (a) MEASURED — traceable to a raw file in this
+directory, or (b) ARITHMETIC — plain division over measured per-unit numbers,
+labeled as such. Nothing is modeled or extrapolated.
 
-CONCURRENT WAKE (thundering herd, MEASURED):
-- 80 paused sandboxes woken AT ONCE: 80/80 resumed, 0 failed, 0 OOM, whole herd 381ms.
-- Per-resume under herd: p50 265ms / p95 350 / p99 357.
-- No breaking point at 80. Resume is lazy-paged (file-backed mmap) so idle resumed guests
-  cost their WORKING SET, not their allocation — host MemAvailable barely moved.
+MEASURED — at rest (paused sandbox):
+- Host RAM per paused sandbox ≈ 6.6 MB. 90 paused 2 GiB sandboxes moved host
+  MemAvailable 127140 -> 126542 MB = 598 MB total (partC-work-spike.txt).
+  Pause kills the VMM; state lives on disk, not RAM.
+- Disk per paused 2 GiB sandbox = 2.22 GB. 80 paused = 177617 MB total
+  (partC-spike.txt).
+- Disk per paused 24 GiB sandbox = 27.8 GB: memory snapshot 24577 MB +
+  workspace image 3217 MB (partB-pauseresume.txt). Snapshots are Full, not
+  diff — ratio under zstd is a separate line item (B7).
 
-NOT MEASURED (honest):
-- The actual breaking point (did not push N past 80).
-- Active-concurrent ceiling. DERIVED (not measured): bounded by the ~12–16 GiB memory
-  floor => ~7–8 concurrent HEAVY typechecks on a 125 GiB host. Flagged as a derivation.
+MEASURED — waking them (thundering herd):
+- 80 paused woken AT ONCE: 80/80 resumed, 0 failed, 0 OOM; whole herd 381 ms;
+  per-resume p50 265 / p95 350 / p99 357 ms (partC-spike.txt).
+- Uncontended resume p50 65 ms over 50 cycles (partB-pauseresume.txt).
+- Resume is lazy-paged (file-backed mmap): a resumed-but-idle guest costs its
+  WORKING SET, not its allocation — host MemAvailable barely moved on wake.
 
-Workload footprint (from the benchmark BENCH_DISK): after_install ≈ 3.2 GB node_modules.
+MEASURED — active-concurrent (the number that was previously a guess):
+- 81 concurrently-WORKING 2 GiB guests, each actively touching 1.5 GiB of
+  tmpfs, ran on the 125 GiB host before MemAvailable bottomed at 1408 MB —
+  near exhaustion, 0 OOM kills, and NO admission refusal (partC-work-spike.txt).
+  That last part is the admission-gap finding (Part C): the host over-commits
+  on the resume path rather than refusing.
+
+ARITHMETIC (division over the measured per-unit numbers, nothing else):
+- Paused density if you fill the 3.4 TB root NVMe: ~1530 × 2 GiB sandboxes,
+  or ~122 × 24 GiB. The 2nd unused NVMe would double both.
+- €/paused-sandbox/hr at that fill: €0.36 / 1530 ≈ €0.00024 (2 GiB);
+  €0.36 / 122 ≈ €0.0030 (24 GiB).
+
+NOT MEASURED (honest gaps):
+- The paused-density limit itself (we never filled the disk).
+- The OOM breaking point past 81 workers (we reached near-exhaustion and
+  stopped; 0 kills at 81).
+- An active-concurrent ceiling for HEAVY workloads. The OpenCode typecheck
+  needs the ~14 GiB floor (demand-curve-ladder.tsv), so a 125 GiB host bounds
+  it at ≤8 concurrent — but that is a bound from the floor, not a measured
+  wall, and is flagged as such.
+
+Workload footprint (from the benchmark's own BENCH_DISK): after_install
+≈ 3.2 GB node_modules.

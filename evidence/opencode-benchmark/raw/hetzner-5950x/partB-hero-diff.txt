@@ -1,0 +1,40 @@
+Part B §hero-diff v2 (Hetzner 5950X bare metal, 2026-07-18). Does a typecheck
+paused MID-RUN and resumed produce the same RESULT as one never interrupted?
+Both runs from a COLD Turborepo cache (all .turbo dirs + node_modules/.cache/turbo
+removed before each; telemetry disabled). Harness: harness/bench-hero-diff.sh.
+
+DISCLOSURE — v1 of this test was flawed and its "output DIFFERS" verdict was
+ours, not the product's: the baseline ran first and warmed the turbo cache, so
+every differing line was cache state ("cache miss, executing" vs "cache hit,
+replaying") plus a one-time telemetry banner. v2 controls both. Kept here so the
+correction is on the record.
+
+--- raw run log ---
+evidence/opencode-benchmark/harness/bench-hero-diff.sh: line 18: 37079 Killed                  sudo pkill -9 -f "daemon/dist" 2> /dev/null
+evidence/opencode-benchmark/harness/bench-hero-diff.sh: line 18: 37081 Killed                  sudo pkill -9 -f firecracker 2> /dev/null
+sandbox=6f03d577d46a
+installing opencode (KEEP_ROOT, ~2min)...
+installed
+=== baseline (COLD cache, uninterrupted) -> base.log ===
+baseline done
+=== interrupted (COLD cache, pause mid-run, resume) -> intr.log ===
+started
+paused mid-run
+resumed
+=== RESULT hero-diff v2 ===
+base: exit=0 | Tasks: 30 successful, 30 total | Cached: 0 cached, 30 total | TS_errors=0
+intr: exit=0 | Tasks: 30 successful, 30 total | Cached: 0 cached, 30 total | TS_errors=0
+cold check (both must show '0 cached'): base[Cached: 0 cached, 30 total] intr[Cached: 0 cached, 30 total]
+RESULT hero: SEMANTIC-IDENTICAL — same exit code (0), same task summary (Tasks: 30 successful, 30 total), same TS error count (0)
+content check (informational): sorted timing-stripped logs IDENTICAL
+HERODIFFDONE
+
+INTERPRETATION:
+- Semantic verdict: PASS — exit 0 both, 30/30 tasks successful both, 0 TS errors
+  both, and "Cached: 0 cached" both (proves both runs were genuinely cold).
+- Content: with cache state controlled, the interrupted run's output is
+  IDENTICAL to the uninterrupted baseline after stripping timing values and
+  normalizing line order (parallel task interleaving is nondeterministic).
+- Honest claim this supports: a typecheck paused mid-run and resumed completes
+  with the same exit code, the same task summary, and (timing/order aside) the
+  same output as one that was never interrupted.

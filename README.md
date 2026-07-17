@@ -72,7 +72,16 @@ export HOTCELL_PROVIDER_KEY_CFOPENAI=sk-...
 HOTCELL_EGRESS_ENFORCE=true hotcelld
 ```
 
-> On **macOS Docker Desktop** the firewall can't be installed (the bridge lives in a VM), so enforcement is **advisory** there — the gateway still works, but a process could route around it. Kernel-enforced lockdown on a Mac is the **Apple VZ microVM driver** (shipped) — its guests have no NIC at all, so egress is denied by construction and only reaches the gateway over vsock. The gateway, policy, caps, cost, providers, and allowlist all work on macOS today.
+> On **macOS Docker Desktop** the firewall can't be installed (the bridge lives in a VM), so enforcement is **advisory** there — the gateway still works, but a process could route around it. Kernel-enforced lockdown on a Mac is the **Apple VZ microVM driver** (shipped) — its guests have **no NIC by default**, so egress is denied by construction and only reaches the gateway over vsock. (A NAT NIC is opt-in for trusted workloads; on that path the allowlist is advisory — proxy-based — not enforced.) The gateway, policy, caps, cost, providers, and allowlist all work on macOS today.
+
+**Egress enforcement, by tier** — pick what matches your isolation needs:
+
+| Config | Enforcement | Mechanism |
+| --- | --- | --- |
+| Container + `HOTCELL_EGRESS_ENFORCE` (Linux) | **Kernel-enforced** | host `DOCKER-USER` iptables, default-drop, on a dedicated bridge (needs `CAP_NET_ADMIN`; degrades to advisory if the daemon can't install rules) |
+| microVM, no NIC (default) | **Enforced by construction** | no network device exists; the vsock gateway is the only route out |
+| microVM, opt-in NAT NIC (`networked: true`) | **Advisory** | proxy env points tools at the gateway; a raw socket bypasses it, unlogged |
+| Container on macOS (Docker Desktop) | **Advisory** | host firewall can't be installed (bridge lives in a VM); proxy env still set |
 
 It's an LLM gateway (base-URL rewrite + key injection), not a TLS-MITM proxy — no CA to install in any sandbox. Exposed through REST (`POST/GET /sandboxes/:id/egress-tokens`, `DELETE …/:token`), both SDKs, and the CLI; `npm run check:egress` verifies the whole surface (policy, cost, providers, allowlist, fail-closed) with no Docker required.
 

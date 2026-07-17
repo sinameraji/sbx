@@ -10,7 +10,7 @@
  *
  * Prereqs: a daemon whose environment has SBX_PROVIDER_KEY_OPENROUTER, Docker
  * (container driver), and internet egress for the gateway itself.
- * Env: SBX_ENDPOINT (default http://127.0.0.1:4750), SBX_API_KEY (if auth on),
+ * Env: HOTCELL_ENDPOINT (default http://127.0.0.1:4750), HOTCELL_API_KEY (if auth on),
  *      HOTCELL_E2E_MODEL (OpenRouter slug), HOTCELL_E2E_HARNESS — "claude-code"
  *      (default) or "opencode" (any OpenRouter model, e.g. Kimi K2.5),
  *      HOTCELL_E2E_EXPECT — "completion" (default; needs a real provider key) or
@@ -23,12 +23,12 @@ import assert from "node:assert/strict";
 import { HotcellClient, type Sandbox } from "@hotcell/sdk";
 
 async function main(): Promise<number> {
-  const endpoint = process.env.SBX_ENDPOINT ?? "http://127.0.0.1:4750";
+  const endpoint = process.env.HOTCELL_ENDPOINT ?? process.env.SBX_ENDPOINT ?? "http://127.0.0.1:4750";
   const harness = process.env.HOTCELL_E2E_HARNESS ?? "claude-code";
   const model =
     process.env.HOTCELL_E2E_MODEL ??
     (harness === "opencode" ? "openrouter/moonshotai/kimi-k2.5" : "anthropic/claude-3.5-haiku");
-  const client = new HotcellClient({ endpoint, apiKey: process.env.SBX_API_KEY });
+  const client = new HotcellClient({ endpoint, apiKey: process.env.HOTCELL_API_KEY ?? process.env.SBX_API_KEY });
 
   let passed = 0;
   const ok = (l: string) => {
@@ -100,14 +100,14 @@ async function main(): Promise<number> {
         /401|unauthori[sz]ed|invalid.*(key|token)|authentication/i,
         `expected a provider auth error, got:\n${run.stdout.slice(-800)}`,
       );
-      ok("★ headless Claude Code → gateway → real provider (auth error as expected with a dummy key)");
+      ok(`★ headless ${harness} → gateway → real provider (auth error as expected with a dummy key)`);
     } else {
       assert.match(
         run.stdout,
         /HOTCELL_E2E_OK/,
         `no completion came back through the gateway:\n${run.stdout.slice(-800)}`,
       );
-      ok("★ headless Claude Code completed a real prompt through the egress gateway");
+      ok(`★ headless ${harness} completed a real prompt through the egress gateway`);
     }
 
     // The gateway metered the traffic: provider calls on the record.

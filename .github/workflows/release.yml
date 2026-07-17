@@ -1,0 +1,34 @@
+# Trusted publishing: npm publish via GitHub OIDC — no npm token stored anywhere,
+# and every package gets provenance attestations. This is the post-Jan-2027 path
+# (2FA-bypass tokens lose publish rights then; see PUBLISHING.md).
+#
+# Prerequisite (once per package, AFTER its first manual publish): on npmjs.com,
+# package → Settings → Publishing access → add Trusted Publisher:
+#   GitHub repo `sinameraji/hotcell`, workflow `release.yml`.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      id-token: write # OIDC for npm trusted publishing + provenance
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+      - run: npm ci
+      - run: npm run build
+      - name: publish (dependency order, provenance)
+        run: |
+          npm publish -w @hotcell/sdk --access public --provenance
+          npm publish -w @hotcell/daemon --access public --provenance
+          npm publish -w hotcell --provenance
+          npm publish -w @hotcell/mastra --access public --provenance

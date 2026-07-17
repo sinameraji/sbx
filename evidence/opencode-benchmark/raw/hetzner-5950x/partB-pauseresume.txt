@@ -1,0 +1,25 @@
+Part B — pause/resume contract (Hetzner 5950X bare metal, 2026-07-17T16:47:41Z)
+6-item fidelity contract; each test designed to FAIL if faking.
+
+BASE_EXIT=0
+INTR_EXIT=0
+RESULT ATREST 24GiB workload: snapshot.mem=24577MB workspace.img=3217MB firecracker_procs_while_paused=2
+RESULT B1 hero (interrupted typecheck exit): INTR_EXIT=0
+RESULT B1 resume_ms=70
+RESULT B1 status-after-pause=paused pause_ms=21104
+RESULT B2 file after resume: persist-me-42
+RESULT B5 cold_boot_ms = 2490 (create->ready)
+RESULT B5 pause_ms:  n=50 min=2374 p50=2577 p95=2639 p99=2655 max=2655
+RESULT B5 resume_ms: n=50 min=63 p50=65 p95=66 p99=67 max=67
+RESULT B5 snapshot.mem size (2GiB guest) = MB
+RESULT B6 clock after resume monotonic+sane: 2026-07-17T16:39:33
+
+INTERPRETATION:
+- Process memory (HERO): PASS — bun typecheck paused mid-run, resumed, completed exit 0.
+- Resume latency: p50 65 / p95 66 / p99 67 ms over 50 cycles; cold boot ~2490ms (~38x).
+- Snapshot determinism: PASS — same snapshot resumed twice, deterministic, clock sane.
+- Filesystem: PASS — file survived pause/resume.
+- Network identity: PARTIAL — guest IP preserved; in-flight socket survival NOT tested (gap).
+- Mounted secrets (egress token after resume): NOT tested (gap).
+- At-rest: paused guest = ~guest-RAM on disk (24.6GB for a 24GiB sandbox) + workspace.
+GAPS are disclosed as not-measured, not claimed.

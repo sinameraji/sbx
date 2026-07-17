@@ -1,13 +1,13 @@
-# sbx-sdk (Python)
+# hotcell (Python SDK)
 
-Dependency-free Python client for the [sbx](https://github.com/sinameraji/sbx)
+Dependency-free Python client for the [hotcell](https://github.com/sinameraji/hotcell)
 self-hostable agent sandbox daemon. Mirrors the TypeScript SDK surface (snake_cased)
 so the same workflows work from either language.
 
 ```python
-from sbx import SbxClient
+from hotcell import HotcellClient
 
-client = SbxClient(endpoint="http://127.0.0.1:4750")  # or $SBX_ENDPOINT
+client = HotcellClient(endpoint="http://127.0.0.1:4750")  # or $HOTCELL_ENDPOINT
 sandbox = client.get_sandbox()                          # create a fresh sandbox
 
 # run a command
@@ -31,11 +31,11 @@ sandbox.destroy()
 ```
 
 Standard library only (`urllib`, `json`) — no third-party dependencies. Requires
-Python ≥ 3.9 and a running sbx daemon.
+Python ≥ 3.9 and a running hotcell daemon.
 
 ## Surface
 
-`SbxClient`: `get_sandbox`, `list`, `health`, `info`, `list_backups`, `delete_backup`.
+`HotcellClient`: `get_sandbox`, `list`, `health`, `info`, `list_backups`, `delete_backup`.
 
 `Sandbox`: `exec`, `exec_stream`, `stop`, `start`, `destroy`, `metrics`,
 `write_file`, `read_file`, `mkdir`, `list_files`, `watch`, `start_process`,

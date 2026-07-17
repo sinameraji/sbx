@@ -7,13 +7,13 @@
  * cloned in:
  *
  *   import { Workspace, Agent } from "@mastra/core";
- *   import { SbxSandbox } from "@hotcell/mastra";
+ *   import { HotcellSandbox } from "@hotcell/mastra";
  *
  *   const agent = new Agent({
  *     name: "coder",
  *     model: "openai/gpt-5",
  *     workspace: new Workspace({
- *       sandbox: new SbxSandbox({ repo: "https://github.com/me/app", egress: true }),
+ *       sandbox: new HotcellSandbox({ repo: "https://github.com/me/app", egress: true }),
  *     }),
  *   });
  *
@@ -30,7 +30,7 @@ import type {
   WorkspaceSandbox,
 } from "@mastra/core/workspace";
 
-export interface SbxSandboxOptions {
+export interface HotcellSandboxOptions {
   /** hotcell daemon endpoint (default: `HOTCELL_ENDPOINT` or http://127.0.0.1:4750). */
   endpoint?: string;
   /** API key for an auth-enabled daemon (default: `SBX_API_KEY`). */
@@ -59,20 +59,20 @@ export interface SbxSandboxOptions {
  * process-manager / mount surface is left unimplemented (Mastra degrades
  * gracefully — those tools simply aren't exposed).
  */
-export class SbxSandbox implements WorkspaceSandbox {
+export class HotcellSandbox implements WorkspaceSandbox {
   readonly name = "hotcell";
   readonly provider = "hotcell";
   status: ProviderStatus = "pending";
   error?: string;
 
   private readonly client: HotcellClient;
-  private readonly opts: SbxSandboxOptions;
+  private readonly opts: HotcellSandboxOptions;
   private sandbox?: Sandbox;
   private starting?: Promise<void>;
   private readonly createdAt = new Date();
   private _id = "";
 
-  constructor(opts: SbxSandboxOptions = {}) {
+  constructor(opts: HotcellSandboxOptions = {}) {
     this.opts = opts;
     this.client = new HotcellClient({ endpoint: opts.endpoint, apiKey: opts.apiKey });
   }

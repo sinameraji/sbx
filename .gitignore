@@ -3,7 +3,9 @@ dist/
 *.tsbuildinfo
 .DS_Store
 *.log
+.hotcell/
 .sbx/
+.kimiflare/
 .env
 .env.*
 coverage/

@@ -226,7 +226,7 @@ export class FirecrackerDriver extends AgentDriver {
     const cpus = p.limits?.cpus ? Math.max(1, Math.ceil(p.limits.cpus)) : 2;
     const memMib = p.limits?.memoryMb && p.limits.memoryMb > 0 ? p.limits.memoryMb : 1024;
     const pidsMax = p.limits?.pidsLimit && p.limits.pidsLimit > 0 ? p.limits.pidsLimit : 0;
-    const bootArgs = pidsMax > 0 ? `${FC_DEFAULT_BOOT_ARGS} sbx.pids=${pidsMax}` : FC_DEFAULT_BOOT_ARGS;
+    const bootArgs = pidsMax > 0 ? `${FC_DEFAULT_BOOT_ARGS} hotcell.pids=${pidsMax} sbx.pids=${pidsMax}` : FC_DEFAULT_BOOT_ARGS;
 
     const configureAndBoot = async (): Promise<FcVm> => {
       const vm = await this.spawnVmm(p.stateDir);

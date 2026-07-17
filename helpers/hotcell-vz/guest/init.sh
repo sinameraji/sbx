@@ -1,5 +1,5 @@
 #!/bin/sh
-# sbx-vz guest init (PID 1). Bootstraps a microVM guest: mounts the virtual
+# hotcell-vz guest init (PID 1). Bootstraps a microVM guest: mounts the virtual
 # filesystems, sets up the writable overlays + cgroups + the workspace disk, then
 # execs the in-sandbox agent.
 #
@@ -14,7 +14,7 @@ mount -t devtmpfs dev /dev 2>/dev/null
 mkdir -p /dev/pts && mount -t devpts devpts /dev/pts 2>/dev/null  # PTYs (terminal)
 
 # Read-only root: back the transient write paths with tmpfs so nothing touches
-# the shared rootfs image. Process logs (/tmp/sbx-proc-*.log) live on /tmp here.
+# the shared rootfs image. Process logs (/tmp/hotcell-proc-*.log) live on /tmp here.
 for d in /tmp /run; do mount -t tmpfs tmpfs "$d" 2>/dev/null; done
 
 # Loopback up so 127.0.0.1 (waitForPort, preview bridge to local servers) routes.
@@ -23,11 +23,11 @@ ip link set lo up 2>/dev/null || ifconfig lo up 2>/dev/null || true
 # cgroup v2 (resource limits): mount the unified hierarchy if the kernel did not.
 mkdir -p /sys/fs/cgroup 2>/dev/null
 mountpoint -q /sys/fs/cgroup 2>/dev/null || mount -t cgroup2 none /sys/fs/cgroup 2>/dev/null
-# pidsLimit: the host injects sbx.pids=<N> on the kernel cmdline. Enable the pids
+# pidsLimit: the host injects hotcell.pids=<N> (legacy sbx.pids=<N>) on the kernel cmdline. Enable the pids
 # controller, then run the agent (PID 1) in a leaf cgroup capped at N processes.
 # Memory + CPU need no guest enforcement — the VM hard-caps them.
 for tok in $(cat /proc/cmdline 2>/dev/null); do
-  case "$tok" in sbx.pids=*) PIDS_MAX="${tok#sbx.pids=}";; esac
+  case "$tok" in hotcell.pids=*) PIDS_MAX="${tok#hotcell.pids=}";; sbx.pids=*) PIDS_MAX="${tok#sbx.pids=}";; esac
 done
 if [ -n "${PIDS_MAX:-}" ] && [ -f /sys/fs/cgroup/cgroup.controllers ]; then
   echo +pids > /sys/fs/cgroup/cgroup.subtree_control 2>/dev/null || true
@@ -43,5 +43,5 @@ if [ -b /dev/vdb ]; then
   mount /dev/vdb /workspace 2>/dev/null || { mkfs.ext4 -q -F /dev/vdb 2>/dev/null && mount /dev/vdb /workspace; }
 fi
 
-echo sbx-guest-init-ok
+echo hotcell-guest-init-ok
 exec /sbin/hotcell-agent

@@ -1,8 +1,8 @@
-// Provider test for @sbx/mastra — drives SbxSandbox against a live sbx daemon
+// Provider test for @sbx/mastra — drives HotcellSandbox against a live sbx daemon
 // (no LLM/Mastra runtime needed; types-only dependency on @mastra/core).
 // Run from the repo root: `npm run smoke:mastra`.
 import { spawn } from "node:child_process";
-import { SbxSandbox } from "./dist/index.js";
+import { HotcellSandbox } from "./dist/index.js";
 
 const PORT = 4760;
 const endpoint = `http://127.0.0.1:${PORT}`;
@@ -34,7 +34,7 @@ try {
   await waitHealth();
   log("daemon up");
 
-  const sb = new SbxSandbox({ endpoint });
+  const sb = new HotcellSandbox({ endpoint });
   await sb.start();
   if (!sb.id || sb.status !== "running") throw new Error(`bad start: ${sb.id} ${sb.status}`);
   log(`started sandbox ${sb.id}`);
@@ -64,7 +64,7 @@ try {
   log("onStdout streaming callback works");
 
   const info = await sb.getInfo();
-  if (info.provider !== "sbx" || info.id !== sb.id) throw new Error("getInfo wrong: " + JSON.stringify(info));
+  if (info.provider !== "hotcell" || info.id !== sb.id) throw new Error("getInfo wrong: " + JSON.stringify(info));
   log(`getInfo works (status=${info.status})`);
 
   await sb.destroy();

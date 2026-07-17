@@ -1,6 +1,6 @@
-// A Mastra coding agent that runs inside a self-hosted sbx sandbox.
+// A Mastra coding agent that runs inside a self-hosted hotcell sandbox.
 //
-//   1) start the sbx daemon:   node packages/daemon/dist/index.js
+//   1) start the hotcell daemon:   node packages/daemon/dist/index.js
 //   2) (optional, richer image) docker build -t sbx/base:latest images/base
 //   3) cd examples/mastra-agent && npm install
 //   4) OPENAI_API_KEY=sk-... REPO=https://github.com/you/app \
@@ -8,13 +8,13 @@
 //
 // The agent's LLM reasoning runs here (host-side, with your OPENAI_API_KEY);
 // the SANDBOX is the agent's execution environment — every shell command the
-// agent runs happens in an isolated sbx sandbox with the repo cloned into
+// agent runs happens in an isolated hotcell sandbox with the repo cloned into
 // /workspace. Watch it live in the dashboard (http://127.0.0.1:4750) and see the
 // per-agent cost with `sb stats <id>`.
 import { Agent, Workspace } from "@mastra/core";
-import { SbxSandbox } from "@sbx/mastra";
+import { HotcellSandbox } from "@sbx/mastra";
 
-const sandbox = new SbxSandbox({
+const sandbox = new HotcellSandbox({
   image: process.env.SBX_IMAGE ?? "sbx/base:latest", // has git + node + python
   repo: process.env.REPO, // cloned into /workspace at create
   memoryMb: 2048,

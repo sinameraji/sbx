@@ -1,5 +1,5 @@
 // Package proto is the wire protocol spoken between the daemon's microVM drivers
-// (host) and the in-sandbox sbx-agent (guest) over a single vsock connection.
+// (host) and the in-sandbox hotcell-agent (guest) over a single vsock connection.
 //
 // It is a small, framed, multiplexed binary protocol. One connection carries
 // many concurrent logical streams (one per in-flight exec / pty / file / relay

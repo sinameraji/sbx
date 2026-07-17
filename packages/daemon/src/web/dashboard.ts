@@ -122,7 +122,7 @@ export const DASHBOARD_HTML = String.raw`<!doctype html>
 var rates = { costCpuPerHour: 0, costMemGbPerHour: 0 };
 var selected = null;
 var liveTimer = null;
-var apiKey = localStorage.getItem("sbx_api_key") || "";
+var apiKey = localStorage.getItem("hotcell_api_key") || localStorage.getItem("sbx_api_key") || "";
 
 function authHeaders(h) {
   h = h || {};
@@ -131,7 +131,7 @@ function authHeaders(h) {
 }
 function promptKey() {
   var k = window.prompt("This daemon requires an API key (SBX_API_KEY):", apiKey);
-  if (k != null) { apiKey = k; localStorage.setItem("sbx_api_key", k); }
+  if (k != null) { apiKey = k; localStorage.setItem("hotcell_api_key", k); }
   return k;
 }
 function api(path, opts) {

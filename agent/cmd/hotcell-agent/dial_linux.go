@@ -11,7 +11,7 @@ import (
 )
 
 // egressDial opens a guest→host vsock connection (CID 2 = the host) for the
-// egress relay — the production path inside a microVM. SBX_EGRESS_DIAL
+// egress relay — the production path inside a microVM. HOTCELL_EGRESS_DIAL
 // overrides it for VM-free tests.
 func egressDial(port uint32) (net.Conn, error) {
 	if override := egressDialOverride(); override != nil {

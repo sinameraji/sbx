@@ -202,7 +202,7 @@ final class VmServer: NSObject, VZVirtualMachineDelegate, VZVirtioSocketListener
             // see beyond them). pidsLimit has no VM-config analogue, so it rides in
             // on the kernel cmdline for the guest init to enforce via a cgroup.
             var cmdline = "console=hvc0 root=/dev/vda rw init=/init"
-            if pidsMax > 0 { cmdline += " sbx.pids=\(pidsMax)" }
+            if pidsMax > 0 { cmdline += " hotcell.pids=\(pidsMax) sbx.pids=\(pidsMax)" }
             bootLoader.commandLine = cmdline
             config.bootLoader = bootLoader
 

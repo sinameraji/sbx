@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-// dialSpec parses a scheme://addr dial spec (the SBX_EGRESS_DIAL test
+// dialSpec parses a scheme://addr dial spec (the HOTCELL_EGRESS_DIAL test
 // override). Supported: tcp://host:port and unix:///path/to.sock — mirrors
 // listenSpec so the egress relay is exercisable on any OS without a microVM.
 func dialSpec(spec string) (net.Conn, error) {
@@ -24,7 +24,7 @@ func dialSpec(spec string) (net.Conn, error) {
 	}
 }
 
-// egressDialOverride returns the test-override dialer when SBX_EGRESS_DIAL is
+// egressDialOverride returns the test-override dialer when HOTCELL_EGRESS_DIAL is
 // set, else nil (the platform dialer takes over).
 func egressDialOverride() func(port uint32) (net.Conn, error) {
 	spec := agentEnv("EGRESS_DIAL")

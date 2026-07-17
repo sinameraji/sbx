@@ -485,7 +485,7 @@ export class ContainerDriver implements Driver {
     command: string,
     opts: StartProcessOptions,
   ): Promise<StartProcessResult> {
-    const logPath = `/tmp/sbx-proc-${procId}.log`;
+    const logPath = `/tmp/hotcell-proc-${procId}.log`;
     // `setsid` gives the process its own session + group (pgid == its pid), so we
     // can later signal the whole tree, and it survives the exec that launched it.
     // The inner `bash -lc` runs the user command with a login PATH like `exec`.

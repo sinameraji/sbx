@@ -1,0 +1,183 @@
+=== 32 vCPU / 32 GiB — 5 cold reps (hetzner 5950x bare metal) ===
+--- summary ---
+mem_mb	cpus	rep	result	clone_ms	install_ms	typecheck_ms	total_ms	peak_used_gib	egress
+32768	32	1	PASS	4156	13998	17415	60715	13.54	0
+32768	32	2	PASS	5055	13492	16838	59958	12.76	0
+32768	32	3	PASS	4336	13437	16716	58012	14.19	0
+32768	32	4	PASS	4227	13413	17473	58448	11.58	0
+32768	32	5	PASS	5978	12017	18738	58348	11.01	0
+
+### REP 1 ###
+### CONFIG mem=32768MB cpus=32 cpuset=0-31 networked=true rep=1 egress=0 region=hetzner-5950x-baremetal 2026-07-17T15:35:58Z
+fc_pin: cpus_allowed=0-31 requested=0-31
+mem=32890636kib cpus=32
+BENCH_PHASE	prepare	21625
+BENCH_CACHE	guest_page_cache	dropped
+BENCH_CACHE	workspace	fresh
+BENCH_CACHE	bun	empty
+BENCH_CACHE	turbo	empty
+BENCH_PHASE	cache_clear	479
+BENCH_META	commit	08fb47373509ba64b13441061314eeacf4264f51
+BENCH_META	architecture	x86_64
+BENCH_META	kernel	Linux 5.10.223
+BENCH_META	logical_cpus	32
+BENCH_META	cpu_model	AMD EPYC
+BENCH_META	memory_kib	32890636
+BENCH_PHASE	bun_download	728
+BENCH_PHASE	bun_unpack	531
+BENCH_META	bun_version	1.3.14
+BENCH_META	node_version	v24.14.1
+BENCH_PHASE	clone	4156
+BENCH_DISK	after_clone	352620544
+4708 packages installed [13.58s]
+BENCH_PHASE	install	13998
+BENCH_DISK	after_install	3229667328
+BENCH_PHASE	typecheck	17415
+BENCH_DISK	after_typecheck	3233701888
+BENCH_DONE	08fb47373509ba64b13441061314eeacf4264f51
+BENCH_PHASE	total	60715
+| **hotcell** | 32 CPU / 31.37 GiB | hetzner-5950x-baremetal, AMD EPYC | 4.156s | 13.998s | 17.415s | 35.569s | ✅ |
+BENCH_MEM	total_kib	32890636
+BENCH_MEM	min_avail_kib	18695288
+BENCH_MEM	peak_used_kib	14195348
+BENCH_MEM	peak_used_gib	13.54
+
+### REP 2 ###
+### CONFIG mem=32768MB cpus=32 cpuset=0-31 networked=true rep=2 egress=0 region=hetzner-5950x-baremetal 2026-07-17T15:37:08Z
+fc_pin: cpus_allowed=0-31 requested=0-31
+mem=32890636kib cpus=32
+BENCH_PHASE	prepare	21382
+BENCH_CACHE	guest_page_cache	dropped
+BENCH_CACHE	workspace	fresh
+BENCH_CACHE	bun	empty
+BENCH_CACHE	turbo	empty
+BENCH_PHASE	cache_clear	428
+BENCH_META	commit	08fb47373509ba64b13441061314eeacf4264f51
+BENCH_META	architecture	x86_64
+BENCH_META	kernel	Linux 5.10.223
+BENCH_META	logical_cpus	32
+BENCH_META	cpu_model	AMD EPYC
+BENCH_META	memory_kib	32890636
+BENCH_PHASE	bun_download	489
+BENCH_PHASE	bun_unpack	519
+BENCH_META	bun_version	1.3.14
+BENCH_META	node_version	v24.14.1
+BENCH_PHASE	clone	5055
+BENCH_DISK	after_clone	352620544
+4708 packages installed [13.23s]
+BENCH_PHASE	install	13492
+BENCH_DISK	after_install	3229667328
+BENCH_PHASE	typecheck	16838
+BENCH_DISK	after_typecheck	3233701888
+BENCH_DONE	08fb47373509ba64b13441061314eeacf4264f51
+BENCH_PHASE	total	59958
+| **hotcell** | 32 CPU / 31.37 GiB | hetzner-5950x-baremetal, AMD EPYC | 5.055s | 13.492s | 16.838s | 35.385s | ✅ |
+BENCH_MEM	total_kib	32890636
+BENCH_MEM	min_avail_kib	19513256
+BENCH_MEM	peak_used_kib	13377380
+BENCH_MEM	peak_used_gib	12.76
+
+### REP 3 ###
+### CONFIG mem=32768MB cpus=32 cpuset=0-31 networked=true rep=3 egress=0 region=hetzner-5950x-baremetal 2026-07-17T15:38:18Z
+fc_pin: cpus_allowed=0-31 requested=0-31
+mem=32890636kib cpus=32
+BENCH_PHASE	prepare	20250
+BENCH_CACHE	guest_page_cache	dropped
+BENCH_CACHE	workspace	fresh
+BENCH_CACHE	bun	empty
+BENCH_CACHE	turbo	empty
+BENCH_PHASE	cache_clear	483
+BENCH_META	commit	08fb47373509ba64b13441061314eeacf4264f51
+BENCH_META	architecture	x86_64
+BENCH_META	kernel	Linux 5.10.223
+BENCH_META	logical_cpus	32
+BENCH_META	cpu_model	AMD EPYC
+BENCH_META	memory_kib	32890636
+BENCH_PHASE	bun_download	469
+BENCH_PHASE	bun_unpack	513
+BENCH_META	bun_version	1.3.14
+BENCH_META	node_version	v24.14.1
+BENCH_PHASE	clone	4336
+BENCH_DISK	after_clone	352620544
+4708 packages installed [13.02s]
+BENCH_PHASE	install	13437
+BENCH_DISK	after_install	3229663232
+BENCH_PHASE	typecheck	16716
+BENCH_DISK	after_typecheck	3233697792
+BENCH_DONE	08fb47373509ba64b13441061314eeacf4264f51
+BENCH_PHASE	total	58012
+| **hotcell** | 32 CPU / 31.37 GiB | hetzner-5950x-baremetal, AMD EPYC | 4.336s | 13.437s | 16.716s | 34.489s | ✅ |
+BENCH_MEM	total_kib	32890636
+BENCH_MEM	min_avail_kib	18008740
+BENCH_MEM	peak_used_kib	14881896
+BENCH_MEM	peak_used_gib	14.19
+
+### REP 4 ###
+### CONFIG mem=32768MB cpus=32 cpuset=0-31 networked=true rep=4 egress=0 region=hetzner-5950x-baremetal 2026-07-17T15:39:25Z
+fc_pin: cpus_allowed=0-31 requested=0-31
+mem=32890636kib cpus=32
+BENCH_PHASE	prepare	20088
+BENCH_CACHE	guest_page_cache	dropped
+BENCH_CACHE	workspace	fresh
+BENCH_CACHE	bun	empty
+BENCH_CACHE	turbo	empty
+BENCH_PHASE	cache_clear	493
+BENCH_META	commit	08fb47373509ba64b13441061314eeacf4264f51
+BENCH_META	architecture	x86_64
+BENCH_META	kernel	Linux 5.10.223
+BENCH_META	logical_cpus	32
+BENCH_META	cpu_model	AMD EPYC
+BENCH_META	memory_kib	32890636
+BENCH_PHASE	bun_download	508
+BENCH_PHASE	bun_unpack	519
+BENCH_META	bun_version	1.3.14
+BENCH_META	node_version	v24.14.1
+BENCH_PHASE	clone	4227
+BENCH_DISK	after_clone	352620544
+4708 packages installed [13.09s]
+BENCH_PHASE	install	13413
+BENCH_DISK	after_install	3229659136
+BENCH_PHASE	typecheck	17473
+BENCH_DISK	after_typecheck	3233693696
+BENCH_DONE	08fb47373509ba64b13441061314eeacf4264f51
+BENCH_PHASE	total	58448
+| **hotcell** | 32 CPU / 31.37 GiB | hetzner-5950x-baremetal, AMD EPYC | 4.227s | 13.413s | 17.473s | 35.113s | ✅ |
+BENCH_MEM	total_kib	32890636
+BENCH_MEM	min_avail_kib	20743380
+BENCH_MEM	peak_used_kib	12147256
+BENCH_MEM	peak_used_gib	11.58
+
+### REP 5 ###
+### CONFIG mem=32768MB cpus=32 cpuset=0-31 networked=true rep=5 egress=0 region=hetzner-5950x-baremetal 2026-07-17T15:40:33Z
+fc_pin: cpus_allowed=0-31 requested=0-31
+mem=32890636kib cpus=32
+BENCH_PHASE	prepare	18353
+BENCH_CACHE	guest_page_cache	dropped
+BENCH_CACHE	workspace	fresh
+BENCH_CACHE	bun	empty
+BENCH_CACHE	turbo	empty
+BENCH_PHASE	cache_clear	477
+BENCH_META	commit	08fb47373509ba64b13441061314eeacf4264f51
+BENCH_META	architecture	x86_64
+BENCH_META	kernel	Linux 5.10.223
+BENCH_META	logical_cpus	32
+BENCH_META	cpu_model	AMD EPYC
+BENCH_META	memory_kib	32890636
+BENCH_PHASE	bun_download	541
+BENCH_PHASE	bun_unpack	515
+BENCH_META	bun_version	1.3.14
+BENCH_META	node_version	v24.14.1
+BENCH_PHASE	clone	5978
+BENCH_DISK	after_clone	352616448
+4708 packages installed [11.77s]
+BENCH_PHASE	install	12017
+BENCH_DISK	after_install	3229667328
+BENCH_PHASE	typecheck	18738
+BENCH_DISK	after_typecheck	3233701888
+BENCH_DONE	08fb47373509ba64b13441061314eeacf4264f51
+BENCH_PHASE	total	58348
+| **hotcell** | 32 CPU / 31.37 GiB | hetzner-5950x-baremetal, AMD EPYC | 5.978s | 12.017s | 18.738s | 36.733s | ✅ |
+BENCH_MEM	total_kib	32890636
+BENCH_MEM	min_avail_kib	21341396
+BENCH_MEM	peak_used_kib	11549240
+BENCH_MEM	peak_used_gib	11.01

@@ -215,6 +215,12 @@ export interface CreateOptions {
   repo?: string;
   /** Branch/tag to check out when cloning `repo` (default: the repo's default branch). */
   repoRef?: string;
+  /**
+   * Runtime driver for this sandbox: `container` (default), `firecracker`
+   * (Linux + KVM microVM), or `applevz` (macOS microVM) — one daemon can run
+   * all three side by side. Omit for the daemon default.
+   */
+  driver?: string;
   /** Hard memory cap in MiB (overrides the daemon default; 0 = unlimited). */
   memoryMb?: number;
   /** Hard CPU cap in fractional cores, e.g. 0.5 (overrides the daemon default). */

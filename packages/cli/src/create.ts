@@ -24,6 +24,7 @@ export async function createCommand(
     typeof flags["egress-spend-cap"] === "string" ? Number(flags["egress-spend-cap"]) : undefined;
   const sleepAfter =
     typeof flags["sleep-after"] === "string" ? Number(flags["sleep-after"]) : undefined;
+  const driver = typeof flags.driver === "string" ? flags.driver : undefined;
   const { memoryMb, cpus, pidsLimit } = parseLimitFlags(flags);
   const setup = typeof flags.setup === "string" ? [flags.setup] : undefined;
   const repo = typeof flags.repo === "string" ? flags.repo : undefined;
@@ -45,6 +46,7 @@ export async function createCommand(
       env,
       labels,
       sleepAfter,
+      driver,
       egress,
       egressSpendCapUsd,
       setup,

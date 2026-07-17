@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 //
-// Run a headless coding agent (OpenCode by default) inside a throwaway sbx
+// Run a headless coding agent (OpenCode by default) inside a throwaway hotcell
 // sandbox, with a clean, minimal UI: a single spinner with a live token/$ ticker,
 // then the agent's answer, then a one-line summary. The sandbox is created, the
-// repo is cloned in, the agent runs via OpenRouter through the sbx egress gateway
+// repo is cloned in, the agent runs via OpenRouter through the hotcell egress gateway
 // (your real key never enters the sandbox), and the sandbox is destroyed.
 //
 // Prereqs (see examples/README.md):
@@ -27,7 +27,7 @@ const TASK = pos[1];
 const MODEL = pos[2] || "openrouter/moonshotai/kimi-k2.7-code";
 // Escape hatch: run any command as the "agent" (BYO harness / tests). When set,
 // the OpenCode install/config is skipped — your command brings its own tool.
-const AGENT_CMD = process.env.SBX_AGENT_CMD;
+const AGENT_CMD = process.env.HOTCELL_AGENT_CMD;
 
 if (!TASK || (!REPO && !AGENT_CMD)) {
   console.error('usage: agent.mjs <repo-url> "<task>" [openrouter/model] [--keep] [--verbose]');

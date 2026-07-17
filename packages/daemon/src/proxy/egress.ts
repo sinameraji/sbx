@@ -184,7 +184,7 @@ const HOP_REQUEST = new Set([
   "content-length",
   "accept-encoding",
   "x-hotcell-egress",
-  "x-hotcell-egress",
+  "x-sbx-egress",
   "authorization",
 ]);
 const HOP_RESPONSE = new Set([
@@ -391,9 +391,9 @@ function matchModel(patterns: string[], model: string): boolean {
   });
 }
 
-/** Pull the egress token from `X-Sbx-Egress` or a Bearer Authorization header. */
+/** Pull the egress token from `X-Hotcell-Egress` (legacy `X-Sbx-Egress`) or a Bearer Authorization header. */
 function extractToken(req: IncomingMessage): string | undefined {
-  const direct = req.headers["x-hotcell-egress"] ?? req.headers["x-hotcell-egress"];
+  const direct = req.headers["x-hotcell-egress"] ?? req.headers["x-sbx-egress"];
   if (typeof direct === "string" && direct) return direct;
   const auth = req.headers["authorization"];
   if (typeof auth === "string" && auth.startsWith("Bearer ")) return auth.slice(7);
@@ -403,7 +403,7 @@ function extractToken(req: IncomingMessage): string | undefined {
 /**
  * Pull the egress token from a forward-proxy request: `Proxy-Authorization`
  * (`Bearer <token>` or `Basic base64(<token>:)` — what `HTTPS_PROXY=http://<token>@host`
- * sends) or the `X-Sbx-Egress` header.
+ * sends) or the `X-Hotcell-Egress` (legacy `X-Sbx-Egress`) header.
  */
 function extractProxyToken(req: IncomingMessage): string | undefined {
   const pa = req.headers["proxy-authorization"];
@@ -415,7 +415,7 @@ function extractProxyToken(req: IncomingMessage): string | undefined {
       if (user) return user;
     }
   }
-  const direct = req.headers["x-hotcell-egress"] ?? req.headers["x-hotcell-egress"];
+  const direct = req.headers["x-hotcell-egress"] ?? req.headers["x-sbx-egress"];
   if (typeof direct === "string" && direct) return direct;
   return undefined;
 }
@@ -486,7 +486,7 @@ async function handleForwardHttp(
       lk === "proxy-authorization" ||
       lk === "proxy-connection" ||
       lk === "x-hotcell-egress" ||
-      lk === "x-hotcell-egress" ||
+      lk === "x-sbx-egress" ||
       HOP_REQUEST.has(lk)
     ) {
       continue;

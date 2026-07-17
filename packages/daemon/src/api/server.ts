@@ -1256,11 +1256,11 @@ async function execInSandbox(
   // later `cd` persists. We append a `pwd` write that runs in the same shell as
   // the user command (newline-delimited so a trailing comment can't swallow it).
   let runCommand = command;
-  const cwdFile = session ? `/tmp/sbx-sess-${session.sessionId}.cwd` : null;
+  const cwdFile = session ? `/tmp/hotcell-sess-${session.sessionId}.cwd` : null;
   if (cwdFile) {
     runCommand =
-      `{\n${command}\n}\n__sbx_rc=$?\n` +
-      `pwd > ${cwdFile} 2>/dev/null\nexit $__sbx_rc`;
+      `{\n${command}\n}\n__hc_rc=$?\n` +
+      `pwd > ${cwdFile} 2>/dev/null\nexit $__hc_rc`;
   }
 
   // Stream output as Server-Sent Events.

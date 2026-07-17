@@ -1,15 +1,15 @@
-# @sbx/sdk
+# @hotcell/sdk
 
-TypeScript client for [**sbx**](https://github.com/sinameraji/sbx) — self-hostable sandbox infrastructure for AI agents. Zero runtime dependencies; mirrors the Cloudflare Sandbox SDK surface so existing harnesses port with minimal changes, but points at *your* self-hosted daemon.
+TypeScript client for [**hotcell**](https://github.com/sinameraji/hotcell) — self-hostable sandbox infrastructure for AI agents. Zero runtime dependencies; mirrors the Cloudflare Sandbox SDK surface so existing harnesses port with minimal changes, but points at *your* self-hosted daemon.
 
 ```bash
-npm install @sbx/sdk
+npm install @hotcell/sdk
 ```
 
 ```ts
-import { SbxClient } from "@sbx/sdk";
+import { HotcellClient } from "@hotcell/sdk";
 
-const client = new SbxClient({ endpoint: "http://127.0.0.1:4750" /*, apiKey */ });
+const client = new HotcellClient({ endpoint: "http://127.0.0.1:4750" /*, apiKey */ });
 
 const sandbox = await client.getSandbox();              // fresh sandbox
 const { stdout } = await sandbox.exec("python3 -c 'print(2+2)'");
@@ -30,9 +30,9 @@ await sandbox.destroy();
 - backups, lifecycle (`stop`/`start`, idle auto-pause), `metrics`/`metricsHistory`
 - egress credential proxy: `createEgressToken`/`listEgressTokens`/`revokeEgressToken`, or create with `{ egress: true }`
 
-Configure the endpoint via the constructor or `SBX_ENDPOINT`, and the API key via `apiKey` or `SBX_API_KEY`.
+Configure the endpoint via the constructor or `HOTCELL_ENDPOINT`, and the API key via `apiKey` or `HOTCELL_API_KEY`.
 
-See the [main README](https://github.com/sinameraji/sbx) for the daemon, CLI, dashboard, and full docs.
+See the [main README](https://github.com/sinameraji/hotcell) for the daemon, CLI, dashboard, and full docs.
 
 ## License
 

@@ -12,9 +12,9 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// defaultVsockPort is the guest port the agent binds when no SBX_AGENT_LISTEN
+// defaultVsockPort is the guest port the agent binds when no HOTCELL_AGENT_LISTEN
 // override is given. The host driver connects to this port over the guest's
-// virtio-vsock device. Overridable via SBX_AGENT_VSOCK_PORT.
+// virtio-vsock device. Overridable via HOTCELL_AGENT_VSOCK_PORT.
 const defaultVsockPort = 1024
 
 // listenDefault binds an AF_VSOCK listening socket inside the guest. This is the

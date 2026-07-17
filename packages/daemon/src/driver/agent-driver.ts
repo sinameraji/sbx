@@ -100,7 +100,7 @@ export abstract class AgentDriver extends UnsupportedDriver {
     command: string,
     opts: StartProcessOptions,
   ): Promise<StartProcessResult> {
-    const logPath = `/tmp/sbx-proc-${procId}.log`;
+    const logPath = `/tmp/hotcell-proc-${procId}.log`;
     // Background `sh -c CMD` and echo its real pid. No `setsid`: busybox setsid
     // forks when the caller is a process-group leader, making `$!` the wrapper pid
     // rather than the command's. The backgrounded process orphans to PID 1 (the

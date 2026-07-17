@@ -4,11 +4,11 @@ import { join } from "node:path";
 
 /**
  * Read a daemon env var with legacy fallback: `HOTCELL_<name>` wins, then the
- * pre-rename `SBX_<name>` — so deployments configured before the hotcell
+ * pre-rename `HOTCELL_<name>` — so deployments configured before the hotcell
  * rename keep working unchanged.
  */
 function env(name: string): string | undefined {
-  return process.env[`HOTCELL_${name}`] ?? process.env[`SBX_${name}`];
+  return process.env[`HOTCELL_${name}`] ?? process.env[`HOTCELL_${name}`];
 }
 
 /**
@@ -72,7 +72,7 @@ export interface Config {
    * Bind host for the egress credential proxy (LLM gateway). Defaults to
    * loopback (single-tenant safe). On **native Linux** dockerd, sandboxes reach
    * the daemon via the bridge gateway (`host.docker.internal` → ~172.17.0.1), so
-   * a loopback-only bind is unreachable from sandboxes — set `SBX_EGRESS_HOST`
+   * a loopback-only bind is unreachable from sandboxes — set `HOTCELL_EGRESS_HOST`
    * to `0.0.0.0` (or the bridge IP) there, relying on the per-sandbox egress
    * token + host firewall. Docker Desktop (macOS) reaches loopback as-is.
    */
@@ -84,40 +84,40 @@ export interface Config {
    * (Linux only) install host `DOCKER-USER` iptables rules so the ONLY reachable
    * destinations are the egress gateway + the pinned DNS resolver — everything else
    * is dropped. Off by default (the gateway is then the "safe path available", not
-   * the "only path"). `SBX_EGRESS_ENFORCE`. Advisory-only on macOS Docker Desktop.
+   * the "only path"). `HOTCELL_EGRESS_ENFORCE`. Advisory-only on macOS Docker Desktop.
    */
   egressEnforce: boolean;
-  /** Docker network name sandboxes join when egress is enforced. `SBX_EGRESS_NETWORK`. */
+  /** Docker network name sandboxes join when egress is enforced. `HOTCELL_EGRESS_NETWORK`. */
   egressNetwork: string;
   /**
    * IPv4 subnet (CIDR) for the egress-enforced bridge network. The host firewall
    * scopes its allow/deny rules to this subnet, and the bridge gateway (`.1`) is the
-   * sandbox's route to the egress gateway. `/24` assumed. `SBX_EGRESS_SUBNET`.
+   * sandbox's route to the egress gateway. `/24` assumed. `HOTCELL_EGRESS_SUBNET`.
    */
   egressSubnet: string;
   /**
    * DNS resolver IP pinned into sandboxes under egress enforcement (so DNS can't be
    * used as an exfil channel and DoH is the only blocked path). Empty = Docker's
-   * embedded resolver. `SBX_EGRESS_DNS`.
+   * embedded resolver. `HOTCELL_EGRESS_DNS`.
    */
   egressDnsResolver: string;
   /**
    * Path to a JSON `{ allow, deny }` allowlist that fully REPLACES the built-in
-   * default (forward-proxy host allowlist). `SBX_ALLOWLIST_FILE`. Empty = defaults.
+   * default (forward-proxy host allowlist). `HOTCELL_ALLOWLIST_FILE`. Empty = defaults.
    */
   allowlistFile: string;
-  /** Extra hosts appended to the allowlist (`SBX_ALLOWLIST_EXTRA`, comma-separated). */
+  /** Extra hosts appended to the allowlist (`HOTCELL_ALLOWLIST_EXTRA`, comma-separated). */
   allowlistExtra: string[];
   /**
    * Include the `source_control` allowlist tier (github/gitlab/bitbucket). On by
-   * default so `git clone` works; set `SBX_ALLOW_SOURCE_CONTROL=false` for
+   * default so `git clone` works; set `HOTCELL_ALLOW_SOURCE_CONTROL=false` for
    * high-security workloads (a writable git host is also an exfil channel).
    */
   allowSourceControl: boolean;
   /**
    * Default per-sandbox LLM spend ceiling in USD — the gateway returns 402 once a
    * sandbox's cumulative provider cost reaches it, across all its tokens. Per-create
-   * `egressSpendCapUsd` overrides. `0` = unlimited. `SBX_EGRESS_SPEND_CAP`.
+   * `egressSpendCapUsd` overrides. `0` = unlimited. `HOTCELL_EGRESS_SPEND_CAP`.
    */
   egressSpendCapUsd: number;
   /**
@@ -130,15 +130,15 @@ export interface Config {
    * Provider API keys, held on the daemon host and injected into outbound calls
    * so they never live inside a sandbox. Keyed by lower-case provider name
    * (`openai`, `anthropic`, `openrouter`). A provider's gateway route exists only
-   * when its key is present here. Sourced from `SBX_PROVIDER_KEY_<NAME>` env vars.
+   * when its key is present here. Sourced from `HOTCELL_PROVIDER_KEY_<NAME>` env vars.
    */
   providerKeys: Record<string, string>;
   /**
    * Operator-defined / override provider shapes, keyed by lower-case provider
    * name. Lets an operator add a provider the daemon doesn't ship (or repoint a
    * built-in — e.g. route `openai` through a Cloudflare AI Gateway prefix) without
-   * a code change. Sourced from `SBX_PROVIDER_<NAME>_BASEURL` / `_AUTHHEADER` /
-   * `_FORMAT`. A route still requires a key (`SBX_PROVIDER_KEY_<NAME>`).
+   * a code change. Sourced from `HOTCELL_PROVIDER_<NAME>_BASEURL` / `_AUTHHEADER` /
+   * `_FORMAT`. A route still requires a key (`HOTCELL_PROVIDER_KEY_<NAME>`).
    */
   providerConfigs: Record<string, ProviderConfig>;
   /** Host directory where sandbox backup tarballs + metadata are stored. */
@@ -166,55 +166,55 @@ export interface Config {
   /** Cost-meter rate: currency units per GB of preview-proxy egress. */
   costEgressPerGb: number;
   /**
-   * Path to a JSON model→price override file (`SBX_MODEL_PRICES`), overlaid on the
+   * Path to a JSON model→price override file (`HOTCELL_MODEL_PRICES`), overlaid on the
    * built-in table. Used to compute an LLM call's USD cost when the provider does
    * not report one. Empty = built-in defaults only.
    */
   modelPricesPath: string;
   /**
-   * Path to the signed `sbx-vz` Swift helper for the Apple VZ driver (`SBX_DRIVER=applevz`).
+   * Path to the signed `sbx-vz` Swift helper for the Apple VZ driver (`HOTCELL_DRIVER=applevz`).
    * Built by `npm run build:vz`. Defaults to its in-repo build output; set
-   * `SBX_VZ_HELPER_PATH` to a bundled/installed location. `SBX_DRIVER=container` ignores it.
+   * `HOTCELL_VZ_HELPER_PATH` to a bundled/installed location. `HOTCELL_DRIVER=container` ignores it.
    */
   vzHelperPath: string;
-  /** Guest kernel image for the Apple VZ driver (`SBX_VZ_KERNEL`). Uncompressed arm64 Image. */
+  /** Guest kernel image for the Apple VZ driver (`HOTCELL_VZ_KERNEL`). Uncompressed arm64 Image. */
   vzKernel: string;
-  /** Base rootfs image for the Apple VZ driver (`SBX_VZ_ROOTFS`). */
+  /** Base rootfs image for the Apple VZ driver (`HOTCELL_VZ_ROOTFS`). */
   vzRootfs: string;
-  /** Per-sandbox VM state dir (disks, sockets) for the Apple VZ driver (`SBX_VZ_STATE_DIR`). */
+  /** Per-sandbox VM state dir (disks, sockets) for the Apple VZ driver (`HOTCELL_VZ_STATE_DIR`). */
   vzStateDir: string;
-  /** Default workspace disk size in GiB for a new VZ sandbox (`SBX_VZ_DISK_GB`). */
+  /** Default workspace disk size in GiB for a new VZ sandbox (`HOTCELL_VZ_DISK_GB`). */
   vzDiskGb: number;
   /**
    * Cache dir for OCI→ext4 converted rootfs images + the blank workspace template
-   * (`SBX_VZ_IMAGE_CACHE`). Keyed by image name; populated on demand from
-   * `SBX_IMAGE`. Kept separate from the per-sandbox state dir so it survives.
+   * (`HOTCELL_VZ_IMAGE_CACHE`). Keyed by image name; populated on demand from
+   * `HOTCELL_IMAGE`. Kept separate from the per-sandbox state dir so it survives.
    */
   vzImageCacheDir: string;
   /**
-   * Warm-pool size for the Apple VZ driver (`SBX_VZ_WARM_POOL`, default 0 = off):
+   * Warm-pool size for the Apple VZ driver (`HOTCELL_VZ_WARM_POOL`, default 0 = off):
    * keep this many base-image microVMs pre-booted so a `create` of the base image
    * is an instant adopt instead of a ~2s cold boot. The pool refills in the
    * background as guests are claimed.
    */
   vzWarmPool: number;
-  /** `firecracker` binary path for the Firecracker driver (`SBX_FC_BIN`). */
+  /** `firecracker` binary path for the Firecracker driver (`HOTCELL_FC_BIN`). */
   fcBin: string;
-  /** Guest kernel (uncompressed vmlinux) for the Firecracker driver (`SBX_FC_KERNEL`). */
+  /** Guest kernel (uncompressed vmlinux) for the Firecracker driver (`HOTCELL_FC_KERNEL`). */
   fcKernel: string;
-  /** Prebuilt base rootfs for the Firecracker driver (`SBX_FC_ROOTFS`). */
+  /** Prebuilt base rootfs for the Firecracker driver (`HOTCELL_FC_ROOTFS`). */
   fcRootfs: string;
-  /** Per-sandbox VM state dir for the Firecracker driver (`SBX_FC_STATE_DIR`). */
+  /** Per-sandbox VM state dir for the Firecracker driver (`HOTCELL_FC_STATE_DIR`). */
   fcStateDir: string;
-  /** Default workspace disk size in GiB for a new Firecracker sandbox (`SBX_FC_DISK_GB`). */
+  /** Default workspace disk size in GiB for a new Firecracker sandbox (`HOTCELL_FC_DISK_GB`). */
   fcDiskGb: number;
   /**
-   * Warm-pool size for the Firecracker driver (`SBX_FC_WARM_POOL`, default 0 = off):
+   * Warm-pool size for the Firecracker driver (`HOTCELL_FC_WARM_POOL`, default 0 = off):
    * keep N pre-booted spare microVMs of the default image so a plain create
    * adopts one instantly instead of cold-booting.
    */
   fcWarmPool: number;
-  /** Converted OCI→ext4 rootfs cache for the Firecracker driver (`SBX_FC_IMAGE_CACHE`). */
+  /** Converted OCI→ext4 rootfs cache for the Firecracker driver (`HOTCELL_FC_IMAGE_CACHE`). */
   fcImageCacheDir: string;
   /** Minimum level emitted by the structured logger. */
   logLevel: LogLevel;
@@ -238,13 +238,13 @@ export interface Config {
   /**
    * Maximum accepted request body size in bytes (REST + egress gateway). Caps
    * memory use from a single request. Must stay large enough for base64-encoded
-   * file writes. `SBX_MAX_BODY_BYTES`, default 32 MiB.
+   * file writes. `HOTCELL_MAX_BODY_BYTES`, default 32 MiB.
    */
   maxBodyBytes: number;
   /**
    * Extra Host header values accepted by the API server, beyond the loopback
    * names and `host`. The Host allowlist is a DNS-rebinding / localhost-CSRF
-   * guard. `SBX_ALLOWED_HOSTS` (comma-separated). Empty by default.
+   * guard. `HOTCELL_ALLOWED_HOSTS` (comma-separated). Empty by default.
    */
   allowedHosts: string[];
 }
@@ -281,7 +281,7 @@ export function loadConfig(): Config {
     egressPort: Number(env("EGRESS_PORT") ?? 4752),
     egressAdvertiseHost: env("EGRESS_ADVERTISE_HOST") ?? "host.docker.internal",
     egressEnforce: env("EGRESS_ENFORCE") === "true",
-    egressNetwork: env("EGRESS_NETWORK") ?? "sbx-egress",
+    egressNetwork: env("EGRESS_NETWORK") ?? "hotcell-egress",
     egressSubnet: env("EGRESS_SUBNET") ?? "10.200.0.0/24",
     egressDnsResolver: env("EGRESS_DNS") ?? "",
     allowlistFile: env("ALLOWLIST_FILE") ?? "",
@@ -330,40 +330,45 @@ export function loadConfig(): Config {
   };
 }
 
-/** Collect provider keys from `SBX_PROVIDER_KEY_<NAME>` env vars (name lowercased). */
+/** Collect provider keys from `HOTCELL_PROVIDER_KEY_<NAME>` env vars (name
+ *  lowercased); legacy `SBX_PROVIDER_KEY_<NAME>` still read, HOTCELL_ wins. */
 function loadProviderKeys(): Record<string, string> {
   const keys: Record<string, string> = {};
-  const prefix = "SBX_PROVIDER_KEY_";
-  for (const [name, value] of Object.entries(process.env)) {
-    if (name.startsWith(prefix) && value) {
-      keys[name.slice(prefix.length).toLowerCase()] = value;
+  for (const prefix of ["SBX_PROVIDER_KEY_", "HOTCELL_PROVIDER_KEY_"]) {
+    // legacy first so HOTCELL_ overwrites on conflict
+    for (const [name, value] of Object.entries(process.env)) {
+      if (name.startsWith(prefix) && value) {
+        keys[name.slice(prefix.length).toLowerCase()] = value;
+      }
     }
   }
   return keys;
 }
 
 /**
- * Collect operator-defined provider shapes from `SBX_PROVIDER_<NAME>_<FIELD>` env
- * vars (FIELD ∈ BASEURL/AUTHHEADER/FORMAT), skipping the `SBX_PROVIDER_KEY_*`
+ * Collect operator-defined provider shapes from `HOTCELL_PROVIDER_<NAME>_<FIELD>` env
+ * vars (FIELD ∈ BASEURL/AUTHHEADER/FORMAT), skipping the `HOTCELL_PROVIDER_KEY_*`
  * namespace. The provider name is lower-cased; e.g.
- * `SBX_PROVIDER_CFOPENAI_BASEURL=https://gateway.ai.cloudflare.com/v1/<acct>/<gw>/openai`
- * defines a `cfopenai` route (pair with `SBX_PROVIDER_KEY_CFOPENAI`).
+ * `HOTCELL_PROVIDER_CFOPENAI_BASEURL=https://gateway.ai.cloudflare.com/v1/<acct>/<gw>/openai`
+ * defines a `cfopenai` route (pair with `HOTCELL_PROVIDER_KEY_CFOPENAI`).
  */
 function loadProviderConfigs(): Record<string, ProviderConfig> {
   const out: Record<string, ProviderConfig> = {};
-  const prefix = "SBX_PROVIDER_";
-  for (const [name, value] of Object.entries(process.env)) {
-    if (!name.startsWith(prefix) || !value) continue;
-    if (name.startsWith("SBX_PROVIDER_KEY_")) continue;
-    const rest = name.slice(prefix.length); // <NAME>_<FIELD>
-    const us = rest.lastIndexOf("_");
-    if (us <= 0) continue;
-    const provName = rest.slice(0, us).toLowerCase();
-    const field = rest.slice(us + 1).toUpperCase();
-    const cfg = (out[provName] ??= {});
-    if (field === "BASEURL") cfg.baseUrl = value;
-    else if (field === "AUTHHEADER") cfg.authHeader = value.toLowerCase();
-    else if (field === "FORMAT") cfg.formatTemplate = value;
+  // Legacy prefix scanned first so HOTCELL_ overwrites on conflict.
+  for (const prefix of ["SBX_PROVIDER_", "HOTCELL_PROVIDER_"]) {
+    for (const [name, value] of Object.entries(process.env)) {
+      if (!name.startsWith(prefix) || !value) continue;
+      if (name.startsWith("SBX_PROVIDER_KEY_") || name.startsWith("HOTCELL_PROVIDER_KEY_")) continue;
+      const rest = name.slice(prefix.length); // <NAME>_<FIELD>
+      const us = rest.lastIndexOf("_");
+      if (us <= 0) continue;
+      const provName = rest.slice(0, us).toLowerCase();
+      const field = rest.slice(us + 1).toUpperCase();
+      const cfg = (out[provName] ??= {});
+      if (field === "BASEURL") cfg.baseUrl = value;
+      else if (field === "AUTHHEADER") cfg.authHeader = value.toLowerCase();
+      else if (field === "FORMAT") cfg.formatTemplate = value;
+    }
   }
   return out;
 }

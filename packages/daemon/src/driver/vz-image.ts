@@ -27,7 +27,7 @@ export interface VzImageCacheOpts {
 
 // Image names that map to the prebuilt Alpine base rootfs instead of converting:
 // the lightweight default for tests/dev that needs no Docker pull.
-const SENTINELS = new Set(["base", "alpine", "sbx/base", "sbx/base:latest", "default"]);
+const SENTINELS = new Set(["base", "alpine", "hotcell/base", "hotcell/base:latest", "sbx/base", "sbx/base:latest", "default"]);
 
 export class VzImageCache {
   private inflight = new Map<string, Promise<string>>();

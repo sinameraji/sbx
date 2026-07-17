@@ -5,7 +5,7 @@
 // is shared verbatim by both microVM drivers.
 //
 // Transport selection:
-//   - SBX_AGENT_LISTEN set (e.g. "tcp://127.0.0.1:9000" or "unix:///tmp/a.sock")
+//   - HOTCELL_AGENT_LISTEN set (e.g. "tcp://127.0.0.1:9000" or "unix:///tmp/a.sock")
 //     → listen there. This is the dev/test path and works on any OS, so the
 //     agent can be exercised on a developer's macOS box without a guest.
 //   - otherwise → vsock (Linux only; the production path inside a guest).
@@ -56,7 +56,7 @@ func main() {
 	}
 }
 
-// listen picks the transport: the explicit SBX_AGENT_LISTEN spec if present,
+// listen picks the transport: the explicit HOTCELL_AGENT_LISTEN spec if present,
 // else the platform default (vsock on Linux; an error elsewhere).
 func listen() (net.Listener, error) {
 	if spec := agentEnv("AGENT_LISTEN"); spec != "" {

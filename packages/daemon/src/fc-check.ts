@@ -91,9 +91,9 @@ async function main(): Promise<void> {
     vcpus: 1,
     memMib: 256,
     vsockUds: "/v",
-    bootArgs: `${FC_DEFAULT_BOOT_ARGS} sbx.pids=64`,
+    bootArgs: `${FC_DEFAULT_BOOT_ARGS} hotcell.pids=64 sbx.pids=64`,
   });
-  assert.match((withPids[0]!.body as { boot_args: string }).boot_args, /sbx\.pids=64/);
+  assert.match((withPids[0]!.body as { boot_args: string }).boot_args, /hotcell\.pids=64/);
   ok("custom boot args (pidsLimit cmdline) flow through");
 
   // 3. vsock handshake parser: incomplete → null; OK line → split leftover; bad → not ok.

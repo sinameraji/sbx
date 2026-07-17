@@ -1,4 +1,4 @@
-// Package server implements the in-sandbox sbx-agent: it serves the proto
+// Package server implements the in-sandbox hotcell-agent: it serves the proto
 // protocol over a single connection (vsock in production, a unix/tcp socket in
 // dev/tests) and turns each request into a local OS action — exactly the work
 // `docker exec` does for the container driver, but from inside a microVM where
@@ -42,7 +42,7 @@ type Agent struct {
 	env map[string]string
 
 	// EgressDial opens a fresh guest→host connection for the egress relay
-	// (AF_VSOCK to CID 2 in production; a test override via SBX_EGRESS_DIAL).
+	// (AF_VSOCK to CID 2 in production; a test override via HOTCELL_EGRESS_DIAL).
 	// Set by main at startup; nil means egressListen is unsupported.
 	EgressDial func(vsockPort uint32) (net.Conn, error)
 	egress     egressState

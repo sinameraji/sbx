@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 #
-# Run a coding task with OpenCode inside a throwaway sbx sandbox — clean output:
+# Run a coding task with OpenCode inside a throwaway hotcell sandbox — clean output:
 # a spinner with a live token/$ ticker, then the agent's answer, then a summary.
-# OpenRouter is reached through the sbx egress gateway, so your real key stays on
+# OpenRouter is reached through the hotcell egress gateway, so your real key stays on
 # the daemon and never enters the sandbox.
 #
 # Prereqs:

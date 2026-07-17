@@ -13,7 +13,7 @@ import (
 func listenSpec(spec string) (net.Listener, error) {
 	scheme, addr, ok := strings.Cut(spec, "://")
 	if !ok {
-		return nil, fmt.Errorf("SBX_AGENT_LISTEN must be scheme://addr, got %q", spec)
+		return nil, fmt.Errorf("HOTCELL_AGENT_LISTEN must be scheme://addr, got %q", spec)
 	}
 	switch scheme {
 	case "tcp":
@@ -22,6 +22,6 @@ func listenSpec(spec string) (net.Listener, error) {
 		os.Remove(addr) // clear a stale socket from a prior run
 		return net.Listen("unix", addr)
 	default:
-		return nil, fmt.Errorf("unsupported SBX_AGENT_LISTEN scheme %q (use tcp:// or unix://)", scheme)
+		return nil, fmt.Errorf("unsupported HOTCELL_AGENT_LISTEN scheme %q (use tcp:// or unix://)", scheme)
 	}
 }

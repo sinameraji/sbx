@@ -14,6 +14,11 @@ import { buildProviders, createEgressProxy } from "./proxy/egress.js";
 import { loadModelPrices } from "./pricing.js";
 import { ensureEgressFirewall } from "./net/firewall.js";
 
+/** A loopback bind host (unreachable from sandboxes on native-Linux dockerd). */
+function isLoopback(host: string): boolean {
+  return host === "127.0.0.1" || host === "localhost" || host === "::1";
+}
+
 async function main(): Promise<void> {
   const config = loadConfig();
   configureLogger({ level: config.logLevel, format: config.logFormat });
@@ -78,13 +83,37 @@ async function main(): Promise<void> {
   // advisory no-op otherwise). Best-effort: logs and continues if it can't.
   await ensureEgressFirewall(config);
 
+  // Reconcile the egress bridge network at boot so a subnet collision (e.g. a
+  // stale network from a pre-rename daemon) fails fast with an actionable message
+  // instead of a 422 on the first create.
+  if (config.egressEnforce && typeof driver.initEgress === "function") {
+    await driver.initEgress();
+  }
+
   const providers = buildProviders(config);
   const prices = loadModelPrices(config.modelPricesPath);
+  // Native-Linux enforcement footgun: sandboxes reach the daemon via the bridge
+  // gateway (host.docker.internal → ~172.17.0.1), so a loopback-only egress bind
+  // is unreachable from them and every outbound call (npm, the LLM gateway) fails
+  // with ECONNREFUSED. When enforcement is on, the platform is Linux, and the
+  // operator hasn't pinned a host explicitly, bind 0.0.0.0 — access is still gated
+  // by the per-sandbox egress token + the host firewall. Block the port at your
+  // cloud firewall.
+  const egressHostSet = !!(process.env.HOTCELL_EGRESS_HOST ?? process.env.SBX_EGRESS_HOST);
+  const egressBindHost =
+    config.egressEnforce && !egressHostSet && process.platform === "linux" && isLoopback(config.egressHost)
+      ? "0.0.0.0"
+      : config.egressHost;
+  if (egressBindHost !== config.egressHost) {
+    log.info("egress proxy binding 0.0.0.0 for native-Linux enforcement (token-gated; firewall the port)", {
+      port: config.egressPort,
+    });
+  }
   const egress =
     config.egressPort > 0 ? createEgressProxy({ config, store, providers, prices }) : undefined;
-  egress?.listen(config.egressPort, config.egressHost, () => {
+  egress?.listen(config.egressPort, egressBindHost, () => {
     log.info("egress proxy listening", {
-      url: `http://${config.egressHost}:${config.egressPort}`,
+      url: `http://${egressBindHost}:${config.egressPort}`,
       providers: Object.keys(providers).length ? Object.keys(providers).join(",") : "none configured",
     });
   });

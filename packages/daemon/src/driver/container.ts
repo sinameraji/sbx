@@ -86,26 +86,109 @@ export class ContainerDriver implements Driver {
   }
 
   /**
-   * Create the egress-enforcement bridge network if missing (idempotent). Uses the
-   * configured subnet so the host firewall's `-s <subnet>` rules match, with the
-   * gateway pinned to `.1`. Safe to call repeatedly; a 409 (already exists) is fine.
+   * Startup reconcile of the egress network. Call once at boot when enforcement is
+   * on, so a subnet collision surfaces immediately with an actionable message
+   * rather than as a 422 on the first `create` (a terrible first impression under
+   * load). No-op when enforcement is off.
+   */
+  async initEgress(): Promise<void> {
+    if (this.egress?.enforce) await this.ensureEgressNetwork();
+  }
+
+  /**
+   * Ensure the egress-enforcement bridge network exists on the configured subnet
+   * (idempotent). The subnet must match so the host firewall's `-s <subnet>` rules
+   * apply, with the gateway pinned to `.1`. Reconciles a subnet collision:
+   *   - our network already exists (409)     → adopt it;
+   *   - an *idle, hotcell-managed* network squats the subnet (e.g. the pre-rename
+   *     `sbx-egress` after an upgrade) → remove it and recreate;
+   *   - a *foreign* network, or one with live containers, holds the subnet
+   *     → fail loudly, naming it and the override flag. We never delete a network
+   *     that a user might own or that is in use.
    */
   private async ensureEgressNetwork(): Promise<void> {
     if (!this.egress || this.egressNetReady) return;
     const { network, subnet } = this.egress;
     const gateway = gatewayOf(subnet);
-    try {
-      await this.docker.createNetwork({
+    const create = () =>
+      this.docker.createNetwork({
         Name: network,
         Driver: "bridge",
         CheckDuplicate: true,
         IPAM: { Driver: "default", Config: [{ Subnet: subnet, Gateway: gateway }] },
-        Labels: { "sbx.managed": "true" },
+        Labels: { "sbx.managed": "true", "hotcell.managed": "true" },
       });
+    try {
+      await create();
+      log.info("egress network created", { network, subnet });
     } catch (err) {
-      if (!isConflict(err)) throw err; // 409 = already exists
+      if (isConflict(err)) {
+        log.info("egress network already present — adopting", { network, subnet });
+        this.egressNetReady = true; // 409 = our network already exists
+        return;
+      }
+      if (isPoolOverlap(err)) {
+        const { removed, blockers } = await this.reconcileSubnet(subnet, network);
+        if (removed > 0 && blockers.length === 0) {
+          await create();
+          log.info("egress network recreated after clearing stale networks", { network, subnet, removed });
+          this.egressNetReady = true;
+          return;
+        }
+        throw new Error(
+          `egress enforcement: subnet ${subnet} is already used by ${blockers.join(", ")} ` +
+            `(not hotcell-managed, or with live containers) — refusing to delete it. ` +
+            `Free that network, or set HOTCELL_EGRESS_SUBNET to an unused range.`,
+        );
+      }
+      throw err;
     }
     this.egressNetReady = true;
+  }
+
+  /**
+   * Resolve a subnet collision for `keepName`: remove idle hotcell-managed networks
+   * squatting `subnet`, and report any that block us (foreign, or with live
+   * containers) so the caller can fail with a clear message. Never removes a
+   * network we don't recognise or that has attached containers.
+   */
+  private async reconcileSubnet(
+    subnet: string,
+    keepName: string,
+  ): Promise<{ removed: number; blockers: string[] }> {
+    let removed = 0;
+    const blockers: string[] = [];
+    let nets: Array<{
+      Name?: string;
+      Id?: string;
+      Labels?: Record<string, string>;
+      Containers?: Record<string, unknown>;
+      IPAM?: { Config?: Array<{ Subnet?: string }> };
+    }> = [];
+    try {
+      nets = (await this.docker.listNetworks()) as typeof nets;
+    } catch {
+      return { removed, blockers: ["(could not list Docker networks)"] };
+    }
+    for (const n of nets) {
+      if (n.Name === keepName) continue;
+      if (!n.IPAM?.Config?.some((c) => c.Subnet === subnet)) continue; // not on our subnet
+      const managed = n.Labels?.["sbx.managed"] === "true" || n.Labels?.["hotcell.managed"] === "true";
+      const idle = !n.Containers || Object.keys(n.Containers).length === 0;
+      const label = `"${n.Name}"`;
+      if (managed && idle && n.Id) {
+        try {
+          await this.docker.getNetwork(n.Id).remove();
+          log.info("removed a stale hotcell-managed egress network on our subnet", { name: n.Name, subnet });
+          removed++;
+        } catch {
+          blockers.push(`${label} (in use)`); // attached or racing — treat as a blocker
+        }
+      } else {
+        blockers.push(managed ? `${label} (has live containers)` : `${label} (foreign network)`);
+      }
+    }
+    return { removed, blockers };
   }
 
   /** Create the workspace volume if it does not already exist (idempotent). */
@@ -795,6 +878,16 @@ function isNotFound(err: unknown): boolean {
 
 function isConflict(err: unknown): boolean {
   return statusCode(err) === 409;
+}
+
+/** Docker's 403 "Pool overlaps with other one on this address space" — a
+ *  different network already owns the requested subnet. */
+function isPoolOverlap(err: unknown): boolean {
+  const msg =
+    typeof err === "object" && err !== null && "message" in err
+      ? String((err as { message?: unknown }).message)
+      : String(err);
+  return /pool overlaps/i.test(msg);
 }
 
 function statusCode(err: unknown): number | undefined {

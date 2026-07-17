@@ -96,6 +96,11 @@ export class DriverRouter implements Driver {
     const d = this.forId(id);
     return typeof d.snapshot === "function" && (d.canSnapshot ? d.canSnapshot(id) : true);
   }
+  /** Startup egress reconcile on the default driver (where enforcement lives). */
+  async initEgress(): Promise<void> {
+    const d = this.instance(this.defaultName);
+    if (typeof d.initEgress === "function") await d.initEgress();
+  }
   destroy(id: string): Promise<void> {
     return this.forId(id).destroy(id);
   }

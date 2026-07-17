@@ -171,6 +171,13 @@ export interface Driver {
   canSnapshot?(id: string): boolean;
 
   /**
+   * Optional startup hook: reconcile any host-level egress state (e.g. the
+   * enforcement bridge network) so a collision fails fast at boot with an
+   * actionable message rather than as an error on the first sandbox create.
+   */
+  initEgress?(): Promise<void>;
+
+  /**
    * Run a command inside the sandbox, streaming output via `onEvent`.
    * Resolves with the process exit code.
    */

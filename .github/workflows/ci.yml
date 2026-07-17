@@ -32,6 +32,8 @@ jobs:
         run: npm run check:agent
       - name: egress control-plane check (mock upstream)
         run: npm run check:egress
+      - name: egress-network reconcile (subnet-collision regression)
+        run: npm run check:netreconcile
       - name: container smoke (real Docker, end-to-end)
         run: npm run smoke
 

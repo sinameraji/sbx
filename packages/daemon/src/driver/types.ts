@@ -126,6 +126,13 @@ export interface CreateOptions {
    * Ignored by the container driver (containers are networked already).
    */
   networked?: boolean;
+  /**
+   * Host-core pinning for a microVM sandbox (Firecracker): a `taskset`-style CPU
+   * list (e.g. `"0-7"`) the firecracker process — and thus its vCPU threads — is
+   * constrained to. Used to keep a guest on a single CCD / shared L3 for stable,
+   * disclosed benchmark topology. Ignored by the container driver.
+   */
+  cpuset?: string;
 }
 
 /**

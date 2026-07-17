@@ -188,6 +188,7 @@ export class FirecrackerDriver extends AgentDriver {
       image: opts.image,
       limits: opts.limits,
       networked: opts.networked,
+      cpuset: opts.cpuset,
     });
     this.vms.set(id, vm);
     try {
@@ -213,6 +214,7 @@ export class FirecrackerDriver extends AgentDriver {
     image: string;
     limits?: CreateOptions["limits"];
     networked?: boolean;
+    cpuset?: string;
   }): Promise<FcVm> {
     mkdirSync(p.stateDir, { recursive: true });
     let rootfs = await this.images.ensureRootfs(p.image);
@@ -258,7 +260,7 @@ export class FirecrackerDriver extends AgentDriver {
     const bootArgs = pidsMax > 0 ? `${FC_DEFAULT_BOOT_ARGS} hotcell.pids=${pidsMax} sbx.pids=${pidsMax}` : FC_DEFAULT_BOOT_ARGS;
 
     const configureAndBoot = async (): Promise<FcVm> => {
-      const vm = await this.spawnVmm(p.stateDir);
+      const vm = await this.spawnVmm(p.stateDir, p.cpuset);
       try {
         const api = new FcApi(vm.apiSock);
         await api.applyAll(
@@ -450,11 +452,16 @@ export class FirecrackerDriver extends AgentDriver {
   }
 
   /** Spawn a fresh VMM process for `stateDir` and wait for its API socket. */
-  private async spawnVmm(stateDir: string): Promise<FcVm> {
+  private async spawnVmm(stateDir: string, cpuset?: string): Promise<FcVm> {
     const apiSock = join(stateDir, "fc-api.sock");
     const vsockUds = join(stateDir, "vsock.sock");
     for (const s of [apiSock, vsockUds]) rmQuiet(s);
-    const proc = spawn(this.cfg.fcBin, ["--api-sock", apiSock], { stdio: ["ignore", "pipe", "pipe"] });
+    // Optional host-core pinning: constrain firecracker (and its vCPU threads) to
+    // a fixed cpuset via taskset — keeps a guest on one CCD / shared L3 for stable
+    // benchmark topology. Falls through to an unpinned spawn when cpuset is unset.
+    const proc = cpuset
+      ? spawn("taskset", ["-c", cpuset, this.cfg.fcBin, "--api-sock", apiSock], { stdio: ["ignore", "pipe", "pipe"] })
+      : spawn(this.cfg.fcBin, ["--api-sock", apiSock], { stdio: ["ignore", "pipe", "pipe"] });
     proc.stdout.pipe(createWriteStream(join(stateDir, "console.log"), { flags: "a" }));
     proc.stderr.pipe(createWriteStream(join(stateDir, "console.log"), { flags: "a" }));
     const vm: FcVm = { proc, apiSock, vsockUds, workspaceImg: join(stateDir, "workspace.img"), stateDir };

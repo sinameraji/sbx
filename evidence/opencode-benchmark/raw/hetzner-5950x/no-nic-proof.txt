@@ -1,0 +1,15 @@
+Default (non-networked) Firecracker guest — empirical no-NIC proof
+Hetzner 5950X bare metal, 2026-07-17, stock hotcell.
+
+Create with NO `networked` flag:
+  POST /sandboxes {"image":"ubuntu:24.04","driver":"firecracker","memoryMb":1024,"cpus":2}
+
+In the guest:
+  $ ls /sys/class/net        ->  lo
+  $ getent hosts github.com  ->  NO_INTERNET (no route out)
+
+=> The default microVM has ONLY loopback: no network device, egress denied by
+construction, gateway reachable only over vsock. The benchmark's A1/A2/CPU-ladder
+runs use the OPT-IN `networked:true` NAT (needed for apt/npm/github); A3 (egress
+enforced) runs with the default no-NIC posture. Driver: setupTap() runs only when
+networked:true (packages/daemon/src/driver/firecracker.ts).

@@ -19,15 +19,17 @@
   "keywords": [
     "sandbox",
     "ai-agents",
-    "sbx",
+    "firecracker",
+    "microvm",
+    "apple-virtualization",
     "code-execution",
+    "llm-gateway",
     "self-hosted"
   ],
-  "homepage": "https://github.com/sinameraji/sbx#readme",
+  "homepage": "https://hotcell-bw3.pages.dev",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/sinameraji/sbx.git",
-    "directory": "packages/sdk"
+    "url": "git+https://github.com/sinameraji/hotcell.git"
   },
   "publishConfig": {
     "access": "public"
@@ -38,5 +40,11 @@
   "devDependencies": {
     "@types/node": "^20.14.0",
     "typescript": "^5.5.0"
+  },
+  "bugs": {
+    "url": "https://github.com/sinameraji/hotcell/issues"
+  },
+  "engines": {
+    "node": ">=18"
   }
 }

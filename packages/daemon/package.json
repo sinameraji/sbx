@@ -22,5 +22,32 @@
     "tsx": "^4.16.0",
     "typescript": "^5.5.0",
     "@hotcell/sdk": "^0.1.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sinameraji/hotcell.git"
+  },
+  "homepage": "https://hotcell-bw3.pages.dev",
+  "bugs": {
+    "url": "https://github.com/sinameraji/hotcell/issues"
+  },
+  "keywords": [
+    "sandbox",
+    "ai-agents",
+    "firecracker",
+    "microvm",
+    "apple-virtualization",
+    "code-execution",
+    "llm-gateway",
+    "self-hosted"
+  ],
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

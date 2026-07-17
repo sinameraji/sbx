@@ -1,8 +1,8 @@
 /**
- * @sbx/mastra — a Mastra Workspace sandbox provider backed by self-hosted sbx.
+ * @hotcell/mastra — a Mastra Workspace sandbox provider backed by self-hosted hotcell.
  *
  * Drop it in alongside Mastra's built-in providers (E2B, Modal, …) to run a
- * Mastra agent's commands inside an sbx sandbox on your own hardware, with the
+ * Mastra agent's commands inside an hotcell sandbox on your own hardware, with the
  * LLM egress gateway, per-agent cost/observability, resource caps, and a repo
  * cloned in:
  *
@@ -31,7 +31,7 @@ import type {
 } from "@mastra/core/workspace";
 
 export interface SbxSandboxOptions {
-  /** sbx daemon endpoint (default: `SBX_ENDPOINT` or http://127.0.0.1:4750). */
+  /** hotcell daemon endpoint (default: `HOTCELL_ENDPOINT` or http://127.0.0.1:4750). */
   endpoint?: string;
   /** API key for an auth-enabled daemon (default: `SBX_API_KEY`). */
   apiKey?: string;
@@ -54,14 +54,14 @@ export interface SbxSandboxOptions {
 }
 
 /**
- * Mastra `WorkspaceSandbox` provider backed by sbx. Implements the lifecycle
+ * Mastra `WorkspaceSandbox` provider backed by hotcell. Implements the lifecycle
  * (`start`/`stop`/`destroy`/`getInfo`) and `executeCommand`; the optional
  * process-manager / mount surface is left unimplemented (Mastra degrades
  * gracefully — those tools simply aren't exposed).
  */
 export class SbxSandbox implements WorkspaceSandbox {
-  readonly name = "sbx";
-  readonly provider = "sbx";
+  readonly name = "hotcell";
+  readonly provider = "hotcell";
   status: ProviderStatus = "pending";
   error?: string;
 
@@ -82,7 +82,7 @@ export class SbxSandbox implements WorkspaceSandbox {
     return this._id;
   }
 
-  /** Create (or attach to) the sbx sandbox. Idempotent + concurrency-safe. */
+  /** Create (or attach to) the hotcell sandbox. Idempotent + concurrency-safe. */
   async start(): Promise<void> {
     if (this.sandbox) return;
     if (!this.starting) this.starting = this.doStart();

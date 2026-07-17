@@ -539,25 +539,26 @@ async function handleConnect(
   const token = extractProxyToken(req);
   const rec = token ? deps.store.resolveEgressTokenFull(token) : undefined;
   if (!rec) {
-    clientSocket.write(
-      'HTTP/1.1 407 Proxy Authentication Required\r\nProxy-Authenticate: Basic realm="hotcell-egress"\r\n\r\n',
+    // Graceful close, and say so: git (unlike curl/pip/apt) does not send
+    // Proxy-Authorization preemptively — it expects the 407, then retries with
+    // credentials. Without `Connection: close` + a clean FIN it retries the
+    // CONNECT on this same socket and dies on "Proxy CONNECT aborted".
+    clientSocket.end(
+      'HTTP/1.1 407 Proxy Authentication Required\r\nProxy-Authenticate: Basic realm="hotcell-egress"\r\nConnection: close\r\nContent-Length: 0\r\n\r\n',
     );
-    clientSocket.destroy();
     return;
   }
   // Provider-domain guard MUST precede the allowlist: a wide allowlist entry must
   // never re-open a key-bypass tunnel to an LLM provider.
   if (deps.providerHosts.has(nhost)) {
     log.warn("egress CONNECT denied: LLM provider host", { sandbox: rec.sandboxId, host: nhost });
-    clientSocket.write("HTTP/1.1 403 Forbidden\r\n\r\n");
-    clientSocket.destroy();
+    clientSocket.end("HTTP/1.1 403 Forbidden\r\nConnection: close\r\nContent-Length: 0\r\n\r\n");
     return;
   }
   const decision = deps.allowlist.check(nhost);
   if (!decision.allow) {
     log.warn("egress CONNECT denied", { sandbox: rec.sandboxId, host: nhost, reason: decision.reason });
-    clientSocket.write("HTTP/1.1 403 Forbidden\r\n\r\n");
-    clientSocket.destroy();
+    clientSocket.end("HTTP/1.1 403 Forbidden\r\nConnection: close\r\nContent-Length: 0\r\n\r\n");
     return;
   }
 

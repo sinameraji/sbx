@@ -1,7 +1,7 @@
 import Foundation
 import Virtualization
 
-// Persistent lifecycle server (`sbx-vz serve`). The daemon spawns one per sandbox
+// Persistent lifecycle server (`hotcell-vz serve`). The daemon spawns one per sandbox
 // and drives it over a line-delimited JSON-RPC on stdio:
 //   {"id":N,"method":"start","params":{kernel,rootfs,workspace?,cpus,memMb,socketPath,vsockPort?}}
 //   {"id":N,"method":"stop"} / {"method":"shutdown"} / probe / hostInfo
@@ -24,7 +24,7 @@ final class Relay {
     private let conn: VZVirtioSocketConnection
     private var srcClient: DispatchSourceRead?
     private var srcVsock: DispatchSourceRead?
-    private let queue = DispatchQueue(label: "sbx-vz.relay")
+    private let queue = DispatchQueue(label: "hotcell-vz.relay")
     var onClose: (() -> Void)?
     private var closed = false
 
@@ -129,7 +129,7 @@ final class VmServer: NSObject, VZVirtualMachineDelegate, VZVirtioSocketListener
     }
 
     private func note(_ s: String) {
-        FileHandle.standardError.write(("[sbx-vz] " + s + "\n").data(using: .utf8)!)
+        FileHandle.standardError.write(("[hotcell-vz] " + s + "\n").data(using: .utf8)!)
     }
 
     private func ok(_ id: Any?, _ result: [String: Any]) {

@@ -27,7 +27,7 @@ import (
 	"time"
 
 	"github.com/creack/pty"
-	"github.com/sinameraji/sbx/agent/proto"
+	"github.com/sinameraji/hotcell/agent/proto"
 )
 
 // Version is the agent build version, surfaced in the Hello greeting.
@@ -113,7 +113,7 @@ func (a *Agent) Serve(conn io.ReadWriteCloser) error {
 
 	hello, _ := json.Marshal(proto.Hello{
 		Event:   "hello",
-		Agent:   "sbx-agent",
+		Agent:   "hotcell-agent",
 		Version: Version,
 		Proto:   proto.ProtoVersion,
 	})

@@ -99,11 +99,11 @@ export class FirecrackerDriver extends AgentDriver {
 
   constructor(private readonly cfg: FcConfig) {
     super();
-    // The OCI→ext4 converter + staged guest files live under `helpers/sbx-vz`
+    // The OCI→ext4 converter + staged guest files live under `helpers/hotcell-vz`
     // (shared with the VZ driver: same rootfs artifact, same agent-as-init).
     const vzDir = join(dirname(dirname(cfg.rootfs)));
     this.images = new VzImageCache({
-      vzDir: vzDir.endsWith("guest") ? dirname(vzDir) : "helpers/sbx-vz",
+      vzDir: vzDir.endsWith("guest") ? dirname(vzDir) : "helpers/hotcell-vz",
       cacheDir: cfg.imageCacheDir,
       prebuiltRootfs: cfg.rootfs,
       // Convert OCI images for the host arch (the guest runs on this KVM host).

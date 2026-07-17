@@ -109,7 +109,7 @@ async function main(): Promise<void> {
   const driver = new FirecrackerDriver({
     fcBin: "firecracker",
     kernel: "/nonexistent/vmlinux",
-    rootfs: "helpers/sbx-vz/guest/rootfs.img",
+    rootfs: "helpers/hotcell-vz/guest/rootfs.img",
     stateDir: "/tmp/sbx-fc-check",
     diskGb: 8,
     imageCacheDir: "/tmp/sbx-fc-check/images",

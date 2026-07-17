@@ -1,4 +1,4 @@
-module github.com/sinameraji/sbx/agent
+module github.com/sinameraji/hotcell/agent
 
 go 1.26
 

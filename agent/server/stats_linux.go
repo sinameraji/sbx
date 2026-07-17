@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/sinameraji/sbx/agent/proto"
+	"github.com/sinameraji/hotcell/agent/proto"
 )
 
 // readStats reads the guest's resource usage from /proc and the cgroup

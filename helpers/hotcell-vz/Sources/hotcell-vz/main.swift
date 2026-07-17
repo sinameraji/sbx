@@ -1,21 +1,21 @@
 import Foundation
 
-// sbx-vz entrypoint. Modes:
-//   sbx-vz                    one-shot stdio JSON-RPC (probe / hostInfo) — M0.
-//   sbx-vz serve              persistent VM lifecycle + vsock relay — M1+.
-//   sbx-vz boot-test K R [L]  direct boot bring-up harness.
+// hotcell-vz entrypoint. Modes:
+//   hotcell-vz                    one-shot stdio JSON-RPC (probe / hostInfo) — M0.
+//   hotcell-vz serve              persistent VM lifecycle + vsock relay — M1+.
+//   hotcell-vz boot-test K R [L]  direct boot bring-up harness.
 
 let cliArgs = CommandLine.arguments
 
-// Persistent lifecycle server (M1+): `sbx-vz serve` — the daemon drives VM
+// Persistent lifecycle server (M1+): `hotcell-vz serve` — the daemon drives VM
 // start/stop + the vsock relay over stdio. Never returns.
 if cliArgs.count >= 2 && cliArgs[1] == "serve" {
     VmServer().run()
 }
 
-// Boot bring-up mode (M1): `sbx-vz boot-test <kernel> <rootfs> [consoleLog]`.
+// Boot bring-up mode (M1): `hotcell-vz boot-test <kernel> <rootfs> [consoleLog]`.
 if cliArgs.count >= 4 && cliArgs[1] == "boot-test" {
-    let consoleLog = cliArgs.count >= 5 ? cliArgs[4] : "/tmp/sbx-vz-console.log"
+    let consoleLog = cliArgs.count >= 5 ? cliArgs[4] : "/tmp/hotcell-vz-console.log"
     do {
         let test = try BootTest(
             kernel: cliArgs[2], rootfs: cliArgs[3], consoleLog: consoleLog,

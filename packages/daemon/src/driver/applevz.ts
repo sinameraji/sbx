@@ -74,8 +74,8 @@ export class AppleVzDriver extends AgentDriver {
 
   constructor(private readonly cfg: VzConfig) {
     super();
-    // `helpers/sbx-vz` holds the converter scripts + staged guest files, two dirs
-    // up from the helper binary (helpers/sbx-vz/dist/sbx-vz).
+    // `helpers/hotcell-vz` holds the converter scripts + staged guest files, two dirs
+    // up from the helper binary (helpers/hotcell-vz/dist/hotcell-vz).
     const vzDir = dirname(dirname(cfg.helperPath));
     this.images = new VzImageCache({
       vzDir,
@@ -130,7 +130,7 @@ export class AppleVzDriver extends AgentDriver {
           id,
           stateDir,
           image: opts.image,
-          socketPath: `/tmp/sbx-vz-${id}.sock`, // short, fits sun_path
+          socketPath: `/tmp/hc-${id}.sock`, // short, fits sun_path
           limits: opts.limits,
           restoreFrom,
         });
@@ -337,7 +337,7 @@ export class AppleVzDriver extends AgentDriver {
             id: `pool-${n}`,
             stateDir: join(this.poolDir, `slot-${n}`),
             image: this.poolImage,
-            socketPath: `/tmp/sbx-vz-pool-${n}.sock`,
+            socketPath: `/tmp/hc-pool-${n}.sock`,
           });
           this.pool.push(vm);
           log.info("warm pool: spare guest ready", { size: this.pool.length, target: this.poolTarget });

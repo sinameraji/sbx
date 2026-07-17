@@ -15,7 +15,7 @@ import { log } from "../logger.js";
  * on macOS where there is no native `mke2fs`.
  */
 export interface VzImageCacheOpts {
-  /** The `helpers/sbx-vz` dir holding the converter scripts + staged guest files. */
+  /** The `helpers/hotcell-vz` dir holding the converter scripts + staged guest files. */
   vzDir: string;
   /** Where converted rootfs images + the blank workspace template are cached. */
   cacheDir: string;
@@ -45,7 +45,7 @@ export class VzImageCache {
       await this.run(join(this.o.vzDir, "convert-image.sh"), [
         image,
         out,
-        join(this.o.vzDir, "guest", "sbx-agent"),
+        join(this.o.vzDir, "guest", "hotcell-agent"),
         join(this.o.vzDir, "guest", "init.sh"),
         this.platform,
       ]);

@@ -16,7 +16,7 @@ cd "$(dirname "$0")"
 mkdir -p guest
 
 # 1. Agent (built by `npm run build:agent`) → staged into the rootfs as PID-1.
-cp ../../agent/dist/sbx-agent-linux-arm64 guest/sbx-agent
+cp ../../agent/dist/hotcell-agent-linux-arm64 guest/hotcell-agent
 
 # 2. Rootfs: alpine userland + agent + the shared guest init (guest/init.sh),
 #    booted READ-ONLY (serve.swift mounts it readOnly), so the init backs every
@@ -29,9 +29,9 @@ docker run --rm --platform linux/arm64 -v "$PWD/guest:/guest" alpine:3.20 sh -c 
   cp -a /bin /sbin /usr /etc /lib /rootfs/ 2>/dev/null || true
   # Mountpoints the init needs to exist on the read-only rootfs.
   mkdir -p /rootfs/proc /rootfs/sys /rootfs/dev /rootfs/run /rootfs/tmp /rootfs/workspace
-  cp /guest/sbx-agent /rootfs/sbin/sbx-agent
+  cp /guest/hotcell-agent /rootfs/sbin/hotcell-agent
   cp /guest/init.sh /rootfs/init
-  chmod +x /rootfs/init /rootfs/sbin/sbx-agent
+  chmod +x /rootfs/init /rootfs/sbin/hotcell-agent
   rm -f /guest/rootfs.img
   mkfs.ext4 -q -F -L sbxroot -d /rootfs /guest/rootfs.img 256M
 '

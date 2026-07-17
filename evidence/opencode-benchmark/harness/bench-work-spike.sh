@@ -44,7 +44,12 @@ echo "=== ramp: wake + touch ${TOUCH_MB}MB per guest, cumulative ==="
 w=0; WALL=""
 while read -r id; do
   code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 60 -X POST "$BASE/sandboxes/$id/start")
-  if [ "$code" != "200" ]; then WALL="admission-503"; echo "RESULT WALL: resume refused at $w working guests (HTTP $code) — CLEAN admission refusal"; break; fi
+  if [ "$code" != "200" ]; then
+    WALL="admission-503"; echo "RESULT WALL: resume refused at $w working guests (HTTP $code) — CLEAN admission refusal"
+    nid=$(grep -A1 -x "$id" "$OUT/ids.txt" | tail -1)
+    [ -n "$nid" ] && [ "$nid" != "$id" ] && echo "RESULT auto-resume gate: exec on paused $nid -> HTTP $(curl -s -o /dev/null -w '%{http_code}' --max-time 60 -X POST "$BASE/sandboxes/$nid/exec" -H 'content-type: application/json' -d '{"command":"true"}')"
+    break
+  fi
   r=$(exj "$id" "{\"command\":\"mkdir -p /tmp/h && mount -t tmpfs -o size=$((TOUCH_MB+300))m tmpfs /tmp/h && dd if=/dev/zero of=/tmp/h/x bs=1M count=${TOUCH_MB} 2>&1 | tail -1 || echo TOUCH_FAILED\"}")
   w=$((w+1)); mem=$(freemb); oom=$(ooms); alive=$(pgrep -c -f firecracker)
   if [ "$w" = "1" ]; then d=$((BASE_MEM - mem)); if [ "$d" -lt $((TOUCH_MB/2)) ]; then echo "ABORT: first touch moved only ${d}MB (<$((TOUCH_MB/2))) — memory not faulted in; dd=[$r]"; WALL="touch-broken"; break; fi; echo "first-touch OK: host memory moved ${d}MB for one ${TOUCH_MB}MB guest"; fi
@@ -56,6 +61,8 @@ done < "$OUT/ids.txt"
 MINMEM=$(awk 'NR==1||$2<m{m=$2}END{print m+0}' "$OUT/ramp.tsv" 2>/dev/null)
 if [ -z "$WALL" ]; then
   echo "RESULT work-spike: NO HARD WALL INDUCED — reached pool max ($w working ${MEM}MB guests, each touched ${TOUCH_MB}MB) without OOM or exhaustion. MemAvailable bottomed at ${MINMEM}MB. Report as 'could not induce a wall with this method' (file-backed guest pages are reclaimable via host write-back), NOT as 'no wall exists'."
+elif [ "$WALL" = "admission-503" ]; then
+  echo "RESULT work-spike: WALL=admission-503 at $w concurrently-WORKING ${MEM}MB guests (each touched ${TOUCH_MB}MB) — the daemon REFUSED further resumes with a clean 503; MemAvailable bottomed ${MINMEM}MB (headroom intact, no OOM). The resume-path admission gate held."
 else
   echo "RESULT work-spike: WALL=$WALL at $w concurrently-WORKING ${MEM}MB guests (each touched ${TOUCH_MB}MB); MemAvailable bottomed ${MINMEM}MB; final=$(freemb)MB oom_kills=$(ooms). Over-commit, not admission — resume path is ungated."
 fi

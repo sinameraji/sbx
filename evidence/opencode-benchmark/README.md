@@ -21,13 +21,22 @@ below which the workload dies at typecheck, the CPU knee beyond which more cores
 stop helping, and the at-rest economics dax actually needs for a large, spiky
 userbase. Every rung, including every failure, is published.
 
-**Status (in progress):** the full ladder is running now; rungs land in
-`raw/hetzner-5950x/` as they complete. Published so far — bare-metal proof
-(`host-proof.txt`), the 32 vCPU max-config row (`32vcpu-5reps.txt`, 5 cold reps), the
-host control (`control-bare-host.txt`), the node-gyp diagnostic, and the memory-floor
-lower bound (≤8 GiB always OOMs at typecheck — data in
-`raw/hetzner-5950x/memory-floor.txt`; 12–16 GiB rungs in progress).
-Pause/resume, spike, and economics (Parts B–D) are a separate follow-up.
+**Status:** Part A's ladder is complete — full grid in
+`raw/hetzner-5950x/demand-curve-ladder.tsv`, per-run raws alongside. Measured
+headlines:
+
+- **Memory floor: 14 GiB is the reliable floor** (3/3 PASS at 14 and at 16 GiB).
+  **12 GiB is marginal and flips run to run** — 1/3 PASS in the ladder run
+  (OOM/PASS/OOM), 2/3 PASS in an earlier run; both results stand, neither is
+  the "real" one. ≤ 8 GiB always OOMs at typecheck (`memory-floor.txt`).
+- **CPU knee (typecheck median at 32 GiB):** 2 vCPU 102.8 s → 4 53.9 s →
+  8 30.7 s → 16 20.2 s → 32 17.4 s. Gains per doubling: 1.91× → 1.76× →
+  1.52× → 1.16× — the workload stops scaling past 8–16 vCPU.
+- The published max-config row: 32 vCPU / 32 GiB, Workload total 35.385 s
+  (median of 5 cold reps, `32vcpu-5reps.txt`), vs the host control
+  (`control-bare-host.txt`) and the bare-metal proof (`host-proof.txt`).
+- Parts B–D raws are in the same directory (`partB-*`, `partC-*`,
+  `partD-economics.txt`) — they are the subject of a separate follow-up.
 
 ## Layout
 

@@ -6,12 +6,13 @@
 
 ```bash
 npm install -g hotcell        # CLI (hotcell + hc) and daemon (hotcelld), one install
+pip install hotcell           # Python SDK (optional)
 ```
 
 <img width="1512" height="862" alt="Screenshot 2026-06-18 at 11 42 07" src="https://github.com/user-attachments/assets/621b645e-6305-4287-a7ed-300a5a927df1" />
 <img width="726" height="643" alt="Screenshot 2026-06-18 at 11 42 42" src="https://github.com/user-attachments/assets/a0612cc2-8a35-4af7-9633-a09b1262edf3" />
 
-> **Status:** v0.1 published to npm — the single-node core is feature-complete (Phases 0–3 done). One daemon runs **three drivers side by side** with per-sandbox selection: the Docker **container** driver (Linux + macOS) with durable state, idle auto-pause/resume, files/processes/sessions, a stateful code interpreter, preview URLs, backups, per-sandbox metrics + cost meter, structured logs + OpenTelemetry traces, API-key auth, a web dashboard with a **live terminal**, and the **egress control plane** below — including **default-deny egress on Linux**; the **Apple Virtualization** microVM driver (macOS, hardware-isolated VMs — full daemon-level parity 10/10, warm pool adopts a pre-booted VM in ~7ms vs ~2.5s cold boot, **and true pause/resume: a full-VM snapshot restores RAM + running processes without a kernel boot**); and the **Firecracker** microVM driver (Linux + KVM) — **live, with full daemon-level parity: the same 11-check end-to-end suite the VZ driver passes (REST → SSE → SDK → preview proxy → backups → persistence → pause/resume) is green on a real x86_64 microVM — with true pause/resume: a full VM snapshot (guest RAM + devices) resumes in ~80ms vs ~2.5s cold boot, background processes surviving**. Pause is a first-class lifecycle state: idle sandboxes hibernate automatically (`sleepAfter`), `hotcell pause` / `Sandbox.pause()` do it on demand, and any operation transparently resumes. Both microVM drivers have **warm pools** (a plain create adopts a pre-booted VM in ~7ms instead of ~2.5s), per-sandbox driver selection lets one daemon mix containers and microVMs, and microVM guests have **no network device at all** — egress is hard-denied by construction, yet the **egress gateway is still reachable over vsock**: LLM SDK auto-wiring and the allowlisted `HTTP(S)_PROXY` work identically inside a microVM, with the gateway as the guest's only route out. CI runs the build, agent tests, protocol/egress checks, and the full container smoke on Linux + macOS. Measured density: **40 concurrent microVMs on a 4-vCPU/16GB box, ~54MB host memory per idle VM**, all functional. And the real-harness proof exists: `npm run e2e:harness` runs **headless Claude Code inside a sandbox** with the provider key injected by the gateway — the sandbox only ever sees a revocable token.
+> **Status:** v0.1.x published to **npm + PyPI** (`npm install -g hotcell` · `pip install hotcell`) — the single-node core is feature-complete (Phases 0–3 done). One daemon runs **three drivers side by side** with per-sandbox selection: the Docker **container** driver (Linux + macOS) with durable state, idle auto-pause/resume, files/processes/sessions, a stateful code interpreter, preview URLs, backups, per-sandbox metrics + cost meter, structured logs + OpenTelemetry traces, API-key auth, a web dashboard with a **live terminal**, and the **egress control plane** below — including **default-deny egress on Linux**; the **Apple Virtualization** microVM driver (macOS, hardware-isolated VMs — full daemon-level parity 10/10, warm pool adopts a pre-booted VM in ~7ms vs ~2.5s cold boot, **and true pause/resume: a full-VM snapshot restores RAM + running processes without a kernel boot**); and the **Firecracker** microVM driver (Linux + KVM) — **live, with full daemon-level parity: the same 11-check end-to-end suite the VZ driver passes (REST → SSE → SDK → preview proxy → backups → persistence → pause/resume) is green on a real x86_64 microVM — with true pause/resume: a full VM snapshot (guest RAM + devices) resumes in ~80ms vs ~2.5s cold boot, background processes surviving**. Pause is a first-class lifecycle state: idle sandboxes hibernate automatically (`sleepAfter`), `hotcell pause` / `Sandbox.pause()` do it on demand, and any operation transparently resumes. Both microVM drivers have **warm pools** (a plain create adopts a pre-booted VM in ~7ms instead of ~2.5s), per-sandbox driver selection lets one daemon mix containers and microVMs, and microVM guests have **no network device at all** — egress is hard-denied by construction, yet the **egress gateway is still reachable over vsock**: LLM SDK auto-wiring and the allowlisted `HTTP(S)_PROXY` work identically inside a microVM, with the gateway as the guest's only route out. (Trusted workloads can **opt into a real NIC** — per-sandbox host-NAT networking — but it's off by default; the flagship posture is a guest with no NIC.) CI runs the build, agent tests, protocol/egress checks, and the full container smoke on Linux + macOS. Measured density: **40 concurrent microVMs on a 4-vCPU/16GB box, ~54MB host memory per idle VM**, all functional. And the real-harness proof exists: `npm run e2e:harness` runs **headless Claude Code inside a sandbox** with the provider key injected by the gateway — the sandbox only ever sees a revocable token.
 
 ## The problem it solves for agents
 
@@ -31,7 +32,7 @@ A single chokepoint that every outbound byte from a sandbox flows through.
 ```bash
 # on the daemon host — keys live here, never in a sandbox:
 export HOTCELL_PROVIDER_KEY_OPENROUTER=sk-or-...      # also _OPENAI, _ANTHROPIC, _GOOGLE
-node packages/daemon/dist/index.js
+hotcelld
 
 # auto-wire a sandbox: OPENAI_BASE_URL + OPENAI_API_KEY (a token) are injected for you
 hotcell run --egress --keep "printenv OPENAI_BASE_URL"   # -> http://host.docker.internal:4752/openai
@@ -71,10 +72,10 @@ export HOTCELL_PROVIDER_KEY_CFOPENAI=sk-...
 
 ```bash
 # needs the daemon to hold CAP_NET_ADMIN (see "Running on a Linux server")
-HOTCELL_EGRESS_ENFORCE=true node packages/daemon/dist/index.js
+HOTCELL_EGRESS_ENFORCE=true hotcelld
 ```
 
-> On **macOS Docker Desktop** the firewall can't be installed (the bridge lives in a VM), so enforcement is **advisory** there — the gateway still works, but a process could route around it. Kernel-enforced lockdown on a Mac is the upcoming Apple VZ microVM driver. The gateway, policy, caps, cost, providers, and allowlist all work on macOS today.
+> On **macOS Docker Desktop** the firewall can't be installed (the bridge lives in a VM), so enforcement is **advisory** there — the gateway still works, but a process could route around it. Kernel-enforced lockdown on a Mac is the **Apple VZ microVM driver** (shipped) — its guests have no NIC at all, so egress is denied by construction and only reaches the gateway over vsock. The gateway, policy, caps, cost, providers, and allowlist all work on macOS today.
 
 It's an LLM gateway (base-URL rewrite + key injection), not a TLS-MITM proxy — no CA to install in any sandbox. Exposed through REST (`POST/GET /sandboxes/:id/egress-tokens`, `DELETE …/:token`), both SDKs, and the CLI; `npm run check:egress` verifies the whole surface (policy, cost, providers, allowlist, fail-closed) with no Docker required.
 
@@ -97,14 +98,11 @@ It's an LLM gateway (base-URL rewrite + key injection), not a TLS-MITM proxy —
 
 ## Quick start
 
-Requires a running Docker-compatible runtime (Docker Desktop / colima / Apple `container`).
+Install with `npm install -g hotcell` (top of this README). The `container` driver needs a running Docker-compatible runtime (Docker Desktop / colima / Apple `container`); the `firecracker` (Linux + KVM) and `applevz` (macOS) microVM drivers need a KVM/VZ host. Hacking on hotcell itself? Build from source — see [Running on a Linux server](#running-on-a-linux-server-gcp--aws).
 
 ```bash
-npm install
-npm run build
-
 # start the daemon (REST on :4750, preview proxy on :4751, egress gateway on :4752)
-node packages/daemon/dist/index.js
+hotcelld
 
 # in another shell — run a command in a fresh sandbox
 hotcell run "python3 -c 'print(2+2)'"
@@ -117,7 +115,7 @@ hotcell terminal <id>                # interactive shell in your terminal
 
 Open the **web dashboard** at <http://127.0.0.1:4750/> — sandbox list, live CPU/mem/net with sparklines, cost meter, preview links, a live terminal, and create/stop/start/destroy.
 
-`npm run smoke` exercises the whole surface end-to-end against live Docker; `npm run smoke:py` does the same through the Python SDK; `npm run check:egress` unit-tests the egress control plane (no Docker); `npm run smoke:remote` drives a live remote daemon via the SDK.
+From a source checkout, `npm run smoke` exercises the whole surface end-to-end against live Docker; `npm run smoke:py` does the same through the Python SDK; `npm run check:egress` unit-tests the egress control plane (no Docker); `npm run smoke:remote` drives a live remote daemon via the SDK.
 
 ### TypeScript SDK (`@hotcell/sdk`, zero runtime deps)
 
@@ -136,9 +134,10 @@ await sandbox.writeFile("/workspace/hi.txt", "hello");
 await sandbox.destroy();
 ```
 
-### Python SDK (`sdk/python`, stdlib-only)
+### Python SDK (`hotcell` on PyPI, stdlib-only)
 
 ```python
+# pip install hotcell
 from hotcell import HotcellClient
 
 sandbox = HotcellClient().get_sandbox()      # honors HOTCELL_ENDPOINT / HOTCELL_API_KEY
@@ -197,7 +196,7 @@ Global: --endpoint <url> (HOTCELL_ENDPOINT) · --api-key <key> (HOTCELL_API_KEY)
 | Var | Default | What |
 |---|---|---|
 | `HOTCELL_HOST` / `HOTCELL_PORT` | `127.0.0.1` / `4750` | REST API bind |
-| `HOTCELL_DRIVER` | `container` | Runtime driver: `container` (Docker) — `firecracker`/`applevz` are Phase 3 |
+| `HOTCELL_DRIVER` | `container` | Default runtime driver — all three ship live: `container` (Docker, Linux + macOS), `firecracker` (Linux + KVM), `applevz` (macOS). Also selectable **per sandbox** at create time (`driver: …`), so one daemon mixes containers and microVMs |
 | `HOTCELL_IMAGE` | `python:3.11-slim-bookworm` | Default sandbox image |
 | `HOTCELL_DEFAULT_MEMORY_MB` / `HOTCELL_DEFAULT_CPUS` / `HOTCELL_DEFAULT_PIDS` | `0` (unlimited) | Default per-sandbox hard caps (RAM MiB / fractional cores / process count) |
 | `HOTCELL_ADMISSION` | `enforce` | Reject `create` when the host memory budget is exhausted (`off` to only report) |
@@ -235,13 +234,13 @@ The container driver is the same codepath on macOS and Linux — it talks to the
 # 1. Docker (native dockerd — the daemon finds /var/run/docker.sock automatically)
 curl -fsSL https://get.docker.com | sh && sudo usermod -aG docker "$USER"   # re-login
 
-# 2. Node ≥22 (for node:sqlite + global WebSocket), then build
+# 2. Node ≥22 (for node:sqlite + global WebSocket), then install
 node -v   # must be ≥ 22
-npm install && npm run build
+npm install -g hotcell        # or clone + `npm install && npm run build` to hack on it
 
 # 3. Run the daemon. For remote access, bind a real interface + require a key:
 HOTCELL_HOST=0.0.0.0 HOTCELL_API_KEY="$(openssl rand -hex 24)" \
-  node packages/daemon/dist/index.js
+  hotcelld
 ```
 
 Notes for the egress feature on Linux (auto-handled on macOS Docker Desktop):
@@ -250,7 +249,7 @@ Notes for the egress feature on Linux (auto-handled on macOS Docker Desktop):
 - **Default-deny enforcement** (`HOTCELL_EGRESS_ENFORCE=true`) installs host `DOCKER-USER` iptables, so the daemon needs iptables privileges — run it as root or grant `CAP_NET_ADMIN` (e.g. a systemd unit with `AmbientCapabilities=CAP_NET_ADMIN`). Keep `HOTCELL_EGRESS_ADVERTISE_HOST=host.docker.internal` under enforcement so the proxy + firewall agree on the gateway address. Validated on GCP Ubuntu 24.04.
 - **Non-default Docker runtimes** (colima, remote, rootless): export `DOCKER_HOST` — docker-modem honors it. Native `dockerd` and Docker Desktop need nothing.
 
-> **Stronger isolation (microVMs):** the default container driver shares the host kernel. For VM-grade per-sandbox isolation on Linux, the **Firecracker driver** (Phase 3) needs `/dev/kvm` — a bare-metal box or a *nested-virtualization* GCE/EC2 instance. Not built yet (see `docs/plan.md`).
+> **Stronger isolation (microVMs):** the default container driver shares the host kernel. For VM-grade per-sandbox isolation, both microVM drivers ship live behind the same interface — the **Firecracker driver** on Linux (needs `/dev/kvm`: a bare-metal box or a *nested-virtualization* GCE/EC2 instance) and the **Apple VZ driver** on macOS. Select per sandbox (`driver: "firecracker" | "applevz"`) or daemon-wide (`HOTCELL_DRIVER`). Both boot in well under a second via warm pools and support true pause/resume (full-VM memory snapshot). See `docs/plan.md`.
 
 ## Security model
 
@@ -261,7 +260,7 @@ hotcell is **single-tenant** by design: the API offers arbitrary command executi
 - **Spend bounds.** Per-token (`--spend-cap`) and per-sandbox (`--egress-spend-cap`) hard ceilings cap LLM cost even if a token is abused before you revoke it.
 - **Browser guard.** On a loopback bind, the API rejects requests whose `Host` isn't loopback / `HOTCELL_HOST` / `HOTCELL_ALLOWED_HOSTS` — a DNS-rebinding / localhost-CSRF guard.
 - **DoS bounds.** Request bodies are capped (`HOTCELL_MAX_BODY_BYTES`) and WebSocket messages are size-limited.
-- **Isolation.** The container driver shares the host kernel; per-sandbox CPU/memory/PID caps are available, but **hardware** isolation comes with the Phase 3 microVM drivers.
+- **Isolation.** The container driver shares the host kernel; per-sandbox CPU/memory/PID caps are available. For **hardware** isolation, switch to a microVM driver — `firecracker` (Linux + KVM) or `applevz` (macOS), both shipped and selectable per sandbox — each sandbox a separate VM with its own kernel.
 
 ## Pre-installing packages / custom setup
 
@@ -286,7 +285,7 @@ Setup is **best-effort** (a non-zero exit is logged, not fatal) and runs once at
 ## Architecture
 
 - **`hotcelld`** — single control-plane daemon per host: hand-rolled `node:http` REST API + WebSocket, embedded SQLite state, idle reaper, metrics sampler, preview proxy, egress control plane, and a pluggable runtime-driver layer.
-- **Runtime drivers** — the core abstraction (`create`/`exec`/`openTerminal`/files/ports/backup/stats/…), selected by `HOTCELL_DRIVER`. Today: `container` (Docker) on Linux + macOS. Next: `firecracker` (Linux) and `applevz` (macOS) microVM drivers behind the same interface (scaffolded; they need a KVM/VZ host), so the daemon/SDKs/CLI are unchanged when you swap isolation tiers.
+- **Runtime drivers** — the core abstraction (`create`/`exec`/`openTerminal`/files/ports/backup/stats/…), selected by `HOTCELL_DRIVER` or per sandbox at create time. All three ship live behind the same interface: `container` (Docker, Linux + macOS), `firecracker` (Linux + KVM), and `applevz` (macOS) microVMs — both microVM drivers with warm pools and true pause/resume — so the daemon/SDKs/CLI are unchanged when you swap isolation tiers.
 - **SDKs** — TypeScript + Python, mirroring the Cloudflare Sandbox surface so existing harnesses adopt with near-zero friction.
 
 See `docs/plan.md` for the full spec and phased roadmap, and `KIMI.md` for contributor/agent context.
@@ -297,9 +296,9 @@ See `docs/plan.md` for the full spec and phased roadmap, and `KIMI.md` for contr
 |---|---|
 | `packages/daemon` (`@hotcell/daemon`, bin `hotcelld`) | The control-plane daemon |
 | `packages/sdk` (`@hotcell/sdk`) | TypeScript client SDK (zero runtime deps) |
-| `packages/cli` (`@hotcell/cli`, bin `hotcell`) | Command-line interface |
+| `packages/cli` (`hotcell`, bins `hotcell` / `hc` / `hotcelld`) | Command-line interface + one-install meta-package (pulls in the daemon + SDK) |
 | `packages/mastra` (`@hotcell/mastra`) | Mastra `Workspace` sandbox provider (run Mastra agents on hotcell) |
-| `sdk/python` (`hotcell-sdk`) | Python client SDK (stdlib-only, mirrors the TS SDK) |
+| `sdk/python` (`hotcell` on PyPI) | Python client SDK (stdlib-only, mirrors the TS SDK) |
 | `images/base` | Base sandbox OCI image (Python 3.11 + Node 20 + git/bash) |
 
 ## License

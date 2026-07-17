@@ -51,7 +51,23 @@ Notes:
 - Scoped packages need `--access public` on the FIRST publish (default is private).
 - `files` in each package.json restricts the tarball to `dist/` — verify with
   `npm pack -w hotcell --dry-run` before the real publish.
-- Optional hardening: publish from CI with `--provenance` (GitHub Actions OIDC).
+
+### 2FA (July 2026 npm policy change)
+
+npm is deprecating 2FA-bypass tokens (account ops: Aug 2026; direct publish:
+Jan 2027 — after that such tokens can only *stage* a publish for human 2FA
+approval). Publish **interactively with 2FA on**: npm ≥10 opens a browser
+WebAuthn prompt per publish, or append a fresh `--otp=<code>` to each command
+(codes rotate every 30s — one per publish, don't reuse). Do NOT publish via
+automation tokens from the terminal.
+
+### Future releases: trusted publishing (OIDC, no tokens)
+
+`.github/workflows/release.yml` publishes all four packages with provenance on
+a `v*` tag push. Setup (once per package, only possible AFTER its first manual
+publish): npmjs.com → package → Settings → Publishing access → add Trusted
+Publisher → GitHub repo `sinameraji/hotcell`, workflow `release.yml`. From then
+on a release is just: `git tag v0.2.0 && git push origin v0.2.0`.
 
 ## 3. Verify the install story
 

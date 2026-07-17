@@ -5,7 +5,7 @@
 🌐 **[hotcell.sh](https://hotcell.sh)** · Apache-2.0 · self-hosted · one daemon
 
 ```bash
-npm install -g hotcell        # CLI (hotcell + hc) and daemon (hotcelld), one install
+npm install -g hotcell        # CLI (hotcell + hc), daemon (hotcelld) + TS SDK, one install
 pip install hotcell           # Python SDK (optional)
 ```
 

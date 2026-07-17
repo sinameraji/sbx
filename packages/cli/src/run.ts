@@ -56,7 +56,7 @@ export async function runCommand(
 
   let exitCode = 0;
   try {
-    console.error(`[sb] sandbox ${sandbox.id} created`);
+    console.error(`[hotcell] sandbox ${sandbox.id} created`);
     for await (const event of sandbox.execStream(command)) {
       if (event.type === "stdout") {
         process.stdout.write(event.data);
@@ -67,18 +67,18 @@ export async function runCommand(
       }
     }
   } catch (err) {
-    console.error(`\n[sb] exec failed: ${formatError(err)}`);
+    console.error(`\n[hotcell] exec failed: ${formatError(err)}`);
     exitCode = 1;
   } finally {
     if (!keep) {
       try {
         await sandbox.destroy();
-        console.error(`[sb] sandbox ${sandbox.id} destroyed`);
+        console.error(`[hotcell] sandbox ${sandbox.id} destroyed`);
       } catch (err) {
-        console.error(`[sb] failed to destroy sandbox: ${formatError(err)}`);
+        console.error(`[hotcell] failed to destroy sandbox: ${formatError(err)}`);
       }
     } else {
-      console.error(`[sb] sandbox ${sandbox.id} kept alive`);
+      console.error(`[hotcell] sandbox ${sandbox.id} kept alive`);
     }
   }
 

@@ -1,7 +1,7 @@
 {
   "name": "@hotcell/mastra",
   "version": "0.1.0",
-  "description": "Mastra Workspace sandbox provider backed by self-hosted sbx",
+  "description": "Mastra Workspace sandbox provider backed by self-hosted hotcell",
   "license": "Apache-2.0",
   "type": "module",
   "main": "dist/index.js",

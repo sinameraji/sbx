@@ -246,7 +246,7 @@ Notes for the egress feature on Linux (auto-handled on macOS Docker Desktop):
 - **Default-deny enforcement** (`HOTCELL_EGRESS_ENFORCE=true`) installs host `DOCKER-USER` iptables, so the daemon needs iptables privileges — run it as root or grant `CAP_NET_ADMIN` (e.g. a systemd unit with `AmbientCapabilities=CAP_NET_ADMIN`). Keep `HOTCELL_EGRESS_ADVERTISE_HOST=host.docker.internal` under enforcement so the proxy + firewall agree on the gateway address. Validated on GCP Ubuntu 24.04.
 - **Non-default Docker runtimes** (colima, remote, rootless): export `DOCKER_HOST` — docker-modem honors it. Native `dockerd` and Docker Desktop need nothing.
 
-> **Stronger isolation (microVMs):** the default container driver shares the host kernel. For VM-grade per-sandbox isolation, both microVM drivers ship live behind the same interface — the **Firecracker driver** on Linux (needs `/dev/kvm`: a bare-metal box or a *nested-virtualization* GCE/EC2 instance) and the **Apple VZ driver** on macOS. Select per sandbox (`driver: "firecracker" | "applevz"`) or daemon-wide (`HOTCELL_DRIVER`). Both boot in well under a second via warm pools and support true pause/resume (full-VM memory snapshot). See `docs/plan.md`.
+> **Stronger isolation (microVMs):** the default container driver shares the host kernel. For VM-grade per-sandbox isolation, both microVM drivers ship live behind the same interface — the **Firecracker driver** on Linux (needs `/dev/kvm`: a bare-metal box or a *nested-virtualization* GCE/EC2 instance) and the **Apple VZ driver** on macOS. Select per sandbox (`driver: "firecracker" | "applevz"`) or daemon-wide (`HOTCELL_DRIVER`). Both boot in well under a second via warm pools and support pause/resume via a full-VM memory snapshot. See `docs/plan.md`.
 
 ## Security model
 
@@ -274,7 +274,7 @@ await client.getSandbox(undefined, { setup: ["npm i kimiflare", "pip install ruf
 Setup is **best-effort** (a non-zero exit is logged, not fatal) and runs once at create — with persistence (the default) the installed deps live in the workspace volume and survive idle-pause/resume. Other approaches:
 
 1. **Bake a custom image** — extend `images/base/Dockerfile`, then `HOTCELL_IMAGE=my/hotcell:latest`. Fastest cold-start; daemon-wide.
-2. **Run setup after create** — `id=$(sb create) && sb exec "$id" "npm i kimiflare"`.
+2. **Run setup after create** — `id=$(hotcell create) && hotcell exec "$id" "npm i kimiflare"`.
 3. **Backup/restore templating** — provision once, `hotcell backup`, then `hotcell restore` into fresh sandboxes.
 
 > Under default-deny egress, `setup`/install steps reach package registries through the gateway (pypi, npm, crates, go, rubygems, maven, packagist, apt/apk are allowlisted by default). Add private registries with `HOTCELL_ALLOWLIST_EXTRA`.
@@ -282,7 +282,7 @@ Setup is **best-effort** (a non-zero exit is logged, not fatal) and runs once at
 ## Architecture
 
 - **`hotcelld`** — single control-plane daemon per host: hand-rolled `node:http` REST API + WebSocket, embedded SQLite state, idle reaper, metrics sampler, preview proxy, egress control plane, and a pluggable runtime-driver layer.
-- **Runtime drivers** — the core abstraction (`create`/`exec`/`openTerminal`/files/ports/backup/stats/…), selected by `HOTCELL_DRIVER` or per sandbox at create time. All three ship live behind the same interface: `container` (Docker, Linux + macOS), `firecracker` (Linux + KVM), and `applevz` (macOS) microVMs — both microVM drivers with warm pools and true pause/resume — so the daemon/SDKs/CLI are unchanged when you swap isolation tiers.
+- **Runtime drivers** — the core abstraction (`create`/`exec`/`openTerminal`/files/ports/backup/stats/…), selected by `HOTCELL_DRIVER` or per sandbox at create time. All three ship live behind the same interface: `container` (Docker, Linux + macOS), `firecracker` (Linux + KVM), and `applevz` (macOS) microVMs — both microVM drivers with warm pools and memory-snapshot pause/resume — so the daemon/SDKs/CLI are unchanged when you swap isolation tiers.
 - **SDKs** — TypeScript + Python, mirroring the Cloudflare Sandbox surface so existing harnesses adopt with near-zero friction.
 
 See `docs/plan.md` for the full spec and phased roadmap, and `KIMI.md` for contributor/agent context.

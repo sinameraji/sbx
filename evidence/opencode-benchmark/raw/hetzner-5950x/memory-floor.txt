@@ -1,0 +1,18 @@
+Memory floor — lower bound (Hetzner 5950X bare metal, 8 vCPU pinned CCD0)
+
+The workload dies at TYPECHECK below a memory floor. Confirmed lower bound so far:
+
+  mem_mb  cpus  result
+  4096    8     OOM
+  6144    8     OOM
+  8192    8     OOM
+
+=> ≤ 8 GiB always OOMs at typecheck. OOM is memory-deterministic (the guest has a fixed
+memoryMB; contention cannot manufacture one), so these binary results are valid even
+though these particular runs' *timings* were contended by a concurrent diagnostic — see
+`run-5c49059-contention-and-hang.txt`. The published 32 vCPU row ran at 32 GiB, well
+above the floor.
+
+The floor is a BAND: earlier runs put 12 GiB right at the razor-thin edge (some reps
+OOM, some pass) and 16 GiB reliable. The clean 12/14/16 GiB rungs — with per-run raw —
+land here as the ladder finishes. This file is the lower-bound record until then.

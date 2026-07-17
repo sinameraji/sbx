@@ -25,7 +25,8 @@ userbase. Every rung, including every failure, is published.
 `raw/hetzner-5950x/` as they complete. Published so far — bare-metal proof
 (`host-proof.txt`), the 32 vCPU max-config row (`32vcpu-5reps.txt`, 5 cold reps), the
 host control (`control-bare-host.txt`), the node-gyp diagnostic, and the memory-floor
-lower bound (≤8 GiB always OOMs at typecheck; 12–16 GiB rungs in progress).
+lower bound (≤8 GiB always OOMs at typecheck — data in
+`raw/hetzner-5950x/memory-floor.txt`; 12–16 GiB rungs in progress).
 Pause/resume, spike, and economics (Parts B–D) are a separate follow-up.
 
 ## Layout
@@ -96,7 +97,8 @@ SMT) from the CPU-ladder command above — raw in `raw/hetzner-5950x/32vcpu-5rep
   stock script on the bare host completes fine, with `node-gyp` equally absent.
   Platform, arch, Node ABI and libc are byte-identical between host and guest. Root
   cause is open. Workaround: the hotcell guest image puts npm's bundled `node-gyp`
-  on PATH (`helpers/hotcell-vz/convert-image.sh`). Cost: install is ~2s slower than
+  on PATH (`helpers/hotcell-vz/convert-image.sh` — the OCI→rootfs converter shared by
+both microVM drivers; the `hotcell-vz` dir name is legacy from the sbx-vz era). Cost: install is ~2s slower than
   our own host (13.5s vs 12.1s). The memory floor is unaffected — the source build
   is install-phase; the OOM is typecheck-phase. Details: `raw/hetzner-5950x/nodegyp-diagnostic.txt`.
 - **Guest specs are the guest's.** The table reads the guest's own `/proc`, so

@@ -40,7 +40,7 @@ export async function execCommand(
       else if (event.type === "exit") exitCode = event.exitCode;
     }
   } catch (err) {
-    console.error(`\n[sb] exec failed: ${formatError(err)}`);
+    console.error(`\n[hotcell] exec failed: ${formatError(err)}`);
     return 1;
   }
   return exitCode;

@@ -19,7 +19,7 @@ export async function watchCommand(
   const client = new HotcellClient({ endpoint: globals.endpoint, apiKey: globals.apiKey });
   try {
     const sandbox = await client.getSandbox(id);
-    console.error(`[sb] watching ${path} in ${id} (Ctrl-C to stop)`);
+    console.error(`[hotcell] watching ${path} in ${id} (Ctrl-C to stop)`);
     for await (const event of sandbox.watch(path, { intervalMs })) {
       console.log(`${event.type}\t${event.path}`);
     }

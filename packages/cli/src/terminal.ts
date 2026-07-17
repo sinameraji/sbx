@@ -58,7 +58,7 @@ export async function terminalCommand(
     ws.onopen = () => {
       if (isTTY) {
         try { stdin.setRawMode?.(true); } catch {}
-        console.error(`[sb] attached to ${id} — Ctrl-C exits the shell, then close the socket`);
+        console.error(`[hotcell] attached to ${id} — Ctrl-C exits the shell, then close the socket`);
       }
       stdin.resume();
       stdin.on("data", onStdin);
@@ -70,7 +70,7 @@ export async function terminalCommand(
     };
     ws.onclose = () => cleanup(0);
     ws.onerror = () => {
-      console.error("[sb] terminal connection error");
+      console.error("[hotcell] terminal connection error");
       cleanup(1);
     };
   });

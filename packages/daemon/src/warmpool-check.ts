@@ -14,9 +14,9 @@ import { AppleVzDriver } from "./driver/applevz.js";
 async function main(): Promise<void> {
   const stateDir = mkdtempSync(join(tmpdir(), "sbx-warmpool-"));
   const driver = new AppleVzDriver({
-    helperPath: "helpers/sbx-vz/dist/sbx-vz",
-    kernel: "helpers/sbx-vz/guest/vmlinux-vz",
-    rootfs: "helpers/sbx-vz/guest/rootfs.img",
+    helperPath: "helpers/hotcell-vz/dist/hotcell-vz",
+    kernel: "helpers/hotcell-vz/guest/vmlinux-vz",
+    rootfs: "helpers/hotcell-vz/guest/rootfs.img",
     stateDir,
     diskGb: 2,
     imageCacheDir: join(homedir(), ".sbx", "vz", "images"),

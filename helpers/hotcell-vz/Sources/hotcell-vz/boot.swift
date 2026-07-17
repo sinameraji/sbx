@@ -1,7 +1,7 @@
 import Foundation
 import Virtualization
 
-// Boot bring-up harness (M1). `sbx-vz boot-test <kernel> <rootfs> [consoleLog]`
+// Boot bring-up harness (M1). `hotcell-vz boot-test <kernel> <rootfs> [consoleLog]`
 // boots a microVM directly (no daemon), streams the guest console to the log AND
 // our stderr (live), and — once up — tries to connect to the agent's vsock port.
 // Success on stdout as JSON. Isolates kernel/rootfs/VZ-config bring-up from the
@@ -54,7 +54,7 @@ final class BootTest: NSObject, VZVirtualMachineDelegate {
     }
 
     private func note(_ s: String) {
-        FileHandle.standardError.write(("[sbx-vz] " + s + "\n").data(using: .utf8)!)
+        FileHandle.standardError.write(("[hotcell-vz] " + s + "\n").data(using: .utf8)!)
     }
 
     func run() {

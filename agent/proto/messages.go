@@ -15,7 +15,7 @@ const ProtoVersion = 1
 // to know the guest is up and the agent is serving.
 type Hello struct {
 	Event   string `json:"event"` // always "hello"
-	Agent   string `json:"agent"` // "sbx-agent"
+	Agent   string `json:"agent"` // "hotcell-agent"
 	Version string `json:"version"`
 	Proto   int    `json:"proto"`
 }

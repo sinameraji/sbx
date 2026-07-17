@@ -25,8 +25,8 @@ async function main(): Promise<void> {
   await new Promise<void>((r) => gateway.listen(EGRESS_PORT, "127.0.0.1", r));
   const driver = new FirecrackerDriver({
     fcBin: process.env.SBX_FC_BIN ?? "firecracker",
-    kernel: process.env.SBX_FC_KERNEL ?? "helpers/sbx-vz/guest/vmlinux-fc",
-    rootfs: "helpers/sbx-vz/guest/rootfs.img", // prebuilt path (unused for a converted image)
+    kernel: process.env.SBX_FC_KERNEL ?? "helpers/hotcell-vz/guest/vmlinux-fc",
+    rootfs: "helpers/hotcell-vz/guest/rootfs.img", // prebuilt path (unused for a converted image)
     stateDir,
     diskGb: 2,
     imageCacheDir: process.env.SBX_FC_IMAGE_CACHE ?? join(homedir(), ".sbx", "fc", "images"),
@@ -155,8 +155,8 @@ async function main(): Promise<void> {
     const poolStateDir = mkdtempSync(join(tmpdir(), "sbx-fc-pool-"));
     const pooled = new FirecrackerDriver({
       fcBin: process.env.SBX_FC_BIN ?? "firecracker",
-      kernel: process.env.SBX_FC_KERNEL ?? "helpers/sbx-vz/guest/vmlinux-fc",
-      rootfs: "helpers/sbx-vz/guest/rootfs.img",
+      kernel: process.env.SBX_FC_KERNEL ?? "helpers/hotcell-vz/guest/vmlinux-fc",
+      rootfs: "helpers/hotcell-vz/guest/rootfs.img",
       stateDir: poolStateDir,
       diskGb: 2,
       imageCacheDir: process.env.SBX_FC_IMAGE_CACHE ?? join(homedir(), ".sbx", "fc", "images"),

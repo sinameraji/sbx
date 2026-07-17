@@ -1,4 +1,4 @@
-// Command sbx-agent is the in-sandbox agent: a tiny static Linux binary that
+// Command hotcell-agent is the in-sandbox agent: a tiny static Linux binary that
 // runs inside each microVM (as PID 1 / init under the Firecracker and Apple VZ
 // drivers) and serves the proto protocol to the daemon over vsock. It is the
 // per-sandbox piece that replaces `docker exec` once there is no Docker — and
@@ -16,7 +16,7 @@ import (
 	"net"
 	"os"
 
-	"github.com/sinameraji/sbx/agent/server"
+	"github.com/sinameraji/hotcell/agent/server"
 )
 
 
@@ -31,7 +31,7 @@ func agentEnv(name string) string {
 
 func main() {
 	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
-	log.SetPrefix("sbx-agent ")
+	log.SetPrefix("hotcell-agent ")
 
 	platformInit() // e.g. bring up loopback in slim guests (no ip/ifconfig)
 	ag := server.New()

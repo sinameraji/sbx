@@ -29,8 +29,8 @@ async function main(): Promise<number> {
   const image = process.env.SBX_FC_SMOKE_IMAGE ?? "alpine:3.20";
   const driver = new FirecrackerDriver({
     fcBin: process.env.SBX_FC_BIN ?? "firecracker",
-    kernel: process.env.SBX_FC_KERNEL ?? "helpers/sbx-vz/guest/vmlinux-fc",
-    rootfs: "helpers/sbx-vz/guest/rootfs.img",
+    kernel: process.env.SBX_FC_KERNEL ?? "helpers/hotcell-vz/guest/vmlinux-fc",
+    rootfs: "helpers/hotcell-vz/guest/rootfs.img",
     stateDir,
     diskGb: 1,
     imageCacheDir: process.env.SBX_FC_IMAGE_CACHE ?? join(homedir(), ".sbx", "fc", "images"),

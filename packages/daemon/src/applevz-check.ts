@@ -21,9 +21,9 @@ async function main(): Promise<void> {
   await new Promise<void>((r) => gateway.listen(EGRESS_PORT, "127.0.0.1", r));
 
   const driver = new AppleVzDriver({
-    helperPath: "helpers/sbx-vz/dist/sbx-vz",
-    kernel: "helpers/sbx-vz/guest/vmlinux-vz",
-    rootfs: "helpers/sbx-vz/guest/rootfs.img",
+    helperPath: "helpers/hotcell-vz/dist/hotcell-vz",
+    kernel: "helpers/hotcell-vz/guest/vmlinux-vz",
+    rootfs: "helpers/hotcell-vz/guest/rootfs.img",
     stateDir,
     diskGb: 2,
     // Stable cache so converted images + the blank workspace survive across runs.

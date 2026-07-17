@@ -14,7 +14,7 @@ IMAGE="$1"; OUT="$2"; AGENT="$3"; INIT="$4"; PLATFORM="${5:-linux/arm64}"
 
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"; [ -n "${CID:-}" ] && docker rm -f "$CID" >/dev/null 2>&1 || true' EXIT
-cp "$AGENT" "$WORK/sbx-agent"
+cp "$AGENT" "$WORK/hotcell-agent"
 cp "$INIT" "$WORK/init"
 
 # 1. Export the target image's filesystem to a tar (no run; CMD irrelevant).
@@ -31,9 +31,9 @@ docker run --rm --platform "$PLATFORM" -v "$WORK:/work" alpine:3.20 sh -c '
   mkdir -p /rootfs
   tar -xf /work/rootfs.tar -C /rootfs 2>/dev/null || true
   mkdir -p /rootfs/proc /rootfs/sys /rootfs/dev /rootfs/run /rootfs/tmp /rootfs/workspace /rootfs/sbin
-  cp /work/sbx-agent /rootfs/sbin/sbx-agent
+  cp /work/hotcell-agent /rootfs/sbin/hotcell-agent
   cp /work/init /rootfs/init
-  chmod +x /rootfs/init /rootfs/sbin/sbx-agent
+  chmod +x /rootfs/init /rootfs/sbin/hotcell-agent
   SIZE_MB=$(( $(du -sm /rootfs | cut -f1) + 96 ))   # image contents + headroom
   rm -f /work/out.img
   mkfs.ext4 -q -F -L sbxroot -d /rootfs /work/out.img "${SIZE_MB}M"

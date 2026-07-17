@@ -44,4 +44,4 @@ if [ -b /dev/vdb ]; then
 fi
 
 echo sbx-guest-init-ok
-exec /sbin/sbx-agent
+exec /sbin/hotcell-agent

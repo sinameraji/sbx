@@ -15,7 +15,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { AgentConn } from "./driver/agent.js";
 
 async function main(): Promise<void> {
-  const bin = process.env.SBX_AGENT_BIN ?? "/tmp/sbx-agent-darwin";
+  const bin = process.env.HOTCELL_AGENT_BIN ?? "/tmp/hotcell-agent-check";
   const dir = mkdtempSync(join(tmpdir(), "sbx-agent-"));
   const sock = join(dir, "agent.sock");
 
@@ -23,10 +23,10 @@ async function main(): Promise<void> {
   const proc = spawn(bin, [], {
     env: {
       ...process.env,
-      SBX_AGENT_LISTEN: `unix://${sock}`,
+      HOTCELL_AGENT_LISTEN: `unix://${sock}`,
       // Egress relay test override: instead of vsock (no VM here), the agent
       // dials this unix socket, where the check hosts a mock gateway.
-      SBX_EGRESS_DIAL: `unix://${egressTargetSock}`,
+      HOTCELL_EGRESS_DIAL: `unix://${egressTargetSock}`,
     },
     stdio: ["ignore", "ignore", "inherit"],
   });
@@ -42,7 +42,7 @@ async function main(): Promise<void> {
     assert.ok(existsSync(sock), "agent unix socket should appear");
 
     const conn = await AgentConn.connect({ path: sock });
-    assert.equal(conn.hello?.agent, "sbx-agent", "Hello identifies the agent");
+    assert.equal(conn.hello?.agent, "hotcell-agent", "Hello identifies the agent");
     assert.equal(conn.hello?.proto, 1, "proto version");
     ok(`Hello received (version ${conn.hello?.version})`);
 
@@ -89,7 +89,7 @@ async function main(): Promise<void> {
     ok("stats RPC");
 
     // Egress relay: the agent listens on guest-loopback and forwards each
-    // connection out its dialer (vsock in production; SBX_EGRESS_DIAL here).
+    // connection out its dialer (vsock in production; HOTCELL_EGRESS_DIAL here).
     // The check hosts the "gateway": an HTTP server on the dialed unix socket.
     const gateway = createHttpServer((_req, res) => res.end("egress-pong"));
     await new Promise<void>((r) => gateway.listen(egressTargetSock, r));

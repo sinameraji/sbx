@@ -13,7 +13,7 @@
  *  - applevz: needs a Mac with the VZ helper + guest artifacts built
  *    (`npm run build:vz`, `build:agent`, `build-guest.sh`). `npm run smoke:vz`.
  *  - firecracker: needs a Linux KVM host with `firecracker`, a guest kernel at
- *    `helpers/sbx-vz/guest/vmlinux-fc`, and the amd64 agent staged (see plan
+ *    `helpers/hotcell-vz/guest/vmlinux-fc`, and the amd64 agent staged (see plan
  *    Appendix B). `npm run smoke:fc:full`.
  */
 import { mkdtemp, rm } from "node:fs/promises";

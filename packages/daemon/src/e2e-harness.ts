@@ -11,8 +11,9 @@
  * Prereqs: a daemon whose environment has SBX_PROVIDER_KEY_OPENROUTER, Docker
  * (container driver), and internet egress for the gateway itself.
  * Env: SBX_ENDPOINT (default http://127.0.0.1:4750), SBX_API_KEY (if auth on),
- *      SBX_E2E_MODEL (OpenRouter slug; default anthropic/claude-3.5-haiku),
- *      SBX_E2E_EXPECT — "completion" (default; needs a real provider key) or
+ *      HOTCELL_E2E_MODEL (OpenRouter slug), HOTCELL_E2E_HARNESS — "claude-code"
+ *      (default) or "opencode" (any OpenRouter model, e.g. Kimi K2.5),
+ *      HOTCELL_E2E_EXPECT — "completion" (default; needs a real provider key) or
  *      "auth-fail": run with a dummy key and accept the provider's auth error
  *      as proof the whole chain works (sandbox → token env → headless Claude
  *      Code → gateway → key injection → real provider), minus the billing.
@@ -23,7 +24,10 @@ import { HotcellClient, type Sandbox } from "@hotcell/sdk";
 
 async function main(): Promise<number> {
   const endpoint = process.env.SBX_ENDPOINT ?? "http://127.0.0.1:4750";
-  const model = process.env.SBX_E2E_MODEL ?? "anthropic/claude-3.5-haiku";
+  const harness = process.env.HOTCELL_E2E_HARNESS ?? "claude-code";
+  const model =
+    process.env.HOTCELL_E2E_MODEL ??
+    (harness === "opencode" ? "openrouter/moonshotai/kimi-k2.5" : "anthropic/claude-3.5-haiku");
   const client = new HotcellClient({ endpoint, apiKey: process.env.SBX_API_KEY });
 
   let passed = 0;
@@ -55,15 +59,24 @@ async function main(): Promise<number> {
     );
     ok("egress env wired: gateway base URL + token (no real key in the sandbox)");
 
-    console.error("[e2e] installing @anthropic-ai/claude-code in the sandbox (~1-2 min)…");
-    const install = await sandbox.exec(
-      "npm install -g @anthropic-ai/claude-code --no-fund --no-audit 2>&1 | tail -2 && claude --version",
-    );
+    const installCmd =
+      harness === "opencode"
+        ? // OpenCode reads the openrouter provider from its config; point its
+          // baseURL at the gateway with the egress token as the "key".
+          `npm install -g opencode-ai --no-fund --no-audit 2>&1 | tail -1 && mkdir -p ~/.config/opencode && ` +
+          `printf '{"provider":{"openrouter":{"options":{"baseURL":"%s/v1","apiKey":"%s"}}}}' ` +
+          `"$OPENROUTER_BASE_URL" "$OPENROUTER_API_KEY" > ~/.config/opencode/opencode.json && opencode --version`
+        : "npm install -g @anthropic-ai/claude-code --no-fund --no-audit 2>&1 | tail -2 && claude --version";
+    console.error(`[e2e] installing ${harness} in the sandbox (~1-2 min)…`);
+    const install = await sandbox.exec(installCmd);
     assert.equal(install.exitCode, 0, `install failed:\n${install.stdout}\n${install.stderr}`);
-    ok(`headless harness installed: claude ${install.stdout.trim().split("\n").pop()}`);
+    ok(`headless harness installed: ${harness} ${install.stdout.trim().split("\n").pop()}`);
 
-    console.error("[e2e] running headless Claude Code through the gateway…");
+    console.error(`[e2e] running headless ${harness} through the gateway…`);
     const run = await sandbox.exec(
+      harness === "opencode"
+        ? `export HOME=/root && opencode run -m "${model}" --dangerously-skip-permissions "Reply with exactly: HOTCELL_E2E_OK" 2>&1`
+        :
       [
         // Claude Code → gateway → openrouter.ai/api/v1/messages, per OpenRouter's
         // Claude Code integration guide: base URL swap, token as auth, blank the
@@ -74,10 +87,10 @@ async function main(): Promise<number> {
         `export ANTHROPIC_DEFAULT_HAIKU_MODEL="${model}"`,
         `export DISABLE_TELEMETRY=1 CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`,
         `export HOME=/root IS_SANDBOX=1`,
-        `claude -p "Reply with exactly: SBX_E2E_OK" --model haiku 2>&1`,
+        `claude -p "Reply with exactly: HOTCELL_E2E_OK" --model haiku 2>&1`,
       ].join(" && "),
     );
-    const expect = process.env.SBX_E2E_EXPECT ?? "completion";
+    const expect = process.env.HOTCELL_E2E_EXPECT ?? "completion";
     if (expect === "auth-fail") {
       // Dummy-key mode: the provider rejecting our injected key IS the proof —
       // the request left headless Claude Code, crossed the gateway, had the
@@ -91,7 +104,7 @@ async function main(): Promise<number> {
     } else {
       assert.match(
         run.stdout,
-        /SBX_E2E_OK/,
+        /HOTCELL_E2E_OK/,
         `no completion came back through the gateway:\n${run.stdout.slice(-800)}`,
       );
       ok("★ headless Claude Code completed a real prompt through the egress gateway");

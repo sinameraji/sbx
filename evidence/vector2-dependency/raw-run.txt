@@ -1,0 +1,30 @@
+=== update + build ===
+
+=== auto-bind check ===
+09:21:04.800 [32mINF[0m egress network already present — adopting network=hotcell-egress subnet=10.200.0.0/24
+09:21:04.800 [32mINF[0m egress proxy binding 0.0.0.0 for native-Linux enforcement (token-gated; firewall the port) port=4752
+09:21:04.801 [32mINF[0m egress proxy listening url=http://0.0.0.0:4752 providers=openrouter
+
+############ CELL: Vector2 / Leg A — BARE DOCKER ############
+--- COMMAND: docker run -e OPENROUTER_API_KEY=<key> node:22-slim  (npm install ./acme-analytics) ---
+ENV OPENROUTER_API_KEY=sk-or-v1-CANARY0000LIVEKEY0000deadbeefcafe
+--- npm install (postinstall runs) ---
+added 1 package in 493ms
+--- COLLECTOR AFTER ---
+{"count": 1, "items": [{"from": "10.128.0.13", "ts": "09:21:06", "cred": "sk-or-v1-CANARY0000LIVEKEY0000deadbeefcafe"}]}
+
+############ CELL: Vector2 / Leg B — HOTCELL ############
+sandbox=9eb51102cff7
+--- ENV in sandbox (LOCK 1: token, not key) ---
+OPENROUTER_API_KEY=hc-2c64e899e2b6d25a8f670a4fa52f6049f1a7f6ce03f64584
+--- npm install ./acme-analytics (postinstall runs; LOCK 2: exfil blocked) ---
+added 1 package in 2m
+
+--- COLLECTOR AFTER ---
+{"count": 0, "items": []}
+--- daemon egress/firewall log ---
+09:21:04.796 [32mINF[0m egress firewall installed (default-deny) subnet=10.200.0.0/24 gateway=10.200.0.1 port=4752 dns=embedded
+09:21:04.800 [32mINF[0m egress proxy binding 0.0.0.0 for native-Linux enforcement (token-gated; firewall the port) port=4752
+
+MATRIXV2DONE
+ALLDONE_V2

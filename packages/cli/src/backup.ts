@@ -8,7 +8,7 @@ export async function backupCommand(
 ): Promise<number> {
   const id = positional[0];
   if (!id) {
-    console.error("Usage: sb backup <id>");
+    console.error("Usage: hotcell backup <id>");
     return 1;
   }
 
@@ -30,7 +30,7 @@ export async function restoreCommand(
 ): Promise<number> {
   const [id, backupId] = positional;
   if (!id || !backupId) {
-    console.error("Usage: sb restore <id> <backupId>");
+    console.error("Usage: hotcell restore <id> <backupId>");
     return 1;
   }
 

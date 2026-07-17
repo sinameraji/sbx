@@ -17,7 +17,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { FirecrackerDriver } from "./driver/firecracker.js";
 
 async function main(): Promise<void> {
-  const stateDir = mkdtempSync(join(tmpdir(), "sbx-fc-smoke-"));
+  const stateDir = mkdtempSync(join(tmpdir(), "hotcell-fc-smoke-"));
   const image = process.env.SBX_FC_SMOKE_IMAGE ?? "alpine:3.20";
   // Mock egress gateway: guests reach it ONLY via the vsock relay (no NIC).
   const EGRESS_PORT = 47523;
@@ -152,7 +152,7 @@ async function main(): Promise<void> {
     // snapshot → resume of the ADOPTED VM still works — the no-move symlink
     // adoption keeps Firecracker's recorded boot-time paths valid.
     console.error("[smoke-fc] warm pool…");
-    const poolStateDir = mkdtempSync(join(tmpdir(), "sbx-fc-pool-"));
+    const poolStateDir = mkdtempSync(join(tmpdir(), "hotcell-fc-pool-"));
     const pooled = new FirecrackerDriver({
       fcBin: process.env.SBX_FC_BIN ?? "firecracker",
       kernel: process.env.SBX_FC_KERNEL ?? "helpers/hotcell-vz/guest/vmlinux-fc",

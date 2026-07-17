@@ -2,7 +2,7 @@ import { HotcellClient } from "@hotcell/sdk";
 import type { GlobalArgs } from "./cli.js";
 
 /**
- * sb terminal <id> — attach an interactive shell to a sandbox (the "attach" verb).
+ * hotcell terminal <id> — attach an interactive shell to a sandbox (the "attach" verb).
  *
  * Bridges the daemon's WebSocket PTY (`GET /sandboxes/:id/terminal`) to the local
  * terminal: local stdin → binary frames (keystrokes), output frames → stdout, and
@@ -15,7 +15,7 @@ export async function terminalCommand(
 ): Promise<number> {
   const id = positional[0];
   if (!id) {
-    console.error("Usage: sb terminal <id>");
+    console.error("Usage: hotcell terminal <id>");
     return 1;
   }
   const WS = (globalThis as { WebSocket?: any }).WebSocket;

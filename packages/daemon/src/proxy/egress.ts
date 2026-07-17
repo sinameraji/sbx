@@ -183,7 +183,8 @@ const HOP_REQUEST = new Set([
   "connection",
   "content-length",
   "accept-encoding",
-  "x-sbx-egress",
+  "x-hotcell-egress",
+  "x-hotcell-egress",
   "authorization",
 ]);
 const HOP_RESPONSE = new Set([
@@ -392,7 +393,7 @@ function matchModel(patterns: string[], model: string): boolean {
 
 /** Pull the egress token from `X-Sbx-Egress` or a Bearer Authorization header. */
 function extractToken(req: IncomingMessage): string | undefined {
-  const direct = req.headers["x-sbx-egress"];
+  const direct = req.headers["x-hotcell-egress"] ?? req.headers["x-hotcell-egress"];
   if (typeof direct === "string" && direct) return direct;
   const auth = req.headers["authorization"];
   if (typeof auth === "string" && auth.startsWith("Bearer ")) return auth.slice(7);
@@ -414,7 +415,7 @@ function extractProxyToken(req: IncomingMessage): string | undefined {
       if (user) return user;
     }
   }
-  const direct = req.headers["x-sbx-egress"];
+  const direct = req.headers["x-hotcell-egress"] ?? req.headers["x-hotcell-egress"];
   if (typeof direct === "string" && direct) return direct;
   return undefined;
 }
@@ -453,7 +454,7 @@ async function handleForwardHttp(
   const token = extractProxyToken(req);
   const rec = token ? deps.store.resolveEgressTokenFull(token) : undefined;
   if (!rec) {
-    res.setHeader("proxy-authenticate", 'Basic realm="sbx-egress"');
+    res.setHeader("proxy-authenticate", 'Basic realm="hotcell-egress"');
     return sendText(res, 407, "proxy authentication required");
   }
   if (deps.providerHosts.has(host)) {
@@ -484,7 +485,8 @@ async function handleForwardHttp(
       v == null ||
       lk === "proxy-authorization" ||
       lk === "proxy-connection" ||
-      lk === "x-sbx-egress" ||
+      lk === "x-hotcell-egress" ||
+      lk === "x-hotcell-egress" ||
       HOP_REQUEST.has(lk)
     ) {
       continue;
@@ -538,7 +540,7 @@ async function handleConnect(
   const rec = token ? deps.store.resolveEgressTokenFull(token) : undefined;
   if (!rec) {
     clientSocket.write(
-      'HTTP/1.1 407 Proxy Authentication Required\r\nProxy-Authenticate: Basic realm="sbx-egress"\r\n\r\n',
+      'HTTP/1.1 407 Proxy Authentication Required\r\nProxy-Authenticate: Basic realm="hotcell-egress"\r\n\r\n',
     );
     clientSocket.destroy();
     return;

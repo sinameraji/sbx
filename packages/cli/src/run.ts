@@ -11,7 +11,7 @@ export async function runCommand(
   const command = positional[0];
   if (!command) {
     console.error(
-      'Usage: sb run "<command>" [--image <image>] [--keep] [--env KEY=VAL,...] [--sleep-after <ms>]',
+      'Usage: hotcell run "<command>" [--image <image>] [--keep] [--env KEY=VAL,...] [--sleep-after <ms>]',
     );
     return 1;
   }

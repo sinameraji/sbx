@@ -4,7 +4,7 @@ import { parseEnvPairs } from "./env.js";
 import { parseLimitFlags } from "./util.js";
 
 /**
- * sb create [--image I] [--env K=V,…] [--sleep-after MS] [--egress] [--label K=V,…]
+ * hotcell create [--image I] [--env K=V,…] [--sleep-after MS] [--egress] [--label K=V,…]
  *           [--setup "cmd"]
  *
  * Provision a standalone, persistent sandbox and print its id (unlike `sb run`,

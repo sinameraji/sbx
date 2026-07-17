@@ -110,9 +110,9 @@ async function main(): Promise<void> {
     fcBin: "firecracker",
     kernel: "/nonexistent/vmlinux",
     rootfs: "helpers/hotcell-vz/guest/rootfs.img",
-    stateDir: "/tmp/sbx-fc-check",
+    stateDir: "/tmp/hotcell-fc-check",
     diskGb: 8,
-    imageCacheDir: "/tmp/sbx-fc-check/images",
+    imageCacheDir: "/tmp/hotcell-fc-check/images",
   });
   assert.equal(driver.name, "firecracker");
   if (process.platform !== "linux") {

@@ -2,7 +2,7 @@ import { HotcellClient } from "@hotcell/sdk";
 import { formatError } from "./util.js";
 import type { GlobalArgs } from "./cli.js";
 
-/** sb logs <id> <procId> [--follow] */
+/** hotcell logs <id> <procId> [--follow] */
 export async function logsCommand(
   positional: string[],
   globals: GlobalArgs,
@@ -10,7 +10,7 @@ export async function logsCommand(
 ): Promise<number> {
   const [id, procId] = positional;
   if (!id || !procId) {
-    console.error("Usage: sb logs <id> <procId> [--follow]");
+    console.error("Usage: hotcell logs <id> <procId> [--follow]");
     return 1;
   }
   const client = new HotcellClient({ endpoint: globals.endpoint, apiKey: globals.apiKey });

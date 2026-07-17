@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-**sbx** is self-hostable sandbox infrastructure for AI agents — spin up many isolated, observable sandboxes on your own hardware instead of a managed cloud. It's an npm-workspaces monorepo of TypeScript ES modules (the daemon needs Node ≥22 for built-in `node:sqlite` + global `WebSocket`). **Phases 0–2 are complete and Phase 3 has started**: a Docker-backed container driver with files/processes/sessions/preview-URLs/code-interpreter/backups/idle-FSM, durable SQLite state, metrics + cost meter, structured logs + OpenTelemetry traces, API-key auth, a web dashboard with a live xterm.js terminal, and an egress credential proxy (LLM gateway). Firecracker/Apple VZ microVM drivers are the remaining Phase 3 work and need a KVM-capable host, so they're not built yet.
+**hotcell** (formerly `sbx`, renamed 2026-07-17) is self-hostable sandbox infrastructure for AI agents — spin up many isolated, observable sandboxes on your own hardware instead of a managed cloud. It's an npm-workspaces monorepo of TypeScript ES modules (the daemon needs Node ≥22 for built-in `node:sqlite` + global `WebSocket`) plus a Go guest agent (`agent/`) and a signed Swift VZ helper (`helpers/hotcell-vz`). **Phases 0–3 are complete**: a Docker container driver AND two microVM drivers (Firecracker on Linux/KVM, Apple VZ on macOS) behind one `Driver` interface with per-sandbox selection; files/processes/sessions/preview-URLs/code-interpreter/backups; a lifecycle FSM whose pause is a **memory snapshot** on microVM drivers (processes survive resume); warm pools; durable SQLite state; metrics + cost meter; OTel traces; API-key auth; a dashboard with live terminal; and the egress control plane (LLM gateway, default-deny egress — microVM guests have **no NIC** and reach the gateway over vsock only). Env vars use the `HOTCELL_` prefix (legacy `SBX_` still read). Publishing to npm is pending (`hotcell` + `@hotcell/*`).
 
 Two long-form docs already exist and are the source of truth — read them before large changes:
 - `docs/plan.md` — product spec, full target architecture, and phased roadmap (Phase 0→4).
@@ -23,18 +23,18 @@ npm run smoke                        # build + run packages/daemon/dist/smoke.js
 node packages/daemon/dist/index.js   # start compiled daemon (listens on 127.0.0.1:4750)
 ```
 
-The daemon (`sbd`) requires a running Docker-compatible runtime (Docker Desktop / colima / Apple `container`). `npm run smoke` is the closest thing to an end-to-end test.
+The daemon (`hotcelld`) requires a running Docker-compatible runtime (Docker Desktop / colima / Apple `container`). `npm run smoke` is the closest thing to an end-to-end test.
 
-Daemon config via env (`packages/daemon/src/config.ts`): `SBX_HOST` (127.0.0.1), `SBX_PORT` (4750), `SBX_IMAGE` (`python:3.11-slim-bookworm`). SDK/CLI endpoint via `SBX_ENDPOINT`.
+Daemon config via env (`packages/daemon/src/config.ts`): `HOTCELL_HOST` (127.0.0.1), `HOTCELL_PORT` (4750), `HOTCELL_IMAGE` (`python:3.11-slim-bookworm`). SDK/CLI endpoint via `HOTCELL_ENDPOINT`.
 
 ## Architecture
 
 Three workspaces plus a base image, layered client → daemon → driver → Docker:
 
-- **`packages/daemon`** (`@sbx/daemon`, bin `sbd`) — control plane. Hand-rolled `node:http` REST server (`src/api/server.ts`), `SandboxStore` (`src/store.ts`, embedded SQLite via `node:sqlite` with a write-through in-memory cache — survives daemon restart), and the runtime-driver layer.
-- **`packages/sdk`** (`@sbx/sdk`) — zero-runtime-dependency TS client mirroring the Cloudflare Sandbox SDK surface (`SbxClient.getSandbox`, `Sandbox.exec`/`execStream`/`writeFile`/`readFile`/`mkdir`/`listFiles`/`destroy`). Keep it dependency-free.
-- **`packages/cli`** (`@sbx/cli`, bin `sb`) — `sb run | ls | rm | files`, built on `@sbx/sdk`.
-- **`images/base`** — richer OCI image (Python 3.11 + Node 20 + git/bash); build it and set `SBX_IMAGE=sbx/base:latest` to use it.
+- **`packages/daemon`** (`@hotcell/daemon`, bin `hotcelld`) — control plane. Hand-rolled `node:http` REST server (`src/api/server.ts`), `SandboxStore` (`src/store.ts`, embedded SQLite via `node:sqlite` with a write-through in-memory cache — survives daemon restart), and the runtime-driver layer.
+- **`packages/sdk`** (`@hotcell/sdk`) — zero-runtime-dependency TS client mirroring the Cloudflare Sandbox SDK surface (`HotcellClient.getSandbox`, `Sandbox.exec`/`execStream`/`writeFile`/`readFile`/`mkdir`/`listFiles`/`destroy`). Keep it dependency-free.
+- **`packages/cli`** (`@hotcell/cli`, bin `hotcell`) — `hotcell run | ls | rm | files`, built on `@hotcell/sdk`.
+- **`images/base`** — richer OCI image (Python 3.11 + Node 20 + git/bash); build it and set `HOTCELL_IMAGE=hotcell/base:latest` to use it.
 
 **The central abstraction is the `Driver` interface** (`packages/daemon/src/driver/types.ts`): `create / exec / writeFile / readFile / mkdir / listFiles / destroy / ping`. The only implementation today is `ContainerDriver` (`src/driver/container.ts`), which keeps a long-lived Docker container alive (`sleep infinity`) and `exec`s into it on demand. Future microVM drivers implement this same surface so the daemon, SDK, and CLI stay unchanged. **When adding a sandbox capability, add it to the `Driver` interface first, then the container impl, then expose it through REST → SDK → CLI** (that layering is the existing pattern; see how file ops were added across all four).
 

@@ -34,7 +34,7 @@ function record(id: string, driver: string, image: string): SandboxRecord {
 }
 
 async function main(): Promise<void> {
-  const stateDir = mkdtempSync(join(tmpdir(), "sbx-router-"));
+  const stateDir = mkdtempSync(join(tmpdir(), "hotcell-router-"));
   const microvm =
     process.env.SBX_ROUTER_MICROVM ?? (process.platform === "darwin" ? "applevz" : "firecracker");
   const microImage =

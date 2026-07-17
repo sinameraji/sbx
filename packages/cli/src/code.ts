@@ -9,7 +9,7 @@ export async function runCodeCommand(
 ): Promise<number> {
   const [id, code] = positional;
   if (!id || !code) {
-    console.error('Usage: sb run-code <id> "<code>" [--lang python|javascript]');
+    console.error('Usage: hotcell run-code <id> "<code>" [--lang python|javascript]');
     return 1;
   }
 

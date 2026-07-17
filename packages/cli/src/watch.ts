@@ -9,7 +9,7 @@ export async function watchCommand(
 ): Promise<number> {
   const id = positional[0];
   if (!id) {
-    console.error("Usage: sb watch <id> [path] [--interval <ms>]");
+    console.error("Usage: hotcell watch <id> [path] [--interval <ms>]");
     return 1;
   }
   const path = positional[1] ?? "/workspace";

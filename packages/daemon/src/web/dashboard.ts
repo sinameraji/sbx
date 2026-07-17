@@ -1,4 +1,4 @@
-// Embedded single-page dashboard for sbx — dependency-free vanilla JS + CSS,
+// Embedded single-page dashboard for hotcell — dependency-free vanilla JS + CSS,
 // served by the daemon at GET /. No build step: the markup is a plain string so
 // it compiles straight to dist with the rest of the daemon. It talks to the same
 // REST API the SDK/CLI use (same origin, so no CORS), polling the sandbox list +
@@ -13,7 +13,7 @@ export const DASHBOARD_HTML = String.raw`<!doctype html>
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>sbx dashboard</title>
+<title>hotcell dashboard</title>
 <style>
   :root {
     --bg: #0d1117; --panel: #161b22; --border: #30363d; --fg: #e6edf3;
@@ -90,7 +90,7 @@ export const DASHBOARD_HTML = String.raw`<!doctype html>
 </head>
 <body>
 <header>
-  <h1>sbx</h1>
+  <h1>hotcell</h1>
   <span class="meta" id="info">connecting…</span>
   <span class="spacer"></span>
   <span class="cost" id="cap" title="host memory committed / budget"></span>

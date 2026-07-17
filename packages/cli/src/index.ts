@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * sb — CLI for sbx, the self-hostable agent sandbox platform.
+ * hotcell — CLI for sbx, the self-hostable agent sandbox platform.
  *
  * Usage:
  *   sb run "<command>"          create a sandbox, run a command, destroy it

@@ -1,4 +1,4 @@
-# KIMI.md — sbx Project Context
+# KIMI.md — hotcell Project Context
 
 > Generated context for AI agents working in this repository. Verify assumptions before relying on them; the project is an early MVP and changes quickly.
 
@@ -6,14 +6,14 @@
 
 ## 1. Project
 
-**sbx** is a self-hostable sandbox infrastructure for AI coding agents. It lets you spin up many secure, persistent, observable sandboxes on your own hardware (Mac, Linux VM, bare metal) instead of using managed cloud sandboxes.
+**hotcell** is a self-hostable sandbox infrastructure for AI coding agents. It lets you spin up many secure, persistent, observable sandboxes on your own hardware (Mac, Linux VM, bare metal) instead of using managed cloud sandboxes.
 
 - **Language / runtime:** TypeScript, ES modules (`"type": "module"`). Node.js ≥20 for the SDK/CLI; the daemon needs **≥22** because the store uses the built-in `node:sqlite`.
 - **Package manager:** npm with workspaces
 - **License:** Apache-2.0
 - **Key frameworks / libraries:** `dockerode` (Docker Engine API), `tsx` (dev runner), native `node:http` + `fetch` + `node:sqlite` (embedded state store)
 
-Current status: **Phases 0–2 complete; Phase 3 started.** The `container` (Docker) driver works on Linux and macOS with the full sandbox API, durable SQLite state, idle lifecycle, metrics + cost meter, structured logs + OTel traces, API-key auth, a web dashboard with a live xterm.js terminal, and an egress credential proxy (LLM gateway). The runtime driver is selectable via `SBX_DRIVER`; the `firecracker`/`applevz` microVM drivers are scaffolded (compile-checked stubs) and need a KVM/VZ host. The daemon now requires Node ≥22 (`node:sqlite` + global `WebSocket`).
+Current status: **Phases 0–2 complete; Phase 3 started.** The `container` (Docker) driver works on Linux and macOS with the full sandbox API, durable SQLite state, idle lifecycle, metrics + cost meter, structured logs + OTel traces, API-key auth, a web dashboard with a live xterm.js terminal, and an egress credential proxy (LLM gateway). The runtime driver is selectable via `HOTCELL_DRIVER`; the `firecracker`/`applevz` microVM drivers are scaffolded (compile-checked stubs) and need a KVM/VZ host. The daemon now requires Node ≥22 (`node:sqlite` + global `WebSocket`).
 
 ---
 
@@ -26,11 +26,11 @@ All commands run from the repository root unless noted.
 | `npm install` | Install workspace dependencies | Required first step |
 | `npm run build` | Compile all workspaces (`tsc`) | Writes to `packages/*/dist/` |
 | `npm run dev:daemon` | Run daemon in watch mode with `tsx` | Fast feedback; does not rebuild `dist/` |
-| `node packages/daemon/dist/index.js` | Start compiled daemon | Or `sbd` via `node_modules/.bin` |
+| `node packages/daemon/dist/index.js` | Start compiled daemon | Or `hotcelld` via `node_modules/.bin` |
 | `npm run smoke` | Build + run `packages/daemon/dist/smoke.js` | Full end-to-end suite (TS surface) |
 | `npm run smoke:py` | Build + run `sdk/python/smoke.py` | Python SDK end-to-end (boots daemon on isolated ports) |
 | `npm run dev:cli` | Run CLI in watch mode with `tsx` | Fast feedback; does not rebuild `dist/` |
-| `sb run "<cmd>"` | Create a sandbox, run a command, destroy it | Via `node_modules/.bin/sb` after build |
+| `hotcell run "<cmd>"` | Create a sandbox, run a command, destroy it | Via `node_modules/.bin/sb` after build |
 
 There are **no test, lint, or format scripts** yet. Type-checking is performed by `tsc` during `npm run build`.
 
@@ -45,17 +45,17 @@ Environment variables (`packages/daemon/src/config.ts`):
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `SBX_HOST` | `127.0.0.1` | Bind address |
-| `SBX_PORT` | `4750` | Bind port |
-| `SBX_IMAGE` | `python:3.11-slim-bookworm` | Default sandbox image |
-| `SBX_DB` | `~/.sbx/state.db` | Embedded SQLite path for durable control-plane state (`:memory:` for ephemeral) |
-| `SBX_SLEEP_AFTER_MS` | `0` | Default idle timeout before a sandbox auto-pauses (`0` = disabled; per-sandbox override via `sleepAfter`) |
-| `SBX_REAP_INTERVAL_MS` | `15000` | How often the idle reaper scans for sandboxes to auto-pause |
-| `SBX_METRICS_INTERVAL_MS` | `10000` | How often the metrics sampler integrates per-sandbox CPU/mem usage (`0` = off) |
-| `SBX_COST_CPU_PER_HOUR` | `0.05` | Cost-meter rate: currency per vCPU-hour |
-| `SBX_COST_MEM_GB_PER_HOUR` | `0.005` | Cost-meter rate: currency per GB-hour of memory |
-| `SBX_COST_EGRESS_PER_GB` | `0.01` | Cost-meter rate: currency per GB of preview-proxy egress |
-| `SBX_ENDPOINT` | `http://127.0.0.1:4750` | SDK default endpoint |
+| `HOTCELL_HOST` | `127.0.0.1` | Bind address |
+| `HOTCELL_PORT` | `4750` | Bind port |
+| `HOTCELL_IMAGE` | `python:3.11-slim-bookworm` | Default sandbox image |
+| `HOTCELL_DB` | `~/.hotcell/state.db` | Embedded SQLite path for durable control-plane state (`:memory:` for ephemeral) |
+| `HOTCELL_SLEEP_AFTER_MS` | `0` | Default idle timeout before a sandbox auto-pauses (`0` = disabled; per-sandbox override via `sleepAfter`) |
+| `HOTCELL_REAP_INTERVAL_MS` | `15000` | How often the idle reaper scans for sandboxes to auto-pause |
+| `HOTCELL_METRICS_INTERVAL_MS` | `10000` | How often the metrics sampler integrates per-sandbox CPU/mem usage (`0` = off) |
+| `HOTCELL_COST_CPU_PER_HOUR` | `0.05` | Cost-meter rate: currency per vCPU-hour |
+| `HOTCELL_COST_MEM_GB_PER_HOUR` | `0.005` | Cost-meter rate: currency per GB-hour of memory |
+| `HOTCELL_COST_EGRESS_PER_GB` | `0.01` | Cost-meter rate: currency per GB of preview-proxy egress |
+| `HOTCELL_ENDPOINT` | `http://127.0.0.1:4750` | SDK default endpoint |
 
 ---
 
@@ -63,11 +63,11 @@ Environment variables (`packages/daemon/src/config.ts`):
 
 | Path | Rationale |
 |---|---|
-| `packages/daemon/` | Control-plane daemon (`sbd`). Owns the REST API, sandbox store, and runtime-driver abstraction. |
-| `packages/sdk/` | TypeScript client SDK (`@sbx/sdk`). Thin HTTP client that mirrors the Cloudflare Sandbox surface. |
-| `sdk/python/` | Python client SDK (`sbx-sdk`, package `sbx`). Stdlib-only; mirrors the TS surface, snake_cased. Outside `packages/*` so it's not an npm workspace. |
-| `agent/` | **Go module** (`github.com/sinameraji/sbx/agent`) for the in-sandbox `sbx-agent` — the vsock RPC agent the Phase 3 microVM drivers (Firecracker/Apple VZ) use in place of `docker exec`. Separate `go.mod`, outside the npm workspaces. `proto/` = wire protocol, `server/` = transport-agnostic handlers, `cmd/sbx-agent/` = entrypoint + transports. Dev: `npm run test:agent` (tests run on macOS over net.Pipe/unix, no vsock); ship: `npm run build:agent` (static `linux/{amd64,arm64}`). Only dep: `golang.org/x/sys` (for `AF_VSOCK`). See `agent/README.md`. |
-| `packages/cli/` | `sb` CLI. Commands: `run`, `ls`, `rm`. Uses `@sbx/sdk` to talk to the daemon. |
+| `packages/daemon/` | Control-plane daemon (`hotcelld`). Owns the REST API, sandbox store, and runtime-driver abstraction. |
+| `packages/sdk/` | TypeScript client SDK (`@hotcell/sdk`). Thin HTTP client that mirrors the Cloudflare Sandbox surface. |
+| `sdk/python/` | Python client SDK (`hotcell-sdk`, package `hotcell`). Stdlib-only; mirrors the TS surface, snake_cased. Outside `packages/*` so it's not an npm workspace. |
+| `agent/` | **Go module** (`github.com/sinameraji/hotcell/agent`) for the in-sandbox `hotcell-agent` — the vsock RPC agent the Phase 3 microVM drivers (Firecracker/Apple VZ) use in place of `docker exec`. Separate `go.mod`, outside the npm workspaces. `proto/` = wire protocol, `server/` = transport-agnostic handlers, `cmd/hotcell-agent/` = entrypoint + transports. Dev: `npm run test:agent` (tests run on macOS over net.Pipe/unix, no vsock); ship: `npm run build:agent` (static `linux/{amd64,arm64}`). Only dep: `golang.org/x/sys` (for `AF_VSOCK`). See `agent/README.md`. |
+| `packages/cli/` | `hotcell` CLI. Commands: `run`, `ls`, `rm`. Uses `@hotcell/sdk` to talk to the daemon. |
 | `images/base/` | OCI image definition for the richer sandbox workspace (Python 3.11 + Node 20 + git/bash). |
 | `docs/plan.md` | Long-form product/architecture spec and phased build plan. |
 | `tsconfig.base.json` | Shared strict TypeScript config extended by every workspace. |
@@ -118,7 +118,7 @@ Environment variables (`packages/daemon/src/config.ts`):
 
 - The daemon requires a running Docker-compatible runtime.
 - Default sandbox image is `python:3.11-slim-bookworm` so the vertical slice works without building images.
-- Build `images/base/Dockerfile` and set `SBX_IMAGE=sbx/base:latest` for the richer toolset.
+- Build `images/base/Dockerfile` and set `HOTCELL_IMAGE=hotcell/base:latest` for the richer toolset.
 
 ---
 
@@ -128,10 +128,10 @@ Environment variables (`packages/daemon/src/config.ts`):
 
 ```bash
 # Runtime dependency in a workspace
-npm install <pkg> --workspace @sbx/daemon
+npm install <pkg> --workspace @hotcell/daemon
 
 # Dev dependency in a workspace
-npm install <pkg> --workspace @sbx/daemon --save-dev
+npm install <pkg> --workspace @hotcell/daemon --save-dev
 
 # Root dev dependency (e.g. shared tooling)
 npm install <pkg> --save-dev
@@ -150,7 +150,7 @@ npm install <pkg> --save-dev
 
 ## 6. Do / Don't
 
-1. **Do not commit secrets.** `.gitignore` excludes `.env`, `.env.*`, and `.sbx/`.
+1. **Do not commit secrets.** `.gitignore` excludes `.env`, `.env.*`, and `.hotcell/`.
 2. **Do not use CommonJS.** All packages are ES modules.
 3. **Do not drop the `.js` extension** from relative TypeScript imports — `NodeNext` resolution requires it.
 4. **Do not add a heavy web framework** to the daemon without discussion; the Phase 0 server is intentionally hand-rolled.
@@ -196,9 +196,9 @@ npm run build
 - **`ContainerDriver`**: backs sandboxes with long-lived Docker containers. The container stays alive (`sleep infinity`) and the daemon `exec`s into it on demand.
 - **`SandboxStore`**: registry backed by embedded SQLite (`node:sqlite`), with in-memory `Map`s as a write-through cache rehydrated on startup, so records survive a daemon restart.
 - **Lifecycle FSM**: status is `running` | `paused` | `stopped`. The idle reaper (`src/lifecycle.ts`) auto-pauses `running` sandboxes idle past `sleepAfterMs` (skipping those with exposed ports / running processes); any container-work op auto-resumes a `paused` sandbox via the `ensureLive` choke point in `api/server.ts`. `store.touch` records activity (also on proxy traffic). Manual `stop` → `stopped` is never auto-resumed.
-- **Metrics + cost (Phase 2)**: `driver.stats(id)` reads the Docker stats API; the sampler (`src/metrics.ts`) integrates `cpuSeconds`/`memByteSeconds` into the persisted `usage` column and the preview proxy meters `egressBytes`; `src/cost.ts` applies configurable rates (cpu + mem + egress). Surfaced at `GET /sandboxes/:id/metrics` (`?live=0` skips the live Docker call), SDK `Sandbox.metrics()`, CLI `sb stats`.
+- **Metrics + cost (Phase 2)**: `driver.stats(id)` reads the Docker stats API; the sampler (`src/metrics.ts`) integrates `cpuSeconds`/`memByteSeconds` into the persisted `usage` column and the preview proxy meters `egressBytes`; `src/cost.ts` applies configurable rates (cpu + mem + egress). Surfaced at `GET /sandboxes/:id/metrics` (`?live=0` skips the live Docker call), SDK `Sandbox.metrics()`, CLI `hotcell stats`.
 - **Dashboard (Phase 2)**: served at `GET /` from `src/web/dashboard.ts` (no build step); `GET /info` exposes driver/image/proxy/cost-rates for it.
-- **`SbxClient` / `Sandbox`**: SDK classes that expose `getSandbox`, `exec`, `execStream`, `destroy`, matching the Cloudflare Sandbox shape.
+- **`HotcellClient` / `Sandbox`**: SDK classes that expose `getSandbox`, `exec`, `execStream`, `destroy`, matching the Cloudflare Sandbox shape.
 
 ### Data flow
 

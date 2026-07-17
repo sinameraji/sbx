@@ -68,7 +68,7 @@ export async function cli(args: string[]): Promise<number> {
     case "files":
       return filesCommand(positional, globals, flags);
     case "start":
-      // Overload: `sb start <id> "<cmd>"` launches a process; `sb start <id>`
+      // Overload: `hotcell start <id> "<cmd>"` launches a process; `hotcell start <id>`
       // (no command) resumes a stopped sandbox.
       return positional.length >= 2
         ? startCommand(positional, globals, flags)
@@ -105,19 +105,19 @@ export async function cli(args: string[]): Promise<number> {
 }
 
 function printHelp(): void {
-  console.log(`sb — CLI for sbx self-hosted sandboxes
+  console.log(`hotcell — sandboxes for AI agents, on your own hardware
 
-Usage: sb <command> [options]
+Usage: hotcell <command> [options]
 
 Commands:
-  sb run "<command>" [--image <image>] [--keep] [--sleep-after <ms>] [--egress]
+  hotcell run "<command>" [--image <image>] [--keep] [--sleep-after <ms>] [--egress]
          [--repo <git-url>] [--ref <branch>] [--setup "cmd"]
          [--memory <MB>] [--cpus <n>] [--pids <n>] [--endpoint <url>]
     Create a sandbox, run a command, stream output, then destroy it.
     --egress wires the sandbox to the LLM gateway (provider keys injected by the daemon).
     --memory/--cpus/--pids set hard resource caps (override the daemon defaults).
 
-  sb create [--image I] [--env K=V,…] [--sleep-after MS] [--egress] [--label K=V,…]
+  hotcell create [--image I] [--env K=V,…] [--sleep-after MS] [--egress] [--label K=V,…]
             [--repo <git-url>] [--ref <branch>] [--setup "cmd"]
             [--memory <MB>] [--cpus <n>] [--pids <n>]
     Provision a standalone persistent sandbox and print its id.
@@ -125,84 +125,84 @@ Commands:
     --setup runs a shell command once after the container starts (best-effort;
     chain with && for multiple steps, e.g. --setup "npm i x && pip install y").
 
-  sb terminal <id>
+  hotcell terminal <id>
     Attach an interactive shell (PTY) to a sandbox in your local terminal.
 
-  sb exec <id> "<command>" [--session <sid>] [--cwd <dir>] [--env KEY=VAL,...]
+  hotcell exec <id> "<command>" [--session <sid>] [--cwd <dir>] [--env KEY=VAL,...]
     Run a command in an existing sandbox (optionally within a session).
 
-  sb env <id> [KEY=VALUE ...]
+  hotcell env <id> [KEY=VALUE ...]
     Set sandbox environment variables, or print them when none are given.
 
-  sb session create <id> [--cwd <dir>] [--env KEY=VAL,...] [--id <sid>]
-  sb session ls <id>
-  sb session rm <id> <sessionId>
+  hotcell session create <id> [--cwd <dir>] [--env KEY=VAL,...] [--id <sid>]
+  hotcell session ls <id>
+  hotcell session rm <id> <sessionId>
     Manage persistent sessions (working directory + env) inside a sandbox.
 
-  sb ls [--endpoint <url>]
+  hotcell ls [--endpoint <url>]
     List sandboxes managed by the daemon.
 
-  sb info
+  hotcell info
     Show the daemon's driver, providers, auth, and cost configuration.
 
-  sb capacity
+  hotcell capacity
     Show host memory budget, what's committed, and how many more sandboxes fit.
 
-  sb stats <id>
+  hotcell stats <id>
     Show live CPU/mem/net usage and accumulated cost for a sandbox.
 
-  sb egress <id> [--list] [--revoke <token>]
+  hotcell egress <id> [--list] [--revoke <token>]
     Mint an egress (LLM gateway) token so the sandbox reaches providers without
     baked-in keys; prints the provider base URLs + env exports to set.
 
-  sb stop <id>
+  hotcell stop <id>
     Stop a sandbox, freeing compute but keeping its persistent workspace.
 
-  sb pause <id>
+  hotcell pause <id>
     Fast-pause a sandbox; any later operation resumes it. On microVM sandboxes
     this is a memory snapshot — background processes come back alive.
 
-  sb start <id>
+  hotcell start <id>
     Resume a stopped sandbox (workspace intact).
 
-  sb backup <id>
+  hotcell backup <id>
     Snapshot a sandbox's /workspace to a durable backup.
 
-  sb restore <id> <backupId>
+  hotcell restore <id> <backupId>
     Replace a sandbox's /workspace with a backup (taken from any sandbox).
 
-  sb backups [<id>]
+  hotcell backups [<id>]
     List all backups, or just those from one sandbox.
 
-  sb run-code <id> "<code>" [--lang python|javascript]
+  hotcell run-code <id> "<code>" [--lang python|javascript]
     Run a code snippet in the sandbox's interpreter and print its output.
 
-  sb rm <id> [--endpoint <url>]
+  hotcell rm <id> [--endpoint <url>]
     Destroy a sandbox, including its persistent workspace volume.
 
-  sb files <subcommand> [args] [--endpoint <url>]
+  hotcell files <subcommand> [args] [--endpoint <url>]
     Manage files inside a sandbox. Run \`sb files\` for subcommand help.
 
-  sb watch <id> [path] [--interval <ms>]
+  hotcell watch <id> [path] [--interval <ms>]
     Stream file-change events (created/modified/deleted) until Ctrl-C.
 
-  sb start <id> "<command>" [--cwd <dir>]
+  hotcell start <id> "<command>" [--cwd <dir>]
     Launch a long-running background process inside a sandbox.
-    (With no command, "sb start <id>" resumes a stopped sandbox — see above.)
+    (With no command, "hotcell start <id>" resumes a stopped sandbox — see above.)
 
-  sb ps <id>
+  hotcell ps <id>
     List background processes in a sandbox.
 
-  sb kill <id> <procId> [--signal <SIG>]
+  hotcell kill <id> <procId> [--signal <SIG>]
     Signal a background process (default SIGTERM).
 
-  sb logs <id> <procId> [--follow]
+  hotcell logs <id> <procId> [--follow]
     Stream a background process's logs.
 
-  sb wait-port <id> <port> [--timeout <ms>]
+  hotcell wait-port <id> <port> [--timeout <ms>]
     Block until a TCP port is listening inside the sandbox.
 
-  sb expose <id> <port> [--token <token>]
+  hotcell expose <id> <port> [--token <token>]
     Expose a port and print its preview URL.
 
 Global options:

@@ -24,8 +24,8 @@ import { emptyUsage, SandboxStore } from "./store.js";
 async function main(): Promise<number> {
   const config = loadConfig();
   // Use a throwaway backup dir + SQLite file so the smoke run leaves nothing behind.
-  config.backupDir = await mkdtemp(join(tmpdir(), "sbx-smoke-backups-"));
-  const dbDir = await mkdtemp(join(tmpdir(), "sbx-smoke-db-"));
+  config.backupDir = await mkdtemp(join(tmpdir(), "hotcell-smoke-backups-"));
+  const dbDir = await mkdtemp(join(tmpdir(), "hotcell-smoke-db-"));
   config.dbPath = join(dbDir, "state.db");
   const driver = createDriver(config);
   const store = new SandboxStore(config.dbPath);
@@ -160,7 +160,7 @@ async function main(): Promise<number> {
     console.error("[smoke] exposed port 8000");
 
     // Reach the in-sandbox server through the preview proxy (path-based route).
-    const previewRes = await fetch(`${proxyEndpoint}/_sbx/${id}/8000/`);
+    const previewRes = await fetch(`${proxyEndpoint}/_hotcell/${id}/8000/`);
     const previewBody = await previewRes.text();
     if (!previewBody.includes("Directory listing")) {
       throw new Error(`preview proxy did not serve the sandbox: ${previewBody.slice(0, 80)}`);
@@ -175,9 +175,9 @@ async function main(): Promise<number> {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ port: 8000, token: "AbC123" }),
     });
-    const wrongTok = await httpGet(config.proxyHost, config.proxyPort, `/_sbx/${id}/8000/?token=abc123`);
+    const wrongTok = await httpGet(config.proxyHost, config.proxyPort, `/_hotcell/${id}/8000/?token=abc123`);
     if (wrongTok.status !== 403) throw new Error(`wrong-case token should 403, got ${wrongTok.status}`);
-    const rightTok = await httpGet(config.proxyHost, config.proxyPort, `/_sbx/${id}/8000/?token=AbC123`);
+    const rightTok = await httpGet(config.proxyHost, config.proxyPort, `/_hotcell/${id}/8000/?token=AbC123`);
     if (!rightTok.body.includes("Directory listing")) {
       throw new Error(`exact token should pass, got ${rightTok.status}`);
     }
@@ -508,7 +508,7 @@ async function main(): Promise<number> {
         const call = (await (
           await fetch(`http://127.0.0.1:${egressPort}/mock/v1/chat`, {
             method: "POST",
-            headers: { "content-type": "application/json", "x-sbx-egress": mint.token },
+            headers: { "content-type": "application/json", "x-hotcell-egress": mint.token },
             body: JSON.stringify({ hello: "world" }),
           })
         ).json()) as { receivedAuth: string };
@@ -519,7 +519,7 @@ async function main(): Promise<number> {
         // An invalid token is rejected before reaching the provider.
         const bad = await fetch(`http://127.0.0.1:${egressPort}/mock/v1/chat`, {
           method: "POST",
-          headers: { "x-sbx-egress": "nope" },
+          headers: { "x-hotcell-egress": "nope" },
           body: "{}",
         });
         if (bad.status !== 403) throw new Error(`invalid token should 403, got ${bad.status}`);
@@ -576,7 +576,7 @@ async function main(): Promise<number> {
         if (!baseUrl.endsWith("/openai")) {
           throw new Error(`expected OPENAI_BASE_URL .../openai, got "${baseUrl}"`);
         }
-        if (!keyVal.startsWith("sbx-")) {
+        if (!keyVal.startsWith("hc-")) {
           throw new Error(`expected OPENAI_API_KEY to be an egress token, got "${keyVal}"`);
         }
       } finally {
@@ -859,7 +859,7 @@ async function main(): Promise<number> {
     }
     const dashRes = await fetch(`${endpoint}/`);
     const dashHtml = await dashRes.text();
-    if (!dashRes.ok || !dashHtml.includes("<title>sbx dashboard</title>")) {
+    if (!dashRes.ok || !dashHtml.includes("<title>hotcell dashboard</title>")) {
       throw new Error(`dashboard not served (status ${dashRes.status})`);
     }
     console.error("[smoke] dashboard + /info served");

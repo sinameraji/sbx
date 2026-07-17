@@ -12,7 +12,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { AppleVzDriver } from "./driver/applevz.js";
 
 async function main(): Promise<void> {
-  const stateDir = mkdtempSync(join(tmpdir(), "sbx-warmpool-"));
+  const stateDir = mkdtempSync(join(tmpdir(), "hotcell-warmpool-"));
   const driver = new AppleVzDriver({
     helperPath: "helpers/hotcell-vz/dist/hotcell-vz",
     kernel: "helpers/hotcell-vz/guest/vmlinux-vz",

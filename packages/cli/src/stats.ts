@@ -1,14 +1,14 @@
 import { HotcellClient } from "@hotcell/sdk";
 import type { GlobalArgs } from "./cli.js";
 
-/** sb stats <id> — print live resource usage and accumulated cost. */
+/** hotcell stats <id> — print live resource usage and accumulated cost. */
 export async function statsCommand(
   positional: string[],
   globals: GlobalArgs,
 ): Promise<number> {
   const id = positional[0];
   if (!id) {
-    console.error("Usage: sb stats <id>");
+    console.error("Usage: hotcell stats <id>");
     return 1;
   }
 

@@ -4,7 +4,7 @@ import type { GlobalArgs } from "./cli.js";
 import { parseEnvPairs } from "./env.js";
 
 /**
- * sb session <create|ls|rm> <id> [...]
+ * hotcell session <create|ls|rm> <id> [...]
  *   create <id> [--cwd <dir>] [--env KEY=VAL,...] [--id <sid>]
  *   ls     <id>
  *   rm     <id> <sessionId>

@@ -1,0 +1,25 @@
+CONTROL — dax's STOCK provider-benchmark.sh run DIRECTLY on the bare Hetzner host
+(no hotcell, no microVM guest, no NAT; real host network). 2026-07-17.
+
+Purpose: determine whether the node-gyp ENOENT crash we saw in the microVM guest is
+(a) dax's script / cold-path bug, or (b) specific to our guest. The host ran the same
+COLD path: host had Node v22.23.1 (!= pinned v24.14.1), so prepare()'s guard fired and
+it installed Node 24 + symlinked node/npm/npx/corepack — but NOT node-gyp.
+
+host node before: v22.23.1
+BENCH_PHASE   clone       3626
+Resolved, downloaded and extracted [537]
+4708 packages installed [12.00s]        <- passed the point the guest crashed (537)
+BENCH_PHASE   install     12112
+BENCH_PHASE   typecheck   14673
+| Provider | CPU / RAM | Region / CPU | Clone | Install | Typecheck | Workload total | Result |
+| **control** | 32 CPU / 125.70 GiB | hetzner-baremetal-HOST, AMD Ryzen 9 5950X 16-Core Processor | 3.626s | 12.112s | 14.673s | 30.411s | ✅ |
+
+node-gyp NOT on PATH (bare)              <- and yet bun install succeeded
+/opt/node-v24.14.1-linux-x64/lib/node_modules/npm/node_modules/node-gyp/bin/node-gyp.js  (exists inside npm, unlinked)
+
+CONCLUSION: the crash is NOT dax's bug and NOT the cold path — the bare host reproduces
+every one of those conditions and PASSES. tree-sitter-powershell's node-gyp-build
+resolves a prebuilt on the host but falls back to source-build in the hotcell microVM
+guest. => guest-specific. The node-gyp exposure is a disclosed guest WORKAROUND, not a
+statement about the benchmark. Root cause of the guest quirk: unresolved (do not guess).

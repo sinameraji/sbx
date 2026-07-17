@@ -215,11 +215,25 @@ export class FirecrackerDriver extends AgentDriver {
     networked?: boolean;
   }): Promise<FcVm> {
     mkdirSync(p.stateDir, { recursive: true });
-    const rootfs = await this.images.ensureRootfs(p.image);
+    let rootfs = await this.images.ensureRootfs(p.image);
 
     // Opt-in NAT networking: give the guest a real eth0 (host TAP + masquerade).
     // Default posture is no NIC (egress over vsock only).
     const net = p.networked ? this.setupTap(p.id) : undefined;
+
+    // "Trusted VM" mode (networked): a private, writable, grown rootfs so the
+    // guest can write to `/` (apt, node into /opt, …). The default shared rootfs
+    // is read-only. Cloned + grown once per sandbox.
+    let rootfsReadOnly = true;
+    if (p.networked) {
+      const priv = join(p.stateDir, "rootfs.img");
+      if (!existsSync(priv)) {
+        cloneFile(rootfs, priv);
+        growExt4(priv, 8);
+      }
+      rootfs = priv;
+      rootfsReadOnly = false;
+    }
 
     // First boot only: give the sandbox its own workspace disk (clone the blank
     // pre-formatted template; else a sparse file the guest formats).
@@ -257,6 +271,7 @@ export class FirecrackerDriver extends AgentDriver {
             vsockUds: vm.vsockUds,
             bootArgs,
             net,
+            rootfsReadOnly,
           }),
         );
         await api.call(FC_START_ACTION);
@@ -697,6 +712,14 @@ function cloneFile(src: string, dst: string): void {
   } catch {
     execFileSync("cp", [src, dst]);
   }
+}
+
+/** Grow an ext4 image file to `gb` gigabytes (truncate + resize2fs). Used to
+ *  give a writable per-sandbox rootfs room for apt/node installs. Needs
+ *  e2fsprogs on the host. */
+function growExt4(path: string, gb: number): void {
+  execFileSync("truncate", ["-s", `${gb}G`, path]);
+  execFileSync("bash", ["-lc", `e2fsck -fy ${path} >/dev/null 2>&1; resize2fs ${path} >/dev/null 2>&1`]);
 }
 
 /** Create a sparse file of `sizeBytes` if it doesn't exist (workspace disk). */

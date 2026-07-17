@@ -34,6 +34,12 @@ export interface FcVmSpec {
   /** Override the kernel command line (mainly for tests). */
   bootArgs?: string;
   /**
+   * Mount the rootfs read-write instead of the default read-only shared mode.
+   * Used by "trusted VM" (networked) sandboxes that need to write to `/` (apt,
+   * node into /opt, etc.). Requires a private per-sandbox rootfs copy.
+   */
+  rootfsReadOnly?: boolean;
+  /**
    * Opt-in guest networking. When set, the microVM gets an eth0 backed by the
    * host TAP device, auto-configured at boot via the kernel `ip=` param (no
    * in-guest tooling needed). Off by default — the flagship posture is a guest
@@ -69,7 +75,8 @@ export const FC_DEFAULT_BOOT_ARGS =
 export function buildFcApiCalls(spec: FcVmSpec): FcApiCall[] {
   // With networking, auto-configure eth0 via the kernel `ip=` param at boot:
   //   ip=<guest>::<gw>:<mask>::eth0:off   (no in-guest tooling required).
-  const baseArgs = spec.bootArgs ?? FC_DEFAULT_BOOT_ARGS;
+  let baseArgs = spec.bootArgs ?? FC_DEFAULT_BOOT_ARGS;
+  if (spec.rootfsReadOnly === false) baseArgs = baseArgs.replace("root=/dev/vda ro", "root=/dev/vda rw");
   const bootArgs = spec.net
     ? `${baseArgs} ip=${spec.net.guestIp}::${spec.net.gatewayIp}:${spec.net.mask}::eth0:off`
     : baseArgs;
@@ -91,7 +98,7 @@ export function buildFcApiCalls(spec: FcVmSpec): FcApiCall[] {
         drive_id: "rootfs",
         path_on_host: spec.rootfsPath,
         is_root_device: true,
-        is_read_only: true,
+        is_read_only: spec.rootfsReadOnly ?? true,
       },
     },
     {

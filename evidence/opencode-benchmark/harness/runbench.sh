@@ -5,9 +5,9 @@
 # so this peak is stable across RAM sizes and pins the memory floor from one run.
 ( while :; do awk '/MemAvailable/{print $2}' /proc/meminfo; sleep 0.3; done ) > /tmp/mem.log 2>/dev/null &
 S=$!
-cd /root
+cd /tmp
 BENCH_PROVIDER="${BENCH_PROVIDER:-hotcell}" BENCH_REGION="${BENCH_REGION:-unknown}" \
-  BENCH_ROOT=/workspace/bench bash /root/pb.sh 2>&1
+  BENCH_ROOT=/workspace/bench bash /tmp/pb.sh 2>&1
 RC=$?
 kill "$S" 2>/dev/null
 TOTAL=$(awk '/MemTotal/{print $2}' /proc/meminfo)

@@ -26,6 +26,7 @@ CONFIGS=${CONFIGS:-"24576:8"}
 REPS=${REPS:-3}
 EGRESS=${EGRESS:-0}
 NETWORKED=${NETWORKED:-true}   # true = opt-in NAT (perf ladder); false = no NIC (Part A3 contained)
+WRITABLE_ROOTFS=${WRITABLE_ROOTFS:-$NETWORKED}  # private rw rootfs; contained egress runs set true with NETWORKED=false
 SKIP_BUILD=${SKIP_BUILD:-0}
 REGION=${REGION:-gcp-n2-nested}
 OUTDIR=${OUTDIR:-/tmp/bench-suite}
@@ -84,7 +85,7 @@ classify(){ # raw-file -> RESULT
 # Pre-warm the OCI->rootfs conversion (needs docker), then stop dockerd so its
 # iptables chains don't pollute the measured FC NAT path (perf mode; EGRESS=0 only).
 LOG "pre-warming image conversion (ubuntu:24.04 -> FC rootfs)"
-WRESP=$(curl -s --max-time 180 -X POST localhost:4750/sandboxes -H 'content-type: application/json' -d "{\"image\":\"ubuntu:24.04\",\"driver\":\"firecracker\",\"networked\":${NETWORKED},\"memoryMb\":2048,\"cpus\":2,\"cpuset\":\"0-1\"}")
+WRESP=$(curl -s --max-time 180 -X POST localhost:4750/sandboxes -H 'content-type: application/json' -d "{\"image\":\"ubuntu:24.04\",\"driver\":\"firecracker\",\"networked\":${NETWORKED},\"writableRootfs\":${WRITABLE_ROOTFS},\"memoryMb\":2048,\"cpus\":2,\"cpuset\":\"0-1\"}")
 WSB=$(echo "$WRESP" | $NODE -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>{try{console.log(JSON.parse(d).id||"ERR")}catch{console.log("ERR")}})')
 LOG "  warmup sandbox=$WSB"; sleep 2; curl -s -X DELETE "localhost:4750/sandboxes/$WSB" >/dev/null 2>&1
 if [ "$EGRESS" != 1 ] && [ -f "$HOME/.hotcell/fc/images/ubuntu_24.04.img" ]; then
@@ -99,8 +100,8 @@ for cfg in $CONFIGS; do
     tag="mem${MEM}_cpu${CPUS}_r${REP}"; raw="$OUTDIR/$tag.txt"
     LOG "RUN $tag (cpuset=$CPUSET networked=$NETWORKED)"
     {
-      echo "### CONFIG mem=${MEM}MB cpus=${CPUS} cpuset=${CPUSET} networked=${NETWORKED} rep=${REP} egress=${EGRESS} region=${REGION} $(date -u +%FT%TZ)"
-      RESP=$(curl -s --max-time 180 -X POST localhost:4750/sandboxes -H 'content-type: application/json' -d "{\"image\":\"ubuntu:24.04\",\"driver\":\"firecracker\",\"networked\":${NETWORKED},\"memoryMb\":${MEM},\"cpus\":${CPUS},\"cpuset\":\"${CPUSET}\"}")
+      echo "### CONFIG mem=${MEM}MB cpus=${CPUS} cpuset=${CPUSET} networked=${NETWORKED} writableRootfs=${WRITABLE_ROOTFS} rep=${REP} egress=${EGRESS} region=${REGION} $(date -u +%FT%TZ)"
+      RESP=$(curl -s --max-time 180 -X POST localhost:4750/sandboxes -H 'content-type: application/json' -d "{\"image\":\"ubuntu:24.04\",\"driver\":\"firecracker\",\"networked\":${NETWORKED},\"writableRootfs\":${WRITABLE_ROOTFS},\"memoryMb\":${MEM},\"cpus\":${CPUS},\"cpuset\":\"${CPUSET}\"}")
       SB=$(echo "$RESP" | $NODE -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>{try{console.log(JSON.parse(d).id||("ERR:"+d))}catch{console.log("ERR:"+d)}})')
       echo "sandbox=$SB"
       if echo "$SB" | grep -qE '^ERR|^$'; then
@@ -109,9 +110,9 @@ for cfg in $CONFIGS; do
         FCPID=$(pgrep -x firecracker | tail -1)
         [ -n "$FCPID" ] && echo "fc_pin: cpus_allowed=$(awk '/Cpus_allowed_list/{print $2}' /proc/$FCPID/status 2>/dev/null) requested=${CPUSET}"
         exj "$SB" '{"command":"echo mem=$(awk \"/MemTotal/{printf \\$2}\" /proc/meminfo)kib cpus=$(nproc); getent hosts registry.npmjs.org >/dev/null 2>&1 && echo DNS_OK || echo DNS_FAIL"}'
-        exj "$SB" "{\"command\":\"echo $PB64 | base64 -d > /root/pb.sh; echo $RB64 | base64 -d > /root/runbench.sh; chmod +x /root/runbench.sh\"}"
+        exj "$SB" "{\"command\":\"echo $PB64 | base64 -d > /tmp/pb.sh; echo $RB64 | base64 -d > /tmp/runbench.sh; chmod +x /tmp/runbench.sh\"}"
         echo "############### BENCHMARK (${MEM}MB/${CPUS}cpu rep${REP}) ###############"
-        exj "$SB" "{\"command\":\"BENCH_REGION=${REGION} bash /root/runbench.sh\"}"
+        exj "$SB" "{\"command\":\"BENCH_REGION=${REGION} bash /tmp/runbench.sh\"}"
         echo "############### END ###############"
         curl -s -X DELETE "localhost:4750/sandboxes/$SB" >/dev/null 2>&1
       fi

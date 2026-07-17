@@ -830,6 +830,7 @@ async function createSandbox(
   const repo = typeof body.repo === "string" && body.repo ? body.repo : undefined;
   const repoRef = typeof body.repoRef === "string" && body.repoRef ? body.repoRef : undefined;
   const networked = body.networked === true;
+  const writableRootfs = body.writableRootfs === true;
   const cpuset = typeof body.cpuset === "string" && body.cpuset ? body.cpuset : undefined;
 
   // Resolve hard resource caps: per-create value overrides the daemon default.
@@ -865,7 +866,7 @@ async function createSandbox(
   }
 
   try {
-    await driver.create({ id, image, driver: driverName, env, labels, persist, setup, repo, repoRef, limits, networked, cpuset });
+    await driver.create({ id, image, driver: driverName, env, labels, persist, setup, repo, repoRef, limits, networked, writableRootfs, cpuset });
   } catch (err) {
     // Provisioning failed (e.g. repo clone) — tear down the half-built container
     // so it doesn't orphan, and report the failure instead of leaking it.

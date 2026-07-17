@@ -188,6 +188,7 @@ export class FirecrackerDriver extends AgentDriver {
       image: opts.image,
       limits: opts.limits,
       networked: opts.networked,
+      writableRootfs: opts.writableRootfs,
       cpuset: opts.cpuset,
     });
     this.vms.set(id, vm);
@@ -214,6 +215,7 @@ export class FirecrackerDriver extends AgentDriver {
     image: string;
     limits?: CreateOptions["limits"];
     networked?: boolean;
+    writableRootfs?: boolean;
     cpuset?: string;
   }): Promise<FcVm> {
     mkdirSync(p.stateDir, { recursive: true });
@@ -223,11 +225,12 @@ export class FirecrackerDriver extends AgentDriver {
     // Default posture is no NIC (egress over vsock only).
     const net = p.networked ? this.setupTap(p.id) : undefined;
 
-    // "Trusted VM" mode (networked): a private, writable, grown rootfs so the
-    // guest can write to `/` (apt, node into /opt, …). The default shared rootfs
-    // is read-only. Cloned + grown once per sandbox.
+    // Private writable rootfs so the guest can write to `/` (apt, node into
+    // /opt, …). Implied by `networked` ("trusted VM" mode) or opted into alone
+    // via `writableRootfs` (contained: no NIC, egress via vsock only). The
+    // default shared rootfs is read-only. Cloned + grown once per sandbox.
     let rootfsReadOnly = true;
-    if (p.networked) {
+    if (p.networked || p.writableRootfs) {
       const priv = join(p.stateDir, "rootfs.img");
       if (!existsSync(priv)) {
         cloneFile(rootfs, priv);

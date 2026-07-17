@@ -127,6 +127,15 @@ export interface CreateOptions {
    */
   networked?: boolean;
   /**
+   * Give a microVM sandbox a private, writable rootfs (cloned + grown from the
+   * shared image) WITHOUT implying a NIC. `networked: true` already does this;
+   * `writableRootfs: true` grants the same disk posture to a contained sandbox —
+   * no network device, egress via the vsock gateway only — so workloads that
+   * write to `/` (apt, node into /opt, …) still run in the default-deny posture.
+   * Ignored by the container driver (its filesystem is already writable).
+   */
+  writableRootfs?: boolean;
+  /**
    * Host-core pinning for a microVM sandbox (Firecracker): a `taskset`-style CPU
    * list (e.g. `"0-7"`) the firecracker process — and thus its vCPU threads — is
    * constrained to. Used to keep a guest on a single CCD / shared L3 for stable,

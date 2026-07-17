@@ -1,0 +1,24 @@
+Run at commit 5c49059 (full ladder) — contention + hang record. DO NOT PUBLISH timings.
+
+CONTEXT: this ladder launched while the node-gyp root-cause diagnostics (control run,
+diag.sh, tsp-test.sh) were also executing on the box. They each spun up their own
+daemon + guest. Consequences:
+
+1. CONTENTION (timings contaminated): the 4/6/8 GiB rungs ran concurrently with the
+   diagnostics. Fingerprint: mem4096_cpu8_r3 = ADMISSION (a diagnostic guest briefly
+   held host RAM, so the 4 GiB create was refused). The OOM/PASS RESULTS are still
+   valid — OOM is memory-deterministic and contention cannot manufacture one — but the
+   clone/install/typecheck TIMINGS for 4/6/8 GiB are NOT clean and must not be published.
+
+2. HANG: the suite wedged at mem8192_cpu8_r3 for ~32 min (a rung is ~2 min). A stray
+   firecracker guest (orphaned by a diagnostic that lost its daemon) was still live
+   (2 firecracker procs; the ladder runs 1). The benchmark exec has no per-run timeout,
+   so a stalled guest hangs the whole suite. The readable rungs (12/16/32 GiB, the CPU
+   ladder, the 32 vCPU max-config) NEVER RAN.
+
+VALID from this run: only the binary results 4096/6144/8192 = OOM (floor lower bound
+confirmed: <=8 GiB always dies). NOTHING publishable for timings or the PASS band.
+
+RESOLUTION: a clean re-run is required — box rebooted to clear the orphan, ladder run
+ALONE (no concurrent diagnostics), and a per-benchmark timeout added so a stalled guest
+drops that rep instead of wedging the suite. Superseded by that clean run.

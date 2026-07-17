@@ -65,7 +65,9 @@ LOG "daemon: $(curl -s localhost:4750/healthz)"
 PB64=$(curl -fsSL "https://raw.githubusercontent.com/anomalyco/opencode/provider-benchmark/script/provider-benchmark.sh" | base64 -w0)
 RB64=$(base64 -w0 "$(dirname "$0")/runbench.sh")
 
-exj(){ curl -s -N -X POST "localhost:4750/sandboxes/$1/exec" -H 'content-type: application/json' -d "$2" | sed -n 's/^data: //p' | $NODE -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>{d.trim().split("\n").forEach(l=>{try{let e=JSON.parse(l);if(e.type=="stdout"||e.type=="stderr")process.stdout.write(e.data)}catch{}})})'; }
+# --max-time bounds every exec so a stalled guest drops that rep instead of wedging
+# the whole suite (900s >> a healthy rung's ~2-4 min, even at 2 vCPU).
+exj(){ curl -s --max-time 900 -N -X POST "localhost:4750/sandboxes/$1/exec" -H 'content-type: application/json' -d "$2" | sed -n 's/^data: //p' | $NODE -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>{d.trim().split("\n").forEach(l=>{try{let e=JSON.parse(l);if(e.type=="stdout"||e.type=="stderr")process.stdout.write(e.data)}catch{}})})'; }
 field(){ awk -v k="$2" '$1=="BENCH_PHASE"&&$2==k{print $3} $1=="BENCH_MEM"&&$2=="peak_used_gib"&&k=="peak"{print $3}' "$1" | tail -1; }
 
 classify(){ # raw-file -> RESULT
@@ -82,7 +84,7 @@ classify(){ # raw-file -> RESULT
 # Pre-warm the OCI->rootfs conversion (needs docker), then stop dockerd so its
 # iptables chains don't pollute the measured FC NAT path (perf mode; EGRESS=0 only).
 LOG "pre-warming image conversion (ubuntu:24.04 -> FC rootfs)"
-WRESP=$(curl -s -X POST localhost:4750/sandboxes -H 'content-type: application/json' -d "{\"image\":\"ubuntu:24.04\",\"driver\":\"firecracker\",\"networked\":${NETWORKED},\"memoryMb\":2048,\"cpus\":2,\"cpuset\":\"0-1\"}")
+WRESP=$(curl -s --max-time 180 -X POST localhost:4750/sandboxes -H 'content-type: application/json' -d "{\"image\":\"ubuntu:24.04\",\"driver\":\"firecracker\",\"networked\":${NETWORKED},\"memoryMb\":2048,\"cpus\":2,\"cpuset\":\"0-1\"}")
 WSB=$(echo "$WRESP" | $NODE -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>{try{console.log(JSON.parse(d).id||"ERR")}catch{console.log("ERR")}})')
 LOG "  warmup sandbox=$WSB"; sleep 2; curl -s -X DELETE "localhost:4750/sandboxes/$WSB" >/dev/null 2>&1
 if [ "$EGRESS" != 1 ] && [ -f "$HOME/.hotcell/fc/images/ubuntu_24.04.img" ]; then
@@ -98,7 +100,7 @@ for cfg in $CONFIGS; do
     LOG "RUN $tag (cpuset=$CPUSET networked=$NETWORKED)"
     {
       echo "### CONFIG mem=${MEM}MB cpus=${CPUS} cpuset=${CPUSET} networked=${NETWORKED} rep=${REP} egress=${EGRESS} region=${REGION} $(date -u +%FT%TZ)"
-      RESP=$(curl -s -X POST localhost:4750/sandboxes -H 'content-type: application/json' -d "{\"image\":\"ubuntu:24.04\",\"driver\":\"firecracker\",\"networked\":${NETWORKED},\"memoryMb\":${MEM},\"cpus\":${CPUS},\"cpuset\":\"${CPUSET}\"}")
+      RESP=$(curl -s --max-time 180 -X POST localhost:4750/sandboxes -H 'content-type: application/json' -d "{\"image\":\"ubuntu:24.04\",\"driver\":\"firecracker\",\"networked\":${NETWORKED},\"memoryMb\":${MEM},\"cpus\":${CPUS},\"cpuset\":\"${CPUSET}\"}")
       SB=$(echo "$RESP" | $NODE -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>{try{console.log(JSON.parse(d).id||("ERR:"+d))}catch{console.log("ERR:"+d)}})')
       echo "sandbox=$SB"
       if echo "$SB" | grep -qE '^ERR|^$'; then

@@ -1,6 +1,6 @@
 {
   "name": "hotcell",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Sandboxes for AI agents, on your own hardware \u2014 CLI + daemon for the hotcell sandbox platform",
   "license": "Apache-2.0",
   "type": "module",
@@ -31,7 +31,7 @@
     "type": "git",
     "url": "git+https://github.com/sinameraji/hotcell.git"
   },
-  "homepage": "https://hotcell-bw3.pages.dev",
+  "homepage": "https://hotcell.sh",
   "bugs": {
     "url": "https://github.com/sinameraji/hotcell/issues"
   },

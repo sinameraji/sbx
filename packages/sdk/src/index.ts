@@ -4,7 +4,7 @@
  * Mirrors the Cloudflare Sandbox SDK surface so existing harnesses port with
  * minimal changes, but points at *your* self-hosted daemon instead of the edge.
  *
- *   const client = new SbxClient({ endpoint: "http://127.0.0.1:4750" });
+ *   const client = new HotcellClient({ endpoint: "http://127.0.0.1:4750" });
  *   const sandbox = await client.getSandbox();
  *   const { stdout } = await sandbox.exec("python3 -c 'print(2+2)'");
  *   await sandbox.destroy();
@@ -343,7 +343,7 @@ export interface DaemonInfo {
   otlp: boolean;
 }
 
-export interface SbxClientOptions {
+export interface HotcellClientOptions {
   endpoint?: string;
   /**
    * API key sent as `Authorization: Bearer <key>` on every request. Required when
@@ -363,11 +363,11 @@ export interface MetricSample {
   pids: number;
 }
 
-export class SbxClient {
+export class HotcellClient {
   readonly endpoint: string;
   private readonly apiKey: string;
 
-  constructor(opts: SbxClientOptions = {}) {
+  constructor(opts: HotcellClientOptions = {}) {
     this.endpoint = (opts.endpoint ?? defaultEndpoint()).replace(/\/$/, "");
     this.apiKey = opts.apiKey ?? defaultApiKey();
   }
@@ -445,7 +445,7 @@ export class SbxClient {
 
 export class Sandbox {
   constructor(
-    private readonly client: SbxClient,
+    private readonly client: HotcellClient,
     private info: SandboxInfo,
   ) {}
 
@@ -862,7 +862,7 @@ export class Sandbox {
   }
 
   /** @internal — used by Session to reach the env/session endpoints. */
-  get _client(): SbxClient {
+  get _client(): HotcellClient {
     return this.client;
   }
 }
@@ -948,7 +948,7 @@ type LogEvent = { type: "log"; data: string } | { type: "end" };
 
 /** Convenience matching the Cloudflare `getSandbox(binding, id)` shape. */
 export function getSandbox(
-  client: SbxClient,
+  client: HotcellClient,
   id?: string,
   options?: CreateOptions,
 ): Promise<Sandbox> {
@@ -958,11 +958,11 @@ export function getSandbox(
 // --- internals -------------------------------------------------------------
 
 function defaultEndpoint(): string {
-  return envVar("SBX_ENDPOINT") ?? "http://127.0.0.1:4750";
+  return envVar("HOTCELL_ENDPOINT") ?? envVar("SBX_ENDPOINT") ?? "http://127.0.0.1:4750";
 }
 
 function defaultApiKey(): string {
-  return envVar("SBX_API_KEY") ?? "";
+  return envVar("HOTCELL_API_KEY") ?? envVar("SBX_API_KEY") ?? "";
 }
 
 function envVar(name: string): string | undefined {

@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"net"
-	"os"
 	"strings"
 )
 
@@ -13,7 +12,7 @@ import (
 func dialSpec(spec string) (net.Conn, error) {
 	scheme, addr, ok := strings.Cut(spec, "://")
 	if !ok {
-		return nil, fmt.Errorf("SBX_EGRESS_DIAL must be scheme://addr, got %q", spec)
+		return nil, fmt.Errorf("HOTCELL_EGRESS_DIAL must be scheme://addr, got %q", spec)
 	}
 	switch scheme {
 	case "tcp":
@@ -21,14 +20,14 @@ func dialSpec(spec string) (net.Conn, error) {
 	case "unix":
 		return net.Dial("unix", addr)
 	default:
-		return nil, fmt.Errorf("unsupported SBX_EGRESS_DIAL scheme %q (use tcp:// or unix://)", scheme)
+		return nil, fmt.Errorf("unsupported HOTCELL_EGRESS_DIAL scheme %q (use tcp:// or unix://)", scheme)
 	}
 }
 
 // egressDialOverride returns the test-override dialer when SBX_EGRESS_DIAL is
 // set, else nil (the platform dialer takes over).
 func egressDialOverride() func(port uint32) (net.Conn, error) {
-	spec := os.Getenv("SBX_EGRESS_DIAL")
+	spec := agentEnv("EGRESS_DIAL")
 	if spec == "" {
 		return nil
 	}

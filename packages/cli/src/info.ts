@@ -1,4 +1,4 @@
-import { SbxClient } from "@sbx/sdk";
+import { HotcellClient } from "@hotcell/sdk";
 import type { GlobalArgs } from "./cli.js";
 
 /** sb info — print daemon driver/providers/auth/cost configuration. */
@@ -6,7 +6,7 @@ export async function infoCommand(
   _positional: string[],
   globals: GlobalArgs,
 ): Promise<number> {
-  const client = new SbxClient({ endpoint: globals.endpoint, apiKey: globals.apiKey });
+  const client = new HotcellClient({ endpoint: globals.endpoint, apiKey: globals.apiKey });
   try {
     const i = await client.info();
     console.log(`endpoint:  ${client.endpoint}`);

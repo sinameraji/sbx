@@ -23,7 +23,7 @@ const defaultVsockPort = 1024
 // cross-compilation here; the live round-trip is exercised on the KVM/VZ host.
 func listenDefault() (net.Listener, error) {
 	port := defaultVsockPort
-	if v := os.Getenv("SBX_AGENT_VSOCK_PORT"); v != "" {
+	if v := agentEnv("AGENT_VSOCK_PORT"); v != "" {
 		if p, err := strconv.Atoi(v); err == nil {
 			port = p
 		}

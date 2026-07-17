@@ -1,21 +1,26 @@
 {
-  "name": "@sbx/cli",
-  "version": "0.0.1",
-  "description": "sb CLI for sbx — self-hostable agent sandboxes",
+  "name": "hotcell",
+  "version": "0.1.0",
+  "description": "Sandboxes for AI agents, on your own hardware \u2014 CLI + daemon for the hotcell sandbox platform",
   "license": "Apache-2.0",
   "type": "module",
   "bin": {
-    "sb": "dist/index.js"
+    "hotcell": "dist/index.js",
+    "hc": "dist/index.js",
+    "hotcelld": "dist/daemon.js"
   },
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "dev": "node --import tsx src/index.ts"
   },
   "dependencies": {
-    "@sbx/sdk": "^0.0.1"
+    "@hotcell/sdk": "^0.1.0",
+    "@hotcell/daemon": "^0.1.0"
   },
   "devDependencies": {
     "@types/node": "^20.14.0",

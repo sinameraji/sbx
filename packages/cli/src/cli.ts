@@ -35,7 +35,7 @@ export async function cli(args: string[]): Promise<number> {
   const { flags, positional } = parseFlags(rest);
   const globals: GlobalArgs = {
     endpoint: flags.endpoint as string | undefined,
-    apiKey: (flags["api-key"] as string | undefined) ?? process.env.SBX_API_KEY,
+    apiKey: (flags["api-key"] as string | undefined) ?? (process.env.HOTCELL_API_KEY ?? process.env.SBX_API_KEY),
   };
 
   switch (command) {

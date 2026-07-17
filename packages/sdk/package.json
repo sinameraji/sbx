@@ -1,7 +1,7 @@
 {
-  "name": "@sbx/sdk",
-  "version": "0.0.1",
-  "description": "TypeScript client SDK for sbx — self-hostable agent sandboxes",
+  "name": "@hotcell/sdk",
+  "version": "0.1.0",
+  "description": "Zero-dependency TypeScript client for the hotcell sandbox daemon",
   "license": "Apache-2.0",
   "type": "module",
   "main": "dist/index.js",
@@ -12,8 +12,17 @@
       "import": "./dist/index.js"
     }
   },
-  "files": ["dist", "README.md"],
-  "keywords": ["sandbox", "ai-agents", "sbx", "code-execution", "self-hosted"],
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "keywords": [
+    "sandbox",
+    "ai-agents",
+    "sbx",
+    "code-execution",
+    "self-hosted"
+  ],
   "homepage": "https://github.com/sinameraji/sbx#readme",
   "repository": {
     "type": "git",

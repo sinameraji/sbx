@@ -19,6 +19,16 @@ import (
 	"github.com/sinameraji/sbx/agent/server"
 )
 
+
+// agentEnv reads a config var with legacy fallback: HOTCELL_<name> wins, then
+// the pre-rename SBX_<name>, so old driver builds keep working.
+func agentEnv(name string) string {
+	if v := os.Getenv("HOTCELL_" + name); v != "" {
+		return v
+	}
+	return os.Getenv("SBX_" + name)
+}
+
 func main() {
 	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
 	log.SetPrefix("sbx-agent ")
@@ -49,7 +59,7 @@ func main() {
 // listen picks the transport: the explicit SBX_AGENT_LISTEN spec if present,
 // else the platform default (vsock on Linux; an error elsewhere).
 func listen() (net.Listener, error) {
-	if spec := os.Getenv("SBX_AGENT_LISTEN"); spec != "" {
+	if spec := agentEnv("AGENT_LISTEN"); spec != "" {
 		return listenSpec(spec)
 	}
 	return listenDefault()

@@ -1,4 +1,4 @@
-import { SbxClient } from "@sbx/sdk";
+import { HotcellClient } from "@hotcell/sdk";
 import type { GlobalArgs } from "./cli.js";
 
 /**
@@ -24,12 +24,12 @@ export async function terminalCommand(
     return 1;
   }
 
-  const client = new SbxClient({ endpoint: globals.endpoint, apiKey: globals.apiKey });
+  const client = new HotcellClient({ endpoint: globals.endpoint, apiKey: globals.apiKey });
   const base = client.endpoint.replace(/^http/, "ws");
   const cols = process.stdout.columns ?? 80;
   const rows = process.stdout.rows ?? 24;
   let url = `${base}/sandboxes/${id}/terminal?cols=${cols}&rows=${rows}`;
-  const key = globals.apiKey ?? process.env.SBX_API_KEY;
+  const key = globals.apiKey ?? (process.env.HOTCELL_API_KEY ?? process.env.SBX_API_KEY);
   if (key) url += `&key=${encodeURIComponent(key)}`;
 
   const stdin = process.stdin;

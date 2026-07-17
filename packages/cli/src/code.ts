@@ -1,4 +1,4 @@
-import { SbxClient, type CodeLanguage } from "@sbx/sdk";
+import { HotcellClient, type CodeLanguage } from "@hotcell/sdk";
 import { formatError } from "./util.js";
 import type { GlobalArgs } from "./cli.js";
 
@@ -19,7 +19,7 @@ export async function runCodeCommand(
     return 1;
   }
 
-  const client = new SbxClient({ endpoint: globals.endpoint, apiKey: globals.apiKey });
+  const client = new HotcellClient({ endpoint: globals.endpoint, apiKey: globals.apiKey });
   try {
     const sandbox = await client.getSandbox(id);
     const result = await sandbox.runCode(code, { language: lang as CodeLanguage });

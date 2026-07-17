@@ -1,4 +1,4 @@
-import { SbxClient } from "@sbx/sdk";
+import { HotcellClient } from "@hotcell/sdk";
 import type { GlobalArgs } from "./cli.js";
 import { formatError } from "./util.js";
 
@@ -7,7 +7,7 @@ export async function capacityCommand(
   _positional: string[],
   globals: GlobalArgs,
 ): Promise<number> {
-  const client = new SbxClient({ endpoint: globals.endpoint, apiKey: globals.apiKey });
+  const client = new HotcellClient({ endpoint: globals.endpoint, apiKey: globals.apiKey });
   try {
     const c = await client.capacity();
     if (!c.enforced && c.memory.budgetMb === 0) {

@@ -1,4 +1,4 @@
-import { SbxClient } from "@sbx/sdk";
+import { HotcellClient } from "@hotcell/sdk";
 import { formatError } from "./util.js";
 import type { GlobalArgs } from "./cli.js";
 import { parseEnvPairs } from "./env.js";
@@ -15,7 +15,7 @@ export async function sessionCommand(
   flags: Record<string, string | boolean>,
 ): Promise<number> {
   const [sub, id, arg] = positional;
-  const client = new SbxClient({ endpoint: globals.endpoint, apiKey: globals.apiKey });
+  const client = new HotcellClient({ endpoint: globals.endpoint, apiKey: globals.apiKey });
   try {
     switch (sub) {
       case "create": {

@@ -1,6 +1,6 @@
 {
-  "name": "@sbx/mastra",
-  "version": "0.0.1",
+  "name": "@hotcell/mastra",
+  "version": "0.1.0",
   "description": "Mastra Workspace sandbox provider backed by self-hosted sbx",
   "license": "Apache-2.0",
   "type": "module",
@@ -12,8 +12,17 @@
       "import": "./dist/index.js"
     }
   },
-  "files": ["dist", "README.md"],
-  "keywords": ["mastra", "sandbox", "ai-agents", "sbx", "workspace"],
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "keywords": [
+    "mastra",
+    "sandbox",
+    "ai-agents",
+    "sbx",
+    "workspace"
+  ],
   "homepage": "https://github.com/sinameraji/sbx#readme",
   "repository": {
     "type": "git",
@@ -27,7 +36,7 @@
     "build": "tsc -p tsconfig.json"
   },
   "dependencies": {
-    "@sbx/sdk": "^0.0.1"
+    "@hotcell/sdk": "^0.1.0"
   },
   "peerDependencies": {
     "@mastra/core": ">=1.1.0"

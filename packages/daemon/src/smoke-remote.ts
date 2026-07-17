@@ -18,7 +18,7 @@
  * Usage: SBX_ENDPOINT=... [SBX_API_KEY=...] node dist/smoke-remote.js
  */
 
-import { SbxClient, type Sandbox } from "@sbx/sdk";
+import { HotcellClient, type Sandbox } from "@hotcell/sdk";
 
 async function main(): Promise<number> {
   const endpoint = process.env.SBX_ENDPOINT;
@@ -29,7 +29,7 @@ async function main(): Promise<number> {
     return 1;
   }
   const apiKey = process.env.SBX_API_KEY;
-  const client = new SbxClient({ endpoint, apiKey });
+  const client = new HotcellClient({ endpoint, apiKey });
 
   // 1. Health + info: confirm the daemon is reachable and learn its driver +
   //    which egress providers it has configured.

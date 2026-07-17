@@ -1,4 +1,4 @@
-import { SbxClient } from "@sbx/sdk";
+import { HotcellClient } from "@hotcell/sdk";
 import type { GlobalArgs } from "./cli.js";
 
 /** sb stats <id> — print live resource usage and accumulated cost. */
@@ -12,7 +12,7 @@ export async function statsCommand(
     return 1;
   }
 
-  const client = new SbxClient({ endpoint: globals.endpoint, apiKey: globals.apiKey });
+  const client = new HotcellClient({ endpoint: globals.endpoint, apiKey: globals.apiKey });
   try {
     const sandbox = await client.getSandbox(id);
     const info = sandbox.getInfo();

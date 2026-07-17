@@ -7,7 +7,7 @@
  * cloned in:
  *
  *   import { Workspace, Agent } from "@mastra/core";
- *   import { SbxSandbox } from "@sbx/mastra";
+ *   import { SbxSandbox } from "@hotcell/mastra";
  *
  *   const agent = new Agent({
  *     name: "coder",
@@ -21,7 +21,7 @@
  * has no runtime dependency on `@mastra/core` — the consumer supplies it as a
  * peer (use a version published after the 2026-06-17 supply-chain remediation).
  */
-import { SbxClient, type Sandbox } from "@sbx/sdk";
+import { HotcellClient, type Sandbox } from "@hotcell/sdk";
 import type {
   CommandResult,
   ExecuteCommandOptions,
@@ -65,7 +65,7 @@ export class SbxSandbox implements WorkspaceSandbox {
   status: ProviderStatus = "pending";
   error?: string;
 
-  private readonly client: SbxClient;
+  private readonly client: HotcellClient;
   private readonly opts: SbxSandboxOptions;
   private sandbox?: Sandbox;
   private starting?: Promise<void>;
@@ -74,7 +74,7 @@ export class SbxSandbox implements WorkspaceSandbox {
 
   constructor(opts: SbxSandboxOptions = {}) {
     this.opts = opts;
-    this.client = new SbxClient({ endpoint: opts.endpoint, apiKey: opts.apiKey });
+    this.client = new HotcellClient({ endpoint: opts.endpoint, apiKey: opts.apiKey });
   }
 
   /** Sandbox id (empty until `start()` has run). */

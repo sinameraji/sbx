@@ -17,6 +17,21 @@ trap 'rm -rf "$WORK"; [ -n "${CID:-}" ] && docker rm -f "$CID" >/dev/null 2>&1 |
 cp "$AGENT" "$WORK/hotcell-agent"
 cp "$INIT" "$WORK/init"
 
+# Fidelity shim: `node-gyp` on PATH. Images that install Node at runtime (e.g. the
+# OpenCode provider benchmark, which fetches Node into /opt and symlinks node/npm
+# but NOT node-gyp) otherwise hard-crash a `bun install`/`npm install` the moment a
+# native module's prebuilt binary is unavailable and it falls back to a source
+# build (`spawn node-gyp ENOENT`). A real dev box has a working node-gyp; this
+# makes the guest faithful without touching any workload. Inert unless invoked.
+cat > "$WORK/node-gyp" <<'NGYP'
+#!/bin/sh
+for j in /opt/node-*/lib/node_modules/npm/node_modules/node-gyp/bin/node-gyp.js \
+         /usr/lib/node_modules/npm/node_modules/node-gyp/bin/node-gyp.js; do
+  [ -f "$j" ] && exec node "$j" "$@"
+done
+exec npx -y node-gyp "$@"
+NGYP
+
 # 1. Export the target image's filesystem to a tar (no run; CMD irrelevant).
 docker pull --platform "$PLATFORM" "$IMAGE" >/dev/null 2>&1 || true
 CID="$(docker create --platform "$PLATFORM" "$IMAGE" 2>/dev/null \
@@ -33,7 +48,9 @@ docker run --rm --platform "$PLATFORM" -v "$WORK:/work" alpine:3.20 sh -c '
   mkdir -p /rootfs/proc /rootfs/sys /rootfs/dev /rootfs/run /rootfs/tmp /rootfs/workspace /rootfs/sbin
   cp /work/hotcell-agent /rootfs/sbin/hotcell-agent
   cp /work/init /rootfs/init
-  chmod +x /rootfs/init /rootfs/sbin/hotcell-agent
+  mkdir -p /rootfs/usr/local/bin
+  cp /work/node-gyp /rootfs/usr/local/bin/node-gyp
+  chmod +x /rootfs/init /rootfs/sbin/hotcell-agent /rootfs/usr/local/bin/node-gyp
   SIZE_MB=$(( $(du -sm /rootfs | cut -f1) + 96 ))   # image contents + headroom
   rm -f /work/out.img
   mkfs.ext4 -q -F -L sbxroot -d /rootfs /work/out.img "${SIZE_MB}M"

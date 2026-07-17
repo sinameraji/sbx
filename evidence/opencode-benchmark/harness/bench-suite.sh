@@ -1,0 +1,110 @@
+#!/bin/bash
+# Part A suite for the OpenCode provider benchmark on hotcell Firecracker microVMs.
+#
+# Runs a list of (memoryMB:vCPU) guest configs, REPS times each, COLD (a fresh
+# microVM per run — no reuse), and classifies every outcome so the memory ladder
+# can't be confounded by non-memory failures:
+#   PASS           typecheck succeeded (table shows the workload total)
+#   OOM            typecheck died with the guest out of memory (min avail ~0 / SIGKILL)
+#   INSTALL_FLAKE  bun install broke (node-gyp fallback / turbo missing) — network, not memory
+#   ADMISSION      create refused (host capacity / 503) — itself a finding
+#   OTHER          anything else (captured verbatim)
+#
+# It NEVER modifies dax's script and NEVER retries-until-green: every run's full
+# raw stdout is saved and every rung's pass rate is reported as-is.
+#
+# Env:
+#   CONFIGS   space list "MEM:CPU", e.g. "4096:8 6144:8 8192:8 12288:8 16384:8 32768:8"
+#   REPS      runs per config (default 3)
+#   EGRESS    1 = default-deny egress ON (HOTCELL_EGRESS_ENFORCE); default 0
+#   ALLOWLIST_EXTRA   comma hosts added to the egress allowlist (Part A3 delta)
+#   SKIP_BUILD 1 = skip git reset + npm build (box already built); default 0
+#   REGION    label reported in the table (default gcp-n2-nested)
+#   OUTDIR    where raw + summary land (default /tmp/bench-suite)
+set +e
+CONFIGS=${CONFIGS:-"24576:8"}
+REPS=${REPS:-3}
+EGRESS=${EGRESS:-0}
+SKIP_BUILD=${SKIP_BUILD:-0}
+REGION=${REGION:-gcp-n2-nested}
+OUTDIR=${OUTDIR:-/tmp/bench-suite}
+mkdir -p "$OUTDIR"
+SUMMARY="$OUTDIR/summary.tsv"
+printf 'mem_mb\tcpus\trep\tresult\tclone_ms\tinstall_ms\ttypecheck_ms\ttotal_ms\tpeak_used_gib\tegress\n' > "$SUMMARY"
+LOG(){ echo "[suite $(date -u +%H:%M:%S)] $*"; }
+
+cd ~/hotcell 2>/dev/null || { cd ~; rm -rf hotcell; git clone -q https://github.com/sinameraji/hotcell.git; cd hotcell; }
+if [ "$SKIP_BUILD" != 1 ]; then
+  LOG "build"; git fetch -q origin main && git reset --hard -q origin/main
+  npm install --no-audit --no-fund >/dev/null 2>&1; npm run build >/dev/null 2>&1
+fi
+mkdir -p helpers/hotcell-vz/guest
+if [ ! -f "$HOME/hotcell-agent-linux-amd64" ]; then LOG "FATAL: $HOME/hotcell-agent-linux-amd64 missing"; exit 1; fi
+cp "$HOME/hotcell-agent-linux-amd64" helpers/hotcell-vz/guest/hotcell-agent && chmod +x helpers/hotcell-vz/guest/hotcell-agent
+if [ ! -f helpers/hotcell-vz/guest/vmlinux-fc ]; then
+  latest=$(curl -s "http://spec.ccfc.min.s3.amazonaws.com/?prefix=firecracker-ci/v1.10/x86_64/vmlinux-5.10&list-type=2" | grep -oP "(?<=<Key>)(firecracker-ci/v1.10/x86_64/vmlinux-5\.10\.[0-9]+)(?=</Key>)" | sort -V | tail -1)
+  curl -s -o helpers/hotcell-vz/guest/vmlinux-fc "https://s3.amazonaws.com/spec.ccfc.min/$latest"
+fi
+# force one image re-convert so the node-gyp fidelity shim (new) is baked in
+rm -f "$HOME/.hotcell/fc/images/ubuntu_24.04.img" 2>/dev/null
+NODE=$(command -v node)
+
+LOG "start daemon (egress=$EGRESS)"
+sudo pkill -f "daemon/dist/index" 2>/dev/null; sleep 2
+ENVX="HOTCELL_DRIVER=firecracker HOTCELL_DB=:memory: HOTCELL_FC_KERNEL=helpers/hotcell-vz/guest/vmlinux-fc"
+if [ "$EGRESS" = 1 ]; then
+  ENVX="$ENVX HOTCELL_EGRESS_ENFORCE=true HOTCELL_EGRESS_HOST=0.0.0.0"
+  [ -n "$ALLOWLIST_EXTRA" ] && ENVX="$ENVX HOTCELL_ALLOWLIST_EXTRA=$ALLOWLIST_EXTRA"
+fi
+sudo -E env $ENVX setsid bash -c "$NODE packages/daemon/dist/index.js > /tmp/hotcelld.log 2>&1" </dev/null & disown
+for i in $(seq 1 30); do curl -s --max-time 2 localhost:4750/healthz | grep -q ok && break; sleep 1; done
+LOG "daemon: $(curl -s localhost:4750/healthz)"
+
+# stage dax's script + the mem-sampling wrapper once (base64, decoded into each guest)
+PB64=$(curl -fsSL "https://raw.githubusercontent.com/anomalyco/opencode/provider-benchmark/script/provider-benchmark.sh" | base64 -w0)
+RB64=$(base64 -w0 "$(dirname "$0")/runbench.sh")
+
+exj(){ curl -s -N -X POST "localhost:4750/sandboxes/$1/exec" -H 'content-type: application/json' -d "$2" | sed -n 's/^data: //p' | $NODE -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>{d.trim().split("\n").forEach(l=>{try{let e=JSON.parse(l);if(e.type=="stdout"||e.type=="stderr")process.stdout.write(e.data)}catch{}})})'; }
+field(){ awk -v k="$2" '$1=="BENCH_PHASE"&&$2==k{print $3} $1=="BENCH_MEM"&&$2=="peak_used_gib"&&k=="peak"{print $3}' "$1" | tail -1; }
+
+classify(){ # raw-file -> RESULT
+  local f="$1"
+  grep -qE '✅ \|[[:space:]]*$' "$f" && { echo PASS; return; }
+  grep -qE 'ADMISSION|CREATE_FAILED|503' "$f" && { echo ADMISSION; return; }
+  grep -qE 'node-gyp ENOENT|Cannot run .*turbo\.json|install script from .* exited' "$f" && { echo INSTALL_FLAKE; return; }
+  local minav; minav=$(awk '$1=="BENCH_MEM"&&$2=="min_avail_kib"{print $3}' "$f" | tail -1)
+  { grep -qiE 'SIGKILL|Out of memory|oom-kill|Killed process|Cannot allocate' "$f"; } && { echo OOM; return; }
+  [ -n "$minav" ] && [ "$minav" -lt 262144 ] 2>/dev/null && { echo OOM; return; }
+  echo OTHER
+}
+
+for cfg in $CONFIGS; do
+  MEM=${cfg%%:*}; CPUS=${cfg##*:}
+  for REP in $(seq 1 "$REPS"); do
+    tag="mem${MEM}_cpu${CPUS}_r${REP}"; raw="$OUTDIR/$tag.txt"
+    LOG "RUN $tag"
+    {
+      echo "### CONFIG mem=${MEM}MB cpus=${CPUS} rep=${REP} egress=${EGRESS} region=${REGION} $(date -u +%FT%TZ)"
+      RESP=$(curl -s -X POST localhost:4750/sandboxes -H 'content-type: application/json' -d "{\"image\":\"ubuntu:24.04\",\"driver\":\"firecracker\",\"networked\":true,\"memoryMb\":${MEM},\"cpus\":${CPUS}}")
+      SB=$(echo "$RESP" | $NODE -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>{try{console.log(JSON.parse(d).id||("ERR:"+d))}catch{console.log("ERR:"+d)}})')
+      echo "sandbox=$SB"
+      if echo "$SB" | grep -qE '^ERR|^$'; then
+        echo "CREATE_FAILED $RESP"; tail -25 /tmp/hotcelld.log
+      else
+        exj "$SB" '{"command":"echo mem=$(awk \"/MemTotal/{printf \\$2}\" /proc/meminfo)kib cpus=$(nproc); getent hosts registry.npmjs.org >/dev/null 2>&1 && echo DNS_OK || echo DNS_FAIL"}'
+        exj "$SB" "{\"command\":\"echo $PB64 | base64 -d > /root/pb.sh; echo $RB64 | base64 -d > /root/runbench.sh; chmod +x /root/runbench.sh\"}"
+        echo "############### BENCHMARK (${MEM}MB/${CPUS}cpu rep${REP}) ###############"
+        exj "$SB" "{\"command\":\"BENCH_REGION=${REGION} bash /root/runbench.sh\"}"
+        echo "############### END ###############"
+        curl -s -X DELETE "localhost:4750/sandboxes/$SB" >/dev/null 2>&1
+      fi
+    } > "$raw" 2>&1
+    RES=$(classify "$raw")
+    CL=$(field "$raw" clone); IN=$(field "$raw" install); TC=$(field "$raw" typecheck); TT=$(field "$raw" total); PK=$(awk '$1=="BENCH_MEM"&&$2=="peak_used_gib"{print $3}' "$raw" | tail -1)
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$MEM" "$CPUS" "$REP" "$RES" "${CL:-}" "${IN:-}" "${TC:-}" "${TT:-}" "${PK:-}" "$EGRESS" >> "$SUMMARY"
+    LOG "  -> $RES (clone=${CL:-?}ms install=${IN:-?}ms typecheck=${TC:-?}ms peak=${PK:-?}GiB)"
+  done
+done
+LOG "SUITE COMPLETE -> $SUMMARY"
+echo "=== SUMMARY ==="; cat "$SUMMARY"
+echo SUITEDONE

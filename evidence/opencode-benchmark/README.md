@@ -5,7 +5,9 @@ Raw results and the harness for running dax's OpenCode provider benchmark
 hotcell Firecracker microVMs. Everything here is measured; nothing is
 extrapolated. Full raw stdout for every run is preserved under `raw/`.
 
-The benchmark is run **verbatim** — we never edit dax's script. It clones a
+dax's script runs **verbatim, unmodified** — same commit, same toolchain versions.
+Our guest *image* differs from stock in exactly one way (the node-gyp workaround,
+disclosed below); the script itself is never touched. It clones a
 pinned OpenCode commit, `bun install`s it, and `bun typecheck`s it (a *build*
 workload; OpenCode is never executed as an agent, no LLM calls). It reports
 `BENCH_META` / `BENCH_CACHE` / `BENCH_DISK` / `BENCH_PHASE` lines and a markdown
@@ -23,7 +25,8 @@ userbase. Every rung, including every failure, is published.
 `raw/hetzner-5950x/` as they complete. Published so far — bare-metal proof
 (`host-proof.txt`), the 32 vCPU max-config row (`32vcpu-5reps.txt`, 5 cold reps), the
 host control (`control-bare-host.txt`), the node-gyp diagnostic, and the memory-floor
-lower bound. Pause/resume, spike, and economics (Parts B–D) are a separate follow-up.
+lower bound (≤8 GiB always OOMs at typecheck; 12–16 GiB rungs in progress).
+Pause/resume, spike, and economics (Parts B–D) are a separate follow-up.
 
 ## Layout
 
@@ -48,8 +51,8 @@ systemd-detect-virt                       # must print: none  (bare metal)
 ```
 
 If `systemd-detect-virt` is anything but `none`, the run is labeled as such. The
-`gcp-n2-nested/` rows are exactly that — the same ladder on a **nested-virt**
-shared cloud VM — kept only to quantify the nesting tax against bare metal.
+`gcp-n2-nested/` rows are exactly that — a couple of configs (not the full ladder)
+on a **nested-virt** shared cloud VM, kept only as a labeled comparison point.
 
 ## Reproduce
 
@@ -72,6 +75,9 @@ CONFIGS="32768:2 32768:4 32768:8 32768:16 32768:32" REPS=3 REGION=hetzner-5950x-
 Results land in `/tmp/bench-suite/` (raw per run + `summary.tsv`); copy them into
 `raw/<host>/` and commit.
 
+**The published tweet row is the `32768:32` rung** (32 vCPU / 32 GiB, all 16 cores +
+SMT) from the CPU-ladder command above — raw in `raw/hetzner-5950x/32vcpu-5reps.txt`.
+
 > **Part A3 (default-deny egress ON) has not been run yet.** It uses `EGRESS=1` plus a
 > minimal `ALLOWLIST_EXTRA` delta measured from the denial log — that exact command and
 > the delta land here once the run is done. Not published as a placeholder.
@@ -93,8 +99,5 @@ Results land in `/tmp/bench-suite/` (raw per run + `summary.tsv`); copy them int
   on PATH (`helpers/hotcell-vz/convert-image.sh`). Cost: install is ~2s slower than
   our own host (13.5s vs 12.1s). The memory floor is unaffected — the source build
   is install-phase; the OOM is typecheck-phase. Details: `raw/hetzner-5950x/nodegyp-diagnostic.txt`.
-- **Egress.** Where noted, runs are with default-deny egress ON. The denial log
-  and the minimal `HOTCELL_ALLOWLIST_EXTRA` needed to complete are recorded — the
-  point is: same number, produced with egress enforcement on.
 - **Guest specs are the guest's.** The table reads the guest's own `/proc`, so
   `CPU / RAM` is the microVM's, never the host's. The host is deliberately larger.

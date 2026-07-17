@@ -25,5 +25,5 @@ run of node-gyp-build (suspected install-ordering/timing: node-gyp-build resolve
 
 IMPACT ON BENCHMARK: floor band (12-16 GiB) is UNAFFECTED — the source build is
 install-phase (~100-300 MB), the floor OOM is typecheck-phase (tsgo ~13 GiB), <3% and
-different phases. Install TIME is inflated ~2-3s (our 13s vs host 12s vs Cocoon 11.3s).
+different phases. Install TIME is inflated ~2-3s (our guest 13s vs our own bare host 12s).
 WORKAROUND for the runs: expose npm's bundled node-gyp in the guest (disclosed).

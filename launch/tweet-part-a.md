@@ -38,6 +38,6 @@ github.com/sinameraji/hotcell/tree/main/evidence/opencode-benchmark
   vs 125 GiB host page cache, virtio-block-on-file vs raw NVMe, virt overhead — a test at
   120 GiB guest will separate memory from virt). **Do NOT call it "the isolation tax."**
   That's unproven and could be mislabeling a memory config as product overhead.
-- **Speed framing:** median ~35.2s is honestly the slowest of the three; typecheck 17.4s
-  ties Namespace's 17.18; Cocoon's 14.9 is their newer 9700X. Win = category + €0.36/hr.
+- **Speed framing:** the win is category + €0.36/hr self-hosted, not raw speed. Don't
+  oversell the row.
 - Parts B–D (pause/resume = dax's req #3, spike, economics) = a SEPARATE follow-up post.

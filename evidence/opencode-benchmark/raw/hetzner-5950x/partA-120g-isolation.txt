@@ -1,0 +1,84 @@
+Part A diagnostic — guest-RAM isolation for the guest-vs-host gap (Hetzner 5950X,
+2026-07-18). Question (deferred from the ladder): the 32 vCPU / 32 GiB guest's
+typecheck (median 17.415 s over 5 reps, range 16.7–18.7) is ~17% slower than the
+bare host (14.673 s). Is that the guest's small page cache (31 GiB vs 126 GiB
+host) or real virtualization overhead? Test: same 32 vCPU config, guest RAM
+raised to ~120 GiB (122880 MB) — host-matched page cache. 2 cold reps, NAT,
+cpuset 0-31, image re-converted, caches dropped.
+
+RESULT: typecheck 16.680 / 16.606 s. At the LOW END of the 32 GiB guest's range,
+but nowhere near the host's 14.673 s. Matching host RAM recovers at most ~0.7 s
+(~4%, within run-to-run variance; n=2). CONCLUSION: the gap is NOT the guest's
+page cache — it is genuine virtualization-path overhead. WHICH component
+(virtio-block-on-file vs raw NVMe, KVM vCPU costs) remains NOT isolated; we
+publish what it is not, not a mechanism.
+
+=== summary.tsv ===
+mem_mb	cpus	rep	result	clone_ms	install_ms	typecheck_ms	total_ms	peak_used_gib	egress
+122880	32	1	PASS	4148	12920	16680	60437	13.44	0
+122880	32	2	PASS	4507	11878	16606	55590	14.82	0
+
+--- r1 BENCH + table lines ---
+### CONFIG mem=122880MB cpus=32 cpuset=0-31 networked=true writableRootfs=true rep=1 egress=0 region=hetzner-5950x-baremetal 2026-07-18T07:52:35Z
+fc_pin: cpus_allowed=0-31 requested=0-31
+BENCH_PHASE	prepare	23209
+BENCH_CACHE	guest_page_cache	dropped
+BENCH_CACHE	workspace	fresh
+BENCH_CACHE	bun	empty
+BENCH_CACHE	turbo	empty
+BENCH_PHASE	cache_clear	481
+BENCH_META	commit	08fb47373509ba64b13441061314eeacf4264f51
+BENCH_META	architecture	x86_64
+BENCH_META	kernel	Linux 5.10.223
+BENCH_META	logical_cpus	32
+BENCH_META	cpu_model	AMD EPYC
+BENCH_META	memory_kib	123674328
+BENCH_PHASE	bun_download	654
+BENCH_PHASE	bun_unpack	503
+BENCH_META	bun_version	1.3.14
+BENCH_META	node_version	v24.14.1
+BENCH_PHASE	clone	4148
+BENCH_DISK	after_clone	352620544
+BENCH_PHASE	install	12920
+BENCH_DISK	after_install	3229675520
+BENCH_PHASE	typecheck	16680
+BENCH_DISK	after_typecheck	3233710080
+BENCH_DONE	08fb47373509ba64b13441061314eeacf4264f51
+BENCH_PHASE	total	60437
+| **hotcell** | 32 CPU / 117.95 GiB | hetzner-5950x-baremetal, AMD EPYC | 4.148s | 12.920s | 16.680s | 33.748s | ✅ |
+BENCH_MEM	total_kib	123674328
+BENCH_MEM	min_avail_kib	109577160
+BENCH_MEM	peak_used_kib	14097168
+BENCH_MEM	peak_used_gib	13.44
+--- r2 BENCH + table lines ---
+### CONFIG mem=122880MB cpus=32 cpuset=0-31 networked=true writableRootfs=true rep=2 egress=0 region=hetzner-5950x-baremetal 2026-07-18T07:53:44Z
+fc_pin: cpus_allowed=0-31 requested=0-31
+BENCH_PHASE	prepare	19310
+BENCH_CACHE	guest_page_cache	dropped
+BENCH_CACHE	workspace	fresh
+BENCH_CACHE	bun	empty
+BENCH_CACHE	turbo	empty
+BENCH_PHASE	cache_clear	478
+BENCH_META	commit	08fb47373509ba64b13441061314eeacf4264f51
+BENCH_META	architecture	x86_64
+BENCH_META	kernel	Linux 5.10.223
+BENCH_META	logical_cpus	32
+BENCH_META	cpu_model	AMD EPYC
+BENCH_META	memory_kib	123674328
+BENCH_PHASE	bun_download	520
+BENCH_PHASE	bun_unpack	522
+BENCH_META	bun_version	1.3.14
+BENCH_META	node_version	v24.14.1
+BENCH_PHASE	clone	4507
+BENCH_DISK	after_clone	352620544
+BENCH_PHASE	install	11878
+BENCH_DISK	after_install	3229663232
+BENCH_PHASE	typecheck	16606
+BENCH_DISK	after_typecheck	3233697792
+BENCH_DONE	08fb47373509ba64b13441061314eeacf4264f51
+BENCH_PHASE	total	55590
+| **hotcell** | 32 CPU / 117.95 GiB | hetzner-5950x-baremetal, AMD EPYC | 4.507s | 11.878s | 16.606s | 32.991s | ✅ |
+BENCH_MEM	total_kib	123674328
+BENCH_MEM	min_avail_kib	108136836
+BENCH_MEM	peak_used_kib	15537492
+BENCH_MEM	peak_used_gib	14.82

@@ -1,0 +1,28 @@
+### CONFIG mem=32768MB cpus=8 cpuset=0-7 networked=true rep=2 egress=0 region=hetzner-5950x-baremetal 2026-07-17T15:56:30Z
+sandbox=ERR:{"error":"sandbox provisioning failed: firecracker: VM boot failed: firecracker /network-interfaces/eth0 -> 400: {\"fault_message\":\"Network config error: Could not create the network device: Open tap device failed: Error while creating ifreq structure: Resource busy (os error 16). Invalid TUN/TAP Backend provided by hct10. Check our documentation on setting up the network devices.\"}"}
+CREATE_FAILED {"error":"sandbox provisioning failed: firecracker: VM boot failed: firecracker /network-interfaces/eth0 -> 400: {\"fault_message\":\"Network config error: Could not create the network device: Open tap device failed: Error while creating ifreq structure: Resource busy (os error 16). Invalid TUN/TAP Backend provided by hct10. Check our documentation on setting up the network devices.\"}"}
+15:52:37.357 [32mINF[0m request method=DELETE path=/sandboxes/d5a45cf781b1 status=200 durMs=1989 traceId=8c9c7de9adfac9e3f67890c7e1e88990
+15:52:37.422 [32mINF[0m firecracker: NAT networking up sandbox=e44434122e60 tap=hct7 guestIp=172.16.7.2
+15:52:40.018 [32mINF[0m firecracker VM up sandbox=e44434122e60
+15:52:40.019 [32mINF[0m request method=POST path=/sandboxes status=201 durMs=2634 traceId=7d2c7fce789460e6e8dc05847324ebe8
+15:52:40.078 [32mINF[0m request method=POST path=/sandboxes/e44434122e60/exec status=200 durMs=8 traceId=9a289ed29bfb2c01d30dfbcbbceb8828
+15:52:40.096 [32mINF[0m request method=POST path=/sandboxes/e44434122e60/exec status=200 durMs=4 traceId=6fe00b90e983868eba0316bf6cd42d7f
+15:53:51.494 [32mINF[0m request method=POST path=/sandboxes/e44434122e60/exec status=200 durMs=71382 traceId=059cf6595d8300cf0094d3efa89a0b31
+15:53:53.459 [32mINF[0m request method=DELETE path=/sandboxes/e44434122e60 status=200 durMs=1952 traceId=a6a8d26702c24bb2f2601186c8427437
+15:53:53.519 [32mINF[0m firecracker: NAT networking up sandbox=c9d154997c6d tap=hct8 guestIp=172.16.8.2
+15:53:56.113 [32mINF[0m firecracker VM up sandbox=c9d154997c6d
+15:53:56.113 [32mINF[0m request method=POST path=/sandboxes status=201 durMs=2631 traceId=32c49bb115043e9b6300eb44b0796037
+15:53:56.175 [32mINF[0m request method=POST path=/sandboxes/c9d154997c6d/exec status=200 durMs=8 traceId=7db157907cfdfd1bbf8f86559f4301da
+15:53:56.193 [32mINF[0m request method=POST path=/sandboxes/c9d154997c6d/exec status=200 durMs=5 traceId=0c315663cd3d9f93099fb0d9b3d4dd25
+15:55:11.259 [32mINF[0m request method=POST path=/sandboxes/c9d154997c6d/exec status=200 durMs=75049 traceId=036f1c76683f96c329563bb151622538
+15:55:13.212 [32mINF[0m request method=DELETE path=/sandboxes/c9d154997c6d status=200 durMs=1935 traceId=ca69bf6a0d8cedbb78f30180ecf24bfb
+15:55:13.274 [32mINF[0m firecracker: NAT networking up sandbox=f5ee1d0c3e1b tap=hct9 guestIp=172.16.9.2
+15:55:15.868 [32mINF[0m firecracker VM up sandbox=f5ee1d0c3e1b
+15:55:15.869 [32mINF[0m request method=POST path=/sandboxes status=201 durMs=2634 traceId=77d9864a8aed10152802c87dc05a35c0
+15:55:15.934 [32mINF[0m request method=POST path=/sandboxes/f5ee1d0c3e1b/exec status=200 durMs=12 traceId=3f0f6fea90e8df40fe2039c6e4bb0f88
+15:55:15.947 [32mINF[0m request method=POST path=/sandboxes/f5ee1d0c3e1b/exec status=200 durMs=4 traceId=a297025222fad8c5f3f6e9986e3d3287
+15:56:28.603 [32mINF[0m request method=POST path=/sandboxes/f5ee1d0c3e1b/exec status=200 durMs=72640 traceId=8dda1541826f6cec6b7a3e420880c1fa
+15:56:30.735 [32mINF[0m request method=DELETE path=/sandboxes/f5ee1d0c3e1b status=200 durMs=2116 traceId=15270472c7b705a82d8cd3c5ed29fd31
+15:56:30.790 [32mINF[0m firecracker: NAT networking up sandbox=f57a1857945e tap=hct10 guestIp=172.16.10.2
+15:56:30.963 [33mWRN[0m firecracker boot failed; retrying once on a fresh VMM sandbox=f57a1857945e error="firecracker /network-interfaces/eth0 -> 400: {\"fault_message\":\"Network config error: Could not create the network device: Open tap device failed: Error while creating ifreq structure: Resource busy (os error 16). Invalid TUN/TAP Backend provided by hct10. Check our documentation on setting up the network devices.\"}"
+15:56:31.040 [32mINF[0m request method=POST path=/sandboxes status=422 durMs=283 traceId=a6b963350dc6826afa9c1e23887ac245

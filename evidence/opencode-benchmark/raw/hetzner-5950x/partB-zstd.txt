@@ -1,0 +1,25 @@
+Part B §B7 — snapshot compressibility (Hetzner 5950X bare metal, 2026-07-18).
+zstd -3 -T0 on REAL Full snapshots (snapshots are Full, not diff). Two labeled
+cases because they answer different questions and compress very differently.
+Harness: harness/bench-zstd.sh. Raw run output verbatim below.
+
+evidence/opencode-benchmark/harness/bench-zstd.sh: line 12: 62740 Killed                  sudo pkill -9 -f "daemon/dist" 2> /dev/null
+evidence/opencode-benchmark/harness/bench-zstd.sh: line 12: 62742 Killed                  sudo pkill -9 -f firecracker 2> /dev/null
+=== case 1: idle 2GiB guest (no NIC, default posture) ===
+sandbox=f39cc0348994
+RESULT B7 idle2g: raw=2.15GB zst=0.01GB ratio=176.9x zstd3_T0_ms=947
+=== case 2: 16GiB guest paused after REAL OpenCode workload ===
+sandbox=27a3b8a1f21e
+running full benchmark in guest (KEEP_ROOT, ~2min)...
+workload_done
+RESULT B7 worked16g: raw=17.18GB zst=3.06GB ratio=5.6x zstd3_T0_ms=8441
+ZSTDDONE
+
+INTERPRETATION:
+- Idle guest (the "large paused fleet" economics case): 2.15 GB -> ~12 MB,
+  176.9x — an idle guest's memory is mostly zero pages. Fleet-at-rest disk is
+  effectively free if compressed.
+- Worked guest (agent-at-rest case, paused after the real clone+install+
+  typecheck): 17.18 GB -> 3.06 GB, 5.6x, 8.4 s wall on 32 threads.
+- hotcell does NOT compress snapshots today — this measures the opportunity,
+  not a shipped feature. Part D's disk economics use the UNCOMPRESSED sizes.

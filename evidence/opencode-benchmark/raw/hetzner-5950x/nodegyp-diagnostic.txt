@@ -23,7 +23,9 @@ discriminator identical. Cause is a subtler in-guest interaction in bun's full-i
 run of node-gyp-build (suspected install-ordering/timing: node-gyp-build resolves
 "no prebuilt -> source build" even though the file lands). ROOT CAUSE OPEN — not claimed.
 
-IMPACT ON BENCHMARK: floor band (12-16 GiB) is UNAFFECTED — the source build is
+IMPACT ON BENCHMARK: the floor band is UNAFFECTED — the source build is
 install-phase (~100-300 MB), the floor OOM is typecheck-phase (tsgo ~13 GiB), <3% and
-different phases. Install TIME is inflated ~2-3s (our guest 13s vs our own bare host 12s).
-WORKAROUND for the runs: expose npm's bundled node-gyp in the guest (disclosed).
+different phases. Install TIME is inflated ~1.3s: our guest's median install is 13.437s
+(32vcpu-5reps.txt reps 13998/13492/13437/13413/12017 ms) vs our own bare host 12.112s
+(control-bare-host.txt). WORKAROUND for the runs: expose npm's bundled node-gyp in the
+guest (disclosed).

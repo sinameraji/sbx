@@ -1,0 +1,87 @@
+Part C — work-spike RE-RUN after the admission fix (commit 957068c). Hetzner 5950X
+bare metal, 2026-07-18. Identical harness + config to partC-work-spike.txt (90-pool,
+2048MB guests, each touching 1500MB tmpfs). BEFORE the fix: over-commit to 81 working
+guests, MemAvailable bottomed 1408MB, zero refusals. AFTER:
+
+evidence/opencode-benchmark/harness/bench-work-spike.sh: line 25: 63244 Killed                  sudo pkill -9 -f "daemon/dist" 2> /dev/null
+evidence/opencode-benchmark/harness/bench-work-spike.sh: line 25: 63246 Killed                  sudo pkill -9 -f firecracker 2> /dev/null
+host swap: 0kB — box is NO-SWAP by default (Hetzner installimage), so this IS the realistic config, not artificially harshened
+daemon up; baseline MemAvailable=127040MB
+pool: 90 paused 2048MB; MemAvailable=126398MB
+=== ramp: wake + touch 1500MB per guest, cumulative ===
+first-touch OK: host memory moved 1536MB for one 1500MB guest
+worked=1 MemAvailable=124862MB alive_fc=2 oom_kills=0 dd=[2864000 bytes (1.6 GB, 1.5 GiB) copied, 2.41593 s, 651 MB/s ]
+worked=2 MemAvailable=123298MB alive_fc=3 oom_kills=0 dd=[72864000 bytes (1.6 GB, 1.5 GiB) copied, 2.5284 s, 622 MB/s ]
+worked=3 MemAvailable=121777MB alive_fc=4 oom_kills=0 dd=[2864000 bytes (1.6 GB, 1.5 GiB) copied, 2.47074 s, 637 MB/s ]
+worked=4 MemAvailable=120219MB alive_fc=5 oom_kills=0 dd=[2864000 bytes (1.6 GB, 1.5 GiB) copied, 2.48628 s, 633 MB/s ]
+worked=5 MemAvailable=118662MB alive_fc=6 oom_kills=0 dd=[2864000 bytes (1.6 GB, 1.5 GiB) copied, 2.41708 s, 651 MB/s ]
+worked=6 MemAvailable=117137MB alive_fc=7 oom_kills=0 dd=[2864000 bytes (1.6 GB, 1.5 GiB) copied, 2.52032 s, 624 MB/s ]
+worked=7 MemAvailable=115625MB alive_fc=8 oom_kills=0 dd=[2864000 bytes (1.6 GB, 1.5 GiB) copied, 2.49955 s, 629 MB/s ]
+worked=8 MemAvailable=114074MB alive_fc=9 oom_kills=0 dd=[2864000 bytes (1.6 GB, 1.5 GiB) copied, 2.41074 s, 652 MB/s ]
+worked=9 MemAvailable=112541MB alive_fc=10 oom_kills=0 dd=[2864000 bytes (1.6 GB, 1.5 GiB) copied, 2.48531 s, 633 MB/s ]
+worked=10 MemAvailable=111013MB alive_fc=11 oom_kills=0 dd=[2864000 bytes (1.6 GB, 1.5 GiB) copied, 2.47916 s, 634 MB/s ]
+worked=11 MemAvailable=109467MB alive_fc=12 oom_kills=0 dd=[2864000 bytes (1.6 GB, 1.5 GiB) copied, 2.45754 s, 640 MB/s ]
+worked=12 MemAvailable=107918MB alive_fc=13 oom_kills=0 dd=[2864000 bytes (1.6 GB, 1.5 GiB) copied, 2.49544 s, 630 MB/s ]
+worked=13 MemAvailable=106381MB alive_fc=14 oom_kills=0 dd=[2864000 bytes (1.6 GB, 1.5 GiB) copied, 2.55835 s, 615 MB/s ]
+worked=14 MemAvailable=104833MB alive_fc=15 oom_kills=0 dd=[2864000 bytes (1.6 GB, 1.5 GiB) copied, 2.47809 s, 635 MB/s ]
+worked=15 MemAvailable=103307MB alive_fc=16 oom_kills=0 dd=[2864000 bytes (1.6 GB, 1.5 GiB) copied, 2.43004 s, 647 MB/s ]
+worked=16 MemAvailable=101780MB alive_fc=17 oom_kills=0 dd=[72864000 bytes (1.6 GB, 1.5 GiB) copied, 2.3848 s, 660 MB/s ]
+worked=17 MemAvailable=100253MB alive_fc=18 oom_kills=0 dd=[2864000 bytes (1.6 GB, 1.5 GiB) copied, 2.58396 s, 609 MB/s ]
+worked=18 MemAvailable=98710MB alive_fc=19 oom_kills=0 dd=[2864000 bytes (1.6 GB, 1.5 GiB) copied, 2.45621 s, 640 MB/s ]
+worked=19 MemAvailable=97299MB alive_fc=20 oom_kills=0 dd=[2864000 bytes (1.6 GB, 1.5 GiB) copied, 2.54058 s, 619 MB/s ]
+worked=20 MemAvailable=95736MB alive_fc=21 oom_kills=0 dd=[2864000 bytes (1.6 GB, 1.5 GiB) copied, 2.46161 s, 639 MB/s ]
+worked=21 MemAvailable=94140MB alive_fc=22 oom_kills=0 dd=[2864000 bytes (1.6 GB, 1.5 GiB) copied, 2.60651 s, 603 MB/s ]
+worked=22 MemAvailable=92657MB alive_fc=23 oom_kills=0 dd=[2864000 bytes (1.6 GB, 1.5 GiB) copied, 2.44119 s, 644 MB/s ]
+worked=23 MemAvailable=91159MB alive_fc=24 oom_kills=0 dd=[2864000 bytes (1.6 GB, 1.5 GiB) copied, 2.58106 s, 609 MB/s ]
+worked=24 MemAvailable=89585MB alive_fc=25 oom_kills=0 dd=[2864000 bytes (1.6 GB, 1.5 GiB) copied, 2.46592 s, 638 MB/s ]
+worked=25 MemAvailable=88016MB alive_fc=26 oom_kills=0 dd=[2864000 bytes (1.6 GB, 1.5 GiB) copied, 2.63302 s, 597 MB/s ]
+worked=26 MemAvailable=86439MB alive_fc=27 oom_kills=0 dd=[2864000 bytes (1.6 GB, 1.5 GiB) copied, 2.45293 s, 641 MB/s ]
+worked=27 MemAvailable=84576MB alive_fc=28 oom_kills=0 dd=[2864000 bytes (1.6 GB, 1.5 GiB) copied, 2.56152 s, 614 MB/s ]
+worked=28 MemAvailable=83427MB alive_fc=29 oom_kills=0 dd=[2864000 bytes (1.6 GB, 1.5 GiB) copied, 2.46637 s, 638 MB/s ]
+worked=29 MemAvailable=81835MB alive_fc=30 oom_kills=0 dd=[72864000 bytes (1.6 GB, 1.5 GiB) copied, 2.5268 s, 622 MB/s ]
+worked=30 MemAvailable=80287MB alive_fc=31 oom_kills=0 dd=[2864000 bytes (1.6 GB, 1.5 GiB) copied, 2.51675 s, 625 MB/s ]
+worked=31 MemAvailable=78743MB alive_fc=32 oom_kills=0 dd=[2864000 bytes (1.6 GB, 1.5 GiB) copied, 2.49785 s, 630 MB/s ]
+worked=32 MemAvailable=77177MB alive_fc=33 oom_kills=0 dd=[2864000 bytes (1.6 GB, 1.5 GiB) copied, 2.47904 s, 634 MB/s ]
+worked=33 MemAvailable=75640MB alive_fc=34 oom_kills=0 dd=[2864000 bytes (1.6 GB, 1.5 GiB) copied, 2.54627 s, 618 MB/s ]
+worked=34 MemAvailable=74094MB alive_fc=35 oom_kills=0 dd=[72864000 bytes (1.6 GB, 1.5 GiB) copied, 2.5452 s, 618 MB/s ]
+worked=35 MemAvailable=72584MB alive_fc=36 oom_kills=0 dd=[72864000 bytes (1.6 GB, 1.5 GiB) copied, 2.5388 s, 620 MB/s ]
+worked=36 MemAvailable=71051MB alive_fc=37 oom_kills=0 dd=[2864000 bytes (1.6 GB, 1.5 GiB) copied, 2.46451 s, 638 MB/s ]
+worked=37 MemAvailable=69490MB alive_fc=38 oom_kills=0 dd=[2864000 bytes (1.6 GB, 1.5 GiB) copied, 2.44435 s, 643 MB/s ]
+worked=38 MemAvailable=67959MB alive_fc=39 oom_kills=0 dd=[2864000 bytes (1.6 GB, 1.5 GiB) copied, 2.50423 s, 628 MB/s ]
+worked=39 MemAvailable=66413MB alive_fc=40 oom_kills=0 dd=[2864000 bytes (1.6 GB, 1.5 GiB) copied, 2.45485 s, 641 MB/s ]
+worked=40 MemAvailable=64903MB alive_fc=41 oom_kills=0 dd=[2864000 bytes (1.6 GB, 1.5 GiB) copied, 2.51886 s, 624 MB/s ]
+worked=41 MemAvailable=63301MB alive_fc=42 oom_kills=0 dd=[2864000 bytes (1.6 GB, 1.5 GiB) copied, 3.50318 s, 449 MB/s ]
+worked=42 MemAvailable=61751MB alive_fc=43 oom_kills=0 dd=[2864000 bytes (1.6 GB, 1.5 GiB) copied, 2.44001 s, 645 MB/s ]
+worked=43 MemAvailable=60196MB alive_fc=44 oom_kills=0 dd=[2864000 bytes (1.6 GB, 1.5 GiB) copied, 2.56223 s, 614 MB/s ]
+worked=44 MemAvailable=58641MB alive_fc=45 oom_kills=0 dd=[2864000 bytes (1.6 GB, 1.5 GiB) copied, 2.45467 s, 641 MB/s ]
+worked=45 MemAvailable=57122MB alive_fc=46 oom_kills=0 dd=[72864000 bytes (1.6 GB, 1.5 GiB) copied, 2.6005 s, 605 MB/s ]
+worked=46 MemAvailable=55569MB alive_fc=47 oom_kills=0 dd=[2864000 bytes (1.6 GB, 1.5 GiB) copied, 2.44501 s, 643 MB/s ]
+worked=47 MemAvailable=53998MB alive_fc=48 oom_kills=0 dd=[2864000 bytes (1.6 GB, 1.5 GiB) copied, 2.56676 s, 613 MB/s ]
+worked=48 MemAvailable=52459MB alive_fc=49 oom_kills=0 dd=[72864000 bytes (1.6 GB, 1.5 GiB) copied, 2.4248 s, 649 MB/s ]
+worked=49 MemAvailable=50923MB alive_fc=50 oom_kills=0 dd=[2864000 bytes (1.6 GB, 1.5 GiB) copied, 2.49197 s, 631 MB/s ]
+worked=50 MemAvailable=49347MB alive_fc=51 oom_kills=0 dd=[2864000 bytes (1.6 GB, 1.5 GiB) copied, 2.45795 s, 640 MB/s ]
+worked=51 MemAvailable=47767MB alive_fc=52 oom_kills=0 dd=[2864000 bytes (1.6 GB, 1.5 GiB) copied, 2.39583 s, 657 MB/s ]
+worked=52 MemAvailable=46242MB alive_fc=53 oom_kills=0 dd=[2864000 bytes (1.6 GB, 1.5 GiB) copied, 2.50488 s, 628 MB/s ]
+worked=53 MemAvailable=44654MB alive_fc=54 oom_kills=0 dd=[72864000 bytes (1.6 GB, 1.5 GiB) copied, 2.4556 s, 641 MB/s ]
+worked=54 MemAvailable=43111MB alive_fc=55 oom_kills=0 dd=[2864000 bytes (1.6 GB, 1.5 GiB) copied, 2.99916 s, 524 MB/s ]
+worked=55 MemAvailable=41604MB alive_fc=56 oom_kills=0 dd=[2864000 bytes (1.6 GB, 1.5 GiB) copied, 2.56954 s, 612 MB/s ]
+worked=56 MemAvailable=40061MB alive_fc=57 oom_kills=0 dd=[2864000 bytes (1.6 GB, 1.5 GiB) copied, 2.52876 s, 622 MB/s ]
+worked=57 MemAvailable=38519MB alive_fc=58 oom_kills=0 dd=[2864000 bytes (1.6 GB, 1.5 GiB) copied, 2.53496 s, 620 MB/s ]
+worked=58 MemAvailable=37009MB alive_fc=59 oom_kills=0 dd=[2864000 bytes (1.6 GB, 1.5 GiB) copied, 2.51802 s, 625 MB/s ]
+worked=59 MemAvailable=35524MB alive_fc=60 oom_kills=0 dd=[2864000 bytes (1.6 GB, 1.5 GiB) copied, 2.57516 s, 611 MB/s ]
+worked=60 MemAvailable=33999MB alive_fc=61 oom_kills=0 dd=[2864000 bytes (1.6 GB, 1.5 GiB) copied, 2.47744 s, 635 MB/s ]
+worked=61 MemAvailable=32393MB alive_fc=62 oom_kills=0 dd=[2864000 bytes (1.6 GB, 1.5 GiB) copied, 2.45493 s, 641 MB/s ]
+worked=62 MemAvailable=30881MB alive_fc=63 oom_kills=0 dd=[2864000 bytes (1.6 GB, 1.5 GiB) copied, 2.53542 s, 620 MB/s ]
+RESULT WALL: resume refused at 62 working guests (HTTP 503) — CLEAN admission refusal
+RESULT auto-resume gate: exec on paused df4d97ee127c -> HTTP 503
+RESULT work-spike: WALL=admission-503 at 62 concurrently-WORKING 2048MB guests (each touched 1500MB) — the daemon REFUSED further resumes with a clean 503; MemAvailable bottomed 30881MB (headroom intact, no OOM). The resume-path admission gate held.
+WORKSPIKEDONE
+
+INTERPRETATION:
+- The wall is now a CLEAN HTTP 503 at 62 working guests — matching the capacity
+  budget arithmetic (128715MB host budget / 2048MB per guest = 62.8).
+- MemAvailable bottomed at 30881MB — ~30GB headroom intact, vs 1408MB pre-fix.
+- 0 OOM kills. The auto-resume path (exec on a paused sandbox) is gated too: HTTP 503.
+- Found by measuring (partC-work-spike.txt) -> located in our own code -> fixed
+  (957068c) -> re-measured (this file). Overcommit remains an operator knob
+  (HOTCELL_OVERCOMMIT) — the default now refuses instead of gambling.

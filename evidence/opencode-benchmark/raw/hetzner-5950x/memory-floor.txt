@@ -13,6 +13,16 @@ though these particular runs' *timings* were contended by a concurrent diagnosti
 `run-5c49059-contention-and-hang.txt`. The published 32 vCPU row ran at 32 GiB, well
 above the floor.
 
-The floor is a BAND: earlier runs put 12 GiB right at the razor-thin edge (some reps
-OOM, some pass) and 16 GiB reliable. The clean 12/14/16 GiB rungs — with per-run raw —
-land here as the ladder finishes. This file is the lower-bound record until then.
+The floor is a BAND, wider than a first pass suggested. Peak working set spans
+10.7–15.8 GiB across identical runs, so every rung from 12 to 16 GiB can flip. The
+committed per-run record:
+
+  rung    clean ladder (ladder-runs/)   earlier session (session-1547Z-runs/)
+  12 GiB  OOM/PASS/OOM  (1/3)           OOM/OOM/OOM  (0/3, peaks 11.71/11.71/11.65)
+  14 GiB  PASS/PASS/PASS(3/3)           (not run this session)
+  16 GiB  PASS/PASS/PASS(3/3)           OOM/PASS/PASS(2/3, OOM rep peak 15.65 GiB)
+
+An even earlier run saw 12 GiB pass 2/3, but its per-run raws were overwritten before
+we adopted publish-everything — that count is disclosed as recollection, not evidence.
+Only ≥ 24 GiB has never OOM'd in any session (max observed peak 15.75 GiB). Full per-run
+stdout for both sessions is committed under ladder-runs/ and session-1547Z-runs/.

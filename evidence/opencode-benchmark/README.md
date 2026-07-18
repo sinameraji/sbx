@@ -22,13 +22,15 @@ stop helping, and the at-rest economics dax actually needs for a large, spiky
 userbase. Every rung, including every failure, is published.
 
 **Status:** Part A's ladder is complete — full grid in
-`raw/hetzner-5950x/demand-curve-ladder.tsv`, per-run raws alongside. Measured
-headlines:
+`raw/hetzner-5950x/demand-curve-ladder.tsv`, per-run stdout in `ladder-runs/`
+(plus an earlier, messier session in `session-1547Z-runs/`). Measured headlines:
 
-- **Memory floor: 14 GiB is the reliable floor** (3/3 PASS at 14 and at 16 GiB).
-  **12 GiB is marginal and flips run to run** — 1/3 PASS in the ladder run
-  (OOM/PASS/OOM), 2/3 PASS in an earlier run; both results stand, neither is
-  the "real" one. ≤ 8 GiB always OOMs at typecheck (`memory-floor.txt`).
+- **The memory floor is a band, not a line.** Peak working set swings run to
+  run — 11.0–14.2 GiB even across five byte-identical 32-vCPU reps — so rungs
+  from 12–16 GiB flip: 12 GiB is 1/3 PASS in the clean ladder and 0/3 in the
+  earlier session; 16 GiB is 3/3 in the ladder but **OOM'd once** in the earlier
+  session (peak 15.65 GiB). ≤ 8 GiB always OOMs; only ≥ 24 GiB never has
+  (`memory-floor.txt`, `ladder-runs/`, `session-1547Z-runs/`).
 - **CPU knee (typecheck median at 32 GiB):** 2 vCPU 102.8 s → 4 53.9 s →
   8 30.7 s → 16 20.2 s → 32 17.4 s. Gains per doubling: 1.91× → 1.76× →
   1.52× → 1.16× — the workload stops scaling past 8–16 vCPU.
@@ -46,7 +48,10 @@ headlines:
   full raw stdout per run + a `summary.tsv`. Never retries-until-green.
 - `harness/runbench.sh` — guest-side wrapper: runs the benchmark while sampling
   `/proc/meminfo` `MemAvailable` every 0.3 s, so peak working set is measured.
-- `raw/<host>/` — full stdout per run, named `mem<MB>_cpu<N>_<RESULT>.txt`.
+- `raw/<host>/` — curated per-part evidence (`partA-*` … `partD-*`,
+  `host-proof.txt`), the `demand-curve-ladder.tsv` summary, and full per-run
+  stdout under `ladder-runs/` (clean ladder) + `session-1547Z-runs/` (earlier
+  session), each named `mem<MB>_cpu<N>_r<REP>.txt`.
 
 ## Host requirements & not-nested proof
 
@@ -73,12 +78,16 @@ On a fresh Ubuntu bare-metal host with Docker, Node ≥22, Firecracker + `/dev/k
 git clone https://github.com/sinameraji/hotcell.git ~/hotcell
 (cd ~/hotcell/agent && GOOS=linux GOARCH=amd64 go build -o ~/hotcell-agent-linux-amd64 ./cmd/hotcell-agent)
 
-# memory ladder (fixed 8 vCPU), 3 cold runs per rung:
-CONFIGS="4096:8 6144:8 8192:8 12288:8 16384:8 32768:8" REPS=3 REGION=hetzner-5950x-baremetal \
+# memory ladder (fixed 8 vCPU), 3 cold runs per rung (14336 = the 14 GiB rung):
+CONFIGS="4096:8 6144:8 8192:8 12288:8 14336:8 16384:8 32768:8" REPS=3 REGION=hetzner-5950x-baremetal \
   bash ~/hotcell/evidence/opencode-benchmark/harness/bench-suite.sh
 
-# CPU ladder (fixed 32 GiB, above the floor) — includes the published 32 vCPU max-config row:
-CONFIGS="32768:2 32768:4 32768:8 32768:16 32768:32" REPS=3 REGION=hetzner-5950x-baremetal \
+# CPU ladder (fixed 32 GiB, above the floor):
+CONFIGS="32768:2 32768:4 32768:8 32768:16" REPS=3 REGION=hetzner-5950x-baremetal \
+  bash ~/hotcell/evidence/opencode-benchmark/harness/bench-suite.sh
+
+# the published 32 vCPU max-config row is its OWN 5-rep session (not the REPS=3 ladder):
+CONFIGS="32768:32" REPS=5 REGION=hetzner-5950x-baremetal \
   bash ~/hotcell/evidence/opencode-benchmark/harness/bench-suite.sh
 ```
 
@@ -86,11 +95,15 @@ Results land in `/tmp/bench-suite/` (raw per run + `summary.tsv`); copy them int
 `raw/<host>/` and commit.
 
 **The published tweet row is the `32768:32` rung** (32 vCPU / 32 GiB, all 16 cores +
-SMT) from the CPU-ladder command above — raw in `raw/hetzner-5950x/32vcpu-5reps.txt`.
+SMT) — its own 5-rep session from the command above, raw in
+`raw/hetzner-5950x/32vcpu-5reps.txt`.
 
-> **Part A3 (default-deny egress ON) has not been run yet.** It uses `EGRESS=1` plus a
-> minimal `ALLOWLIST_EXTRA` delta measured from the denial log — that exact command and
-> the delta land here once the run is done. Not published as a placeholder.
+**Part A3 — default-deny egress ON (guest has no NIC; all egress via the vsock
+gateway):** done — 3/3 PASS at **46.211 s** median Workload total, no measurable
+cost vs the NAT rung at the same config. The `ALLOWLIST_EXTRA` delta this workload
+needs was measured from the denial evidence over five attempts (which also surfaced
+two product bugs, since fixed): `nodejs.org,api.github.com,pkg.pr.new`. Raw + the
+full iteration history: `raw/hetzner-5950x/partA-egress-enforced.txt`.
 
 ## Disclosure
 
@@ -107,8 +120,8 @@ SMT) from the CPU-ladder command above — raw in `raw/hetzner-5950x/32vcpu-5rep
   Platform, arch, Node ABI and libc are byte-identical between host and guest. Root
   cause is open. Workaround: the hotcell guest image puts npm's bundled `node-gyp`
   on PATH (`helpers/hotcell-vz/convert-image.sh` — the OCI→rootfs converter shared by
-both microVM drivers; the `hotcell-vz` dir name is legacy from the sbx-vz era). Cost: install is ~2s slower than
-  our own host (13.5s vs 12.1s). The memory floor is unaffected — the source build
+both microVM drivers; the `hotcell-vz` dir name is legacy from the sbx-vz era). Cost: install is ~1.3s slower than
+  our own host (guest median 13.437s vs host 12.112s). The memory floor is unaffected — the source build
   is install-phase; the OOM is typecheck-phase. Details: `raw/hetzner-5950x/nodegyp-diagnostic.txt`.
 - **Guest specs are the guest's.** The table reads the guest's own `/proc`, so
   `CPU / RAM` is the microVM's, never the host's. The host is deliberately larger.

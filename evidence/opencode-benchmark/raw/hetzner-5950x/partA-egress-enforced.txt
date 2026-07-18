@@ -1,0 +1,131 @@
+Part A — egress-ENFORCED leg (default-deny, no NIC, vsock gateway). Hetzner 5950X
+bare metal, 2026-07-18. The A3 run promised in the README: dax's script verbatim,
+32 GiB / 8 vCPU (cpuset 0-7), fresh microVM per rep, egress enforcement ON.
+
+FINAL COMMAND (the one that passed; earlier iterations below):
+  EGRESS=1 NETWORKED=false WRITABLE_ROOTFS=true \
+  ALLOWLIST_EXTRA=nodejs.org,api.github.com,pkg.pr.new \
+  CONFIGS="32768:8" REPS=3 bash harness/bench-suite.sh
+
+RESULT: 3/3 PASS. Workload totals 46.211 / 46.055 / 46.672 s (median rep r1 =
+46.211 s). The NAT (networked:true) rung at the identical config measured
+46.650 / 49.228 / 48.597 s — the egress-enforced rows land inside the NAT rows'
+range; the difference is within install-phase network variance. Default-deny
+egress over vsock added no measurable cost to this workload.
+
+Gateway log during the 3 PASS reps: 741 allowed entries (CONNECT tunnels +
+plaintext forwards), 0 denials — the workload attempted nothing outside the
+stock allowlist + the 3-entry delta.
+
+=== summary.tsv (final run) ===
+mem_mb	cpus	rep	result	clone_ms	install_ms	typecheck_ms	total_ms	peak_used_gib	egress
+32768	8	1	PASS	4092	11964	30155	66988	13.86	1
+32768	8	2	PASS	4040	11965	30050	66348	13.66	1
+32768	8	3	PASS	4036	12629	30007	65672	13.31	1
+
+=== ITERATION HISTORY — the deny-log loop, one discovery per attempt ===
+Attempt 1 (19:58 prev day): contained rootfs is read-only; even staging the
+script failed. -> product gap -> writableRootfs (commit 9120ff6). Full raw:
+  ### CONFIG mem=32768MB cpus=8 cpuset=0-7 networked=false rep=1 egress=1 region=hetzner-5950x-baremetal 2026-07-17T19:58:03Z
+  sandbox=b7202ee59946
+  fc_pin: cpus_allowed=0-7 requested=0-7
+  mem=32896216kib cpus=8
+  DNS_FAIL
+  /bin/sh: 1: cannot create /root/pb.sh: Read-only file system
+  /bin/sh: 1: cannot create /root/runbench.sh: Read-only file system
+  chmod: cannot access '/root/runbench.sh': No such file or directory
+  ############### BENCHMARK (32768MB/8cpu rep1) ###############
+  bash: /root/runbench.sh: No such file or directory
+  ############### END ###############
+
+Attempt 2 (20:33): rootfs writable, prepare ran entirely over vsock (apt +
+nodejs.org + bun) — but git could not CONNECT (gateway closed the socket after
+its 407 auth challenge; git, unlike curl/pip/apt, does not pre-authenticate).
+-> product bug -> fix commit cade4dc. Guest-side evidence:
+  fatal: unable to access 'https://github.com/anomalyco/opencode.git/': Proxy CONNECT aborted
+  fatal: git checkout: --detach does not take a path argument 'FETCH_HEAD'
+  fatal: ambiguous argument 'HEAD': unknown revision or path not in the working tree.
+
+Attempt 3 (20:44, delta=nodejs.org): clone OK; install died resolving
+ghostty-web from github:anomalyco/ghostty-web — bun fetches github: specifiers
+via api.github.com, not in the stock source_control tier. Guest-side evidence:
+  error: GET https://api.github.com/repos/anomalyco/ghostty-web/tarball/513463a6f1190253057e8a3f0dac8f6ee8393553 - 403
+  error: ghostty-web@github:anomalyco/ghostty-web#513463a6f1190253057e8a3f0dac8f6ee8393553 failed to resolve
+
+Attempt 4 (07:26, delta=nodejs.org,api.github.com): install completed 4706/4707;
+the one failure was @solidjs/start — OpenCode pins a PREVIEW build served from
+pkg.pr.new (StackBlitz's PR-preview CDN). typecheck then failed 5 s in (TS2307
+in @opencode-ai/console-support). Guest-side evidence:
+  Failed to install 1 package
+  @opencode-ai/console-support:typecheck: src/app.tsx(3,28): error TS2307: Cannot find module '@solidjs/start/router' or its corresponding type declarations.
+  @opencode-ai/console-support:typecheck: src/entry-client.tsx(2,36): error TS2307: Cannot find module '@solidjs/start/client' or its corresponding type declarations.
+  @opencode-ai/console-support:typecheck: src/entry-server.tsx(2,44): error TS2307: Cannot find module '@solidjs/start/server' or its corresponding type declarations.
+  @opencode-ai/console-support:typecheck: vite.config.ts(2,28): error TS2307: Cannot find module '@solidjs/start/config' or its corresponding type declarations.
+
+Attempt 5 (07:31, delta=nodejs.org,api.github.com,pkg.pr.new): PASS x3, table above.
+
+=== r2/r3 BENCH + table lines (final run; r1 verbatim in partA-egress-enforced-r1-full.txt) ===
+--- r2 ---
+### CONFIG mem=32768MB cpus=8 cpuset=0-7 networked=false writableRootfs=true rep=2 egress=1 region=hetzner-5950x-baremetal 2026-07-18T07:33:24Z
+fc_pin: cpus_allowed=0-7 requested=0-7
+BENCH_PHASE	prepare	16926
+BENCH_CACHE	guest_page_cache	dropped
+BENCH_CACHE	workspace	fresh
+BENCH_CACHE	bun	empty
+BENCH_CACHE	turbo	empty
+BENCH_PHASE	cache_clear	439
+BENCH_META	commit	08fb47373509ba64b13441061314eeacf4264f51
+BENCH_META	architecture	x86_64
+BENCH_META	kernel	Linux 5.10.223
+BENCH_META	logical_cpus	8
+BENCH_META	cpu_model	AMD EPYC
+BENCH_META	memory_kib	32896216
+BENCH_PHASE	bun_download	630
+BENCH_PHASE	bun_unpack	514
+BENCH_META	bun_version	1.3.14
+BENCH_META	node_version	v24.14.1
+BENCH_PHASE	clone	4040
+BENCH_DISK	after_clone	352620544
+BENCH_PHASE	install	11965
+BENCH_DISK	after_install	3229659136
+BENCH_PHASE	typecheck	30050
+BENCH_DISK	after_typecheck	3233693696
+BENCH_DONE	08fb47373509ba64b13441061314eeacf4264f51
+BENCH_PHASE	total	66348
+| **hotcell** | 8 CPU / 31.37 GiB | hetzner-5950x-baremetal, AMD EPYC | 4.040s | 11.965s | 30.050s | 46.055s | ✅ |
+BENCH_MEM	total_kib	32896216
+BENCH_MEM	min_avail_kib	18569496
+BENCH_MEM	peak_used_kib	14326720
+BENCH_MEM	peak_used_gib	13.66
+--- r3 ---
+### CONFIG mem=32768MB cpus=8 cpuset=0-7 networked=false writableRootfs=true rep=3 egress=1 region=hetzner-5950x-baremetal 2026-07-18T07:34:40Z
+fc_pin: cpus_allowed=0-7 requested=0-7
+BENCH_PHASE	prepare	15649
+BENCH_CACHE	guest_page_cache	dropped
+BENCH_CACHE	workspace	fresh
+BENCH_CACHE	bun	empty
+BENCH_CACHE	turbo	empty
+BENCH_PHASE	cache_clear	429
+BENCH_META	commit	08fb47373509ba64b13441061314eeacf4264f51
+BENCH_META	architecture	x86_64
+BENCH_META	kernel	Linux 5.10.223
+BENCH_META	logical_cpus	8
+BENCH_META	cpu_model	AMD EPYC
+BENCH_META	memory_kib	32896216
+BENCH_PHASE	bun_download	687
+BENCH_PHASE	bun_unpack	511
+BENCH_META	bun_version	1.3.14
+BENCH_META	node_version	v24.14.1
+BENCH_PHASE	clone	4036
+BENCH_DISK	after_clone	352620544
+BENCH_PHASE	install	12629
+BENCH_DISK	after_install	3229650944
+BENCH_PHASE	typecheck	30007
+BENCH_DISK	after_typecheck	3233685504
+BENCH_DONE	08fb47373509ba64b13441061314eeacf4264f51
+BENCH_PHASE	total	65672
+| **hotcell** | 8 CPU / 31.37 GiB | hetzner-5950x-baremetal, AMD EPYC | 4.036s | 12.629s | 30.007s | 46.672s | ✅ |
+BENCH_MEM	total_kib	32896216
+BENCH_MEM	min_avail_kib	18944812
+BENCH_MEM	peak_used_kib	13951404
+BENCH_MEM	peak_used_gib	13.31

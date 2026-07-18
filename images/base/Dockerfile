@@ -1,6 +1,12 @@
 # Base sandbox image for hotcell — a general-purpose agent workspace.
 # Python 3.11 + Node 20 + git/bash and common build tools.
+# Multi-arch (amd64 + arm64); published to GHCR by .github/workflows/publish-base-image.yml.
 FROM python:3.11-slim-bookworm
+
+# OCI metadata — links the published GHCR package to this repo and sets provenance.
+LABEL org.opencontainers.image.source="https://github.com/sinameraji/hotcell" \
+      org.opencontainers.image.description="hotcell base sandbox — Python 3.11 + Node 20 + git + build tools" \
+      org.opencontainers.image.licenses="Apache-2.0"
 
 ENV DEBIAN_FRONTEND=noninteractive \
     PIP_NO_CACHE_DIR=1 \

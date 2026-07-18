@@ -18,6 +18,7 @@ import { infoCommand } from "./info.js";
 import { capacityCommand } from "./capacity.js";
 import { egressCommand } from "./egress.js";
 import { terminalCommand } from "./terminal.js";
+import { tuiCommand } from "./tui.js";
 
 export interface GlobalArgs {
   endpoint?: string;
@@ -62,6 +63,9 @@ export async function cli(args: string[]): Promise<number> {
       return egressCommand(positional, globals, flags);
     case "terminal":
       return terminalCommand(positional, globals);
+    case "tui":
+    case "top":
+      return tuiCommand(positional, globals);
     case "rm":
     case "remove":
       return removeCommand(positional, globals);
@@ -126,6 +130,10 @@ Commands:
     --repo clones a git repo into /workspace at create (great for agents).
     --setup runs a shell command once after the container starts (best-effort;
     chain with && for multiple steps, e.g. --setup "npm i x && pip install y").
+
+  hotcell tui   (alias: hotcell top)
+    Full-screen fleet monitor + control panel. Arrow-key nav, live CPU/mem/cost,
+    ⏎ to attach a shell, p/r/d to pause/resume/destroy, c to create.
 
   hotcell terminal <id>
     Attach an interactive shell (PTY) to a sandbox in your local terminal.

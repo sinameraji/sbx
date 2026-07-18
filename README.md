@@ -179,6 +179,8 @@ hotcell run "<cmd>" [--image I] [--keep] [--env K=V,…] [--sleep-after MS] [--e
 hotcell create [--image I] [--env K=V,…] [--egress] [--egress-spend-cap USD] [--memory MB] [--cpus N] [--pids N] …   # prints id
 hotcell exec <id> "<cmd>" [--session SID] [--cwd DIR] [--env K=V,…]
 hotcell ls | stats <id> | stop <id> | start <id> | rm <id> | capacity | info
+hotcell tui   (alias: top)                  # full-screen fleet monitor: arrow-key nav,
+                                            # live cpu/mem/cost, ⏎ attach, p/r/d, c create
 hotcell terminal <id>                       # interactive shell (attach)
 hotcell files <write|read|mkdir|list> …     # file ops
 hotcell watch <id> [path]                   # stream file changes

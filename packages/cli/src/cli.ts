@@ -22,6 +22,7 @@ import { tuiCommand } from "./tui.js";
 import { startEngine, stopEngine, engineStatus } from "./engine.js";
 import { keysCommand } from "./keys.js";
 import { imagesCommand } from "./images.js";
+import { versionCommand } from "./version.js";
 
 export interface GlobalArgs {
   endpoint?: string;
@@ -33,6 +34,13 @@ export async function cli(args: string[]): Promise<number> {
   if (args[0] === "--help" || args[0] === "-h") {
     printHelp();
     return 0;
+  }
+
+  if (args[0] === "--version" || args[0] === "-v" || args[0] === "version") {
+    return versionCommand({
+      endpoint: process.env.HOTCELL_ENDPOINT ?? process.env.SBX_ENDPOINT,
+      apiKey: process.env.HOTCELL_API_KEY ?? process.env.SBX_API_KEY,
+    });
   }
 
   // Bare `hotcell` (no command) opens the interactive UI when attached to a
@@ -258,7 +266,8 @@ Commands:
 Global options:
   --endpoint <url>   Daemon URL (default: http://127.0.0.1:4750 or SBX_ENDPOINT)
   --api-key <key>    API key for an auth-enabled daemon (or SBX_API_KEY)
-  -h, --help         Show this help`);
+  -h, --help         Show this help
+  -v, --version      Show the CLI + running daemon versions (flags any drift)`);
 }
 
 export interface ParsedArgs {

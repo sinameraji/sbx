@@ -35,6 +35,16 @@ import type {
   SandboxRecord,
   SessionInfo,
 } from "../types.js";
+import { readFileSync } from "node:fs";
+
+/** Daemon package version, surfaced on /healthz + /info so the CLI can flag CLI↔daemon drift. */
+const DAEMON_VERSION: string = (() => {
+  try {
+    return (JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8")).version as string) ?? "unknown";
+  } catch {
+    return "unknown";
+  }
+})();
 
 interface Deps {
   config: Config;
@@ -483,7 +493,7 @@ async function handle(
   if (method === "GET" && path === "/healthz") {
     try {
       await driver.ping();
-      return sendJson(res, 200, { ok: true, driver: driver.name });
+      return sendJson(res, 200, { ok: true, driver: driver.name, version: DAEMON_VERSION });
     } catch (err) {
       return sendJson(res, 503, { ok: false, error: String(err) });
     }
@@ -492,6 +502,7 @@ async function handle(
   // Daemon info for the dashboard (cost rates, proxy port, driver, image).
   if (method === "GET" && path === "/info") {
     return sendJson(res, 200, {
+      version: DAEMON_VERSION,
       driver: driver.name,
       drivers: DRIVER_NAMES,
       defaultImage: config.defaultImage,

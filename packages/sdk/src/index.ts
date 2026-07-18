@@ -342,6 +342,8 @@ export interface CapacitySnapshot {
 
 /** Daemon metadata from `GET /info`. */
 export interface DaemonInfo {
+  /** Daemon package version (added 0.1.7; undefined on older daemons). */
+  version?: string;
   driver: string;
   drivers: string[];
   defaultImage: string;
@@ -413,7 +415,7 @@ export class HotcellClient {
   }
 
   /** Daemon health + active runtime driver. */
-  async health(): Promise<{ ok: boolean; driver: string }> {
+  async health(): Promise<{ ok: boolean; driver: string; version?: string }> {
     return this.request("GET", "/healthz");
   }
 

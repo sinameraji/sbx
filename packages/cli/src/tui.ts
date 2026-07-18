@@ -84,6 +84,10 @@ export async function tuiCommand(
   let lastError = "";
   let refreshing = false;
   let stopped = false;
+  // While attached to a PTY (or showing the create prompt) the background refresh
+  // timer must NOT paint TUI frames — otherwise the fleet screen flashes back over
+  // the live shell every REFRESH_MS (looked like a race). Guards render + refresh.
+  let suspended = false;
   let confirmAction: (() => Promise<void>) | null = null;
   let confirmPrompt = "";
 
@@ -303,7 +307,7 @@ export async function tuiCommand(
   }
 
   function render(): void {
-    if (stopped) return;
+    if (stopped || suspended) return;
     lines.length = 0;
     const h = height();
     if (mode === "help") {
@@ -349,7 +353,7 @@ export async function tuiCommand(
   }
 
   async function refresh(): Promise<void> {
-    if (refreshing || stopped || mode === "confirm") return;
+    if (refreshing || stopped || suspended || mode === "confirm") return;
     refreshing = true;
     try {
       const [list, cap] = await Promise.all([
@@ -401,7 +405,9 @@ export async function tuiCommand(
   async function attach(): Promise<void> {
     const r = current();
     if (!r) return;
-    // Suspend the TUI, hand the raw terminal to the PTY bridge, then resume.
+    // Suspend the TUI (incl. the refresh timer's paints), hand the raw terminal to
+    // the PTY bridge, then resume.
+    suspended = true;
     detachInput();
     leaveScreen();
     out.write(`${c.dim}attaching to ${r.id} — exit the shell to return to the fleet…${c.reset}\r\n`);
@@ -411,6 +417,7 @@ export async function tuiCommand(
       lastError = `attach failed: ${formatError(err)}`;
     }
     if (stopped) return;
+    suspended = false;
     enterScreen();
     attachInput(handleKey);
     await refresh();
@@ -418,6 +425,7 @@ export async function tuiCommand(
 
   async function createPrompt(): Promise<void> {
     // Drop to cooked mode for a short prompt, then re-enter the TUI.
+    suspended = true;
     detachInput();
     leaveScreen();
     const rl = createInterface({ input: stdin, output: out });
@@ -439,6 +447,7 @@ export async function tuiCommand(
       lastError = `create failed: ${formatError(err)}`;
     }
     if (stopped) return;
+    suspended = false;
     enterScreen();
     attachInput(handleKey);
     await refresh();

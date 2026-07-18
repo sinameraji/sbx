@@ -1,6 +1,6 @@
 {
   "name": "@hotcell/daemon",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "hotcell sandbox daemon: containers + Firecracker/Apple-VZ microVMs, egress credential gateway",
   "license": "Apache-2.0",
   "type": "module",

@@ -78,7 +78,7 @@ export async function createCommand(
       e("");
       e(`  open a shell   hotcell terminal ${si.id}`);
       if (!setup && !repo) e(`  preinstall     recreate with  --setup "…"   ·   clone a repo:  --repo <url>`);
-      if (/slim/.test(si.image)) e(`  fuller image   --image python:3.11   (adds git + build tools)`);
+      if (/slim/.test(si.image)) e(`  fuller image   --image python:3.11 (+git +build tools)   ·   see all: hotcell images`);
       e(`  run an agent   see examples/ (OpenCode, Codex, Claude Code, Mastra) — add --egress for keyless LLM`);
     }
 

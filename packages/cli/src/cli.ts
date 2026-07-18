@@ -21,6 +21,7 @@ import { terminalCommand } from "./terminal.js";
 import { tuiCommand } from "./tui.js";
 import { startEngine, stopEngine, engineStatus } from "./engine.js";
 import { keysCommand } from "./keys.js";
+import { imagesCommand } from "./images.js";
 
 export interface GlobalArgs {
   endpoint?: string;
@@ -70,6 +71,8 @@ export async function cli(args: string[]): Promise<number> {
       return statsCommand(positional, globals);
     case "info":
       return infoCommand(positional, globals);
+    case "images":
+      return imagesCommand(positional, globals, flags);
     case "capacity":
       return capacityCommand(positional, globals);
     case "egress":
@@ -187,6 +190,10 @@ Commands:
 
   hotcell info
     Show the daemon's driver, providers, auth, and cost configuration.
+
+  hotcell images
+    List recommended base images (and what each ships) for --image. Any public
+    image works; --json for machine-readable output.
 
   hotcell capacity
     Show host memory budget, what's committed, and how many more sandboxes fit.

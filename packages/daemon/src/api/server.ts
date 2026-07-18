@@ -43,6 +43,8 @@ interface Deps {
   backups: BackupRegistry;
   history?: MetricsHistory;
   capacity?: Capacity;
+  /** Re-read provider keys (file/keychain/env) and hot-swap the egress gateway. */
+  reloadKeys?: () => { providers: number };
 }
 
 /**
@@ -552,6 +554,12 @@ async function handle(
   if (method === "GET" && path === "/capacity") {
     if (!deps.capacity) return sendJson(res, 200, { enforced: false });
     return sendJson(res, 200, deps.capacity.snapshot());
+  }
+
+  // Hot-reload provider keys after `hotcell keys add/rm` — no daemon restart.
+  if (method === "POST" && path === "/reload-keys") {
+    const r = deps.reloadKeys?.() ?? { providers: 0 };
+    return sendJson(res, 200, { ok: true, ...r });
   }
 
   // Recent finished spans, for debugging and the trace view. Newest first.

@@ -19,6 +19,8 @@ import { capacityCommand } from "./capacity.js";
 import { egressCommand } from "./egress.js";
 import { terminalCommand } from "./terminal.js";
 import { tuiCommand } from "./tui.js";
+import { startEngine, stopEngine, engineStatus } from "./engine.js";
+import { keysCommand } from "./keys.js";
 
 export interface GlobalArgs {
   endpoint?: string;
@@ -72,13 +74,23 @@ export async function cli(args: string[]): Promise<number> {
     case "files":
       return filesCommand(positional, globals, flags);
     case "start":
-      // Overload: `hotcell start <id> "<cmd>"` launches a process; `hotcell start <id>`
-      // (no command) resumes a stopped sandbox.
+      // Arity overload: no args starts the background engine (daemon); `hotcell
+      // start <id>` resumes a stopped sandbox; `hotcell start <id> "<cmd>"` launches
+      // a process inside it.
+      if (positional.length === 0) return startEngine(globals, flags);
       return positional.length >= 2
         ? startCommand(positional, globals, flags)
         : startSandboxCommand(positional, globals);
+    case "resume":
+      // Clear name for resuming a paused/stopped sandbox (pairs with `pause`).
+      return startSandboxCommand(positional, globals);
+    case "status":
+      return engineStatus(globals);
+    case "keys":
+      return keysCommand(positional, globals, flags);
     case "stop":
-      return stopCommand(positional, globals);
+      // No args stops the engine; `hotcell stop <id>` stops a sandbox.
+      return positional.length === 0 ? stopEngine(globals) : stopCommand(positional, globals);
     case "pause":
       return pauseCommand(positional, globals);
     case "backup":
@@ -113,6 +125,11 @@ function printHelp(): void {
 
 Usage: hotcell <command> [options]
 
+Engine (the background daemon that runs your sandboxes):
+  hotcell start [--foreground]   Start it in the background; returns your terminal.
+  hotcell status                 Is it running? On what port? How much headroom?
+  hotcell stop                   Stop it. (Logs: ~/.hotcell/daemon.log)
+
 Commands:
   hotcell run "<command>" [--image <image>] [--keep] [--sleep-after <ms>] [--egress]
          [--repo <git-url>] [--ref <branch>] [--setup "cmd"]
@@ -130,6 +147,11 @@ Commands:
     --repo clones a git repo into /workspace at create (great for agents).
     --setup runs a shell command once after the container starts (best-effort;
     chain with && for multiple steps, e.g. --setup "npm i x && pip install y").
+
+  hotcell keys add <provider> [--value <key>]   ·   hotcell keys ls   ·   hotcell keys rm <provider>
+    Manage the provider API keys the daemon uses (openrouter, openai, anthropic,
+    google). Stored on the host (macOS keychain, else chmod-600 ~/.hotcell/keys.json)
+    — never inside a sandbox. Human: prompts for the secret (hidden). Agent: --value/--stdin.
 
   hotcell tui   (alias: hotcell top)
     Full-screen fleet monitor + control panel. Arrow-key nav, live CPU/mem/cost,

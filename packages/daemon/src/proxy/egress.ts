@@ -129,7 +129,10 @@ interface ResolvedDeps extends Deps {
   providerHosts: Set<string>;
 }
 
-export function createEgressProxy(deps: Deps): Server {
+/** The egress proxy plus a hot-reload hook for provider keys (see `hotcell keys`). */
+export type EgressServer = Server & { reloadProviders: (p: Record<string, ResolvedProvider>) => void };
+
+export function createEgressProxy(deps: Deps): EgressServer {
   const resolved: ResolvedDeps = {
     ...deps,
     limiter: deps.limiter ?? new RateLimiter(),
@@ -153,7 +156,14 @@ export function createEgressProxy(deps: Deps): Server {
       socket.destroy();
     });
   });
-  return server;
+  // Live-swap provider keys (the handlers read `resolved` by reference), so
+  // `hotcell keys add/rm` applies without restarting the daemon.
+  const egress = server as EgressServer;
+  egress.reloadProviders = (providers) => {
+    resolved.providers = providers;
+    resolved.providerHosts = computeProviderHosts(providers);
+  };
+  return egress;
 }
 
 /**

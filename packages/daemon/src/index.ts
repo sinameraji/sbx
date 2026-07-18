@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { get as httpGet } from "node:http";
 import { BackupRegistry } from "./backups.js";
 import { Capacity } from "./capacity.js";
 import { loadConfig } from "./config.js";
@@ -10,13 +11,42 @@ import { configureTracing, stopTracing } from "./tracing.js";
 import { SandboxStore } from "./store.js";
 import { createApiServer } from "./api/server.js";
 import { createProxyServer } from "./proxy/server.js";
-import { buildProviders, createEgressProxy } from "./proxy/egress.js";
+import { buildProviders, createEgressProxy, type EgressServer } from "./proxy/egress.js";
+import { loadProviderKeyMap } from "./keystore.js";
 import { loadModelPrices } from "./pricing.js";
 import { ensureEgressFirewall } from "./net/firewall.js";
 
 /** A loopback bind host (unreachable from sandboxes on native-Linux dockerd). */
 function isLoopback(host: string): boolean {
   return host === "127.0.0.1" || host === "localhost" || host === "::1";
+}
+
+/**
+ * Turn an EADDRINUSE on the API port into a clear, actionable message instead of
+ * an unhandled 'error' crash — probing the port first so we can tell "a hotcell
+ * daemon is already running" apart from "some other process has the port".
+ */
+function reportPortInUse(host: string, port: number): void {
+  const done = (lines: string[]) => {
+    for (const l of lines) log.error(l);
+    process.exit(1);
+  };
+  const req = httpGet({ host, port, path: "/healthz", timeout: 800 }, (res) => {
+    let body = "";
+    res.on("data", (c) => (body += c));
+    res.on("end", () => {
+      let hotcell = false;
+      try { hotcell = JSON.parse(body)?.ok === true; } catch {}
+      done(hotcell
+        ? [`a hotcell daemon is already running on ${host}:${port}`,
+           `  → use it as-is (hotcell ls), or start a second one on another port: HOTCELL_PORT=<n> hotcelld`]
+        : [`port ${port} is already in use by another process`,
+           `  → free it, or run hotcell elsewhere: HOTCELL_PORT=<n> hotcelld`]);
+    });
+  });
+  req.on("timeout", () => req.destroy());
+  req.on("error", () => done([`port ${port} is already in use`,
+    `  → free it, or run hotcell elsewhere: HOTCELL_PORT=<n> hotcelld`]));
 }
 
 async function main(): Promise<void> {
@@ -57,7 +87,24 @@ async function main(): Promise<void> {
     });
   }
 
-  const server = createApiServer({ config, driver, store, backups, history, capacity });
+  // Provider-key hot-reload: `hotcell keys add/rm` POSTs /reload-keys, which
+  // re-reads keys (file/keychain/env) and live-swaps the egress gateway.
+  // `egress` is assigned below; the closure reads it at call time.
+  let egress: EgressServer | undefined;
+  const reloadKeys = () => {
+    config.providerKeys = loadProviderKeyMap();
+    const rebuilt = buildProviders(config);
+    egress?.reloadProviders(rebuilt);
+    log.info("provider keys reloaded", { providers: Object.keys(rebuilt).length });
+    return { providers: Object.keys(rebuilt).length };
+  };
+
+  const server = createApiServer({ config, driver, store, backups, history, capacity, reloadKeys });
+  server.on("error", (err: NodeJS.ErrnoException) => {
+    if (err.code === "EADDRINUSE") return reportPortInUse(config.host, config.port);
+    log.error("daemon failed to start", { error: String(err) });
+    process.exit(1);
+  });
   server.listen(config.port, config.host, () => {
     log.info("daemon listening", {
       url: `http://${config.host}:${config.port}`,
@@ -69,6 +116,11 @@ async function main(): Promise<void> {
   });
 
   const proxy = createProxyServer({ config, driver, store, capacity });
+  proxy.on("error", (err: NodeJS.ErrnoException) => {
+    if (err.code === "EADDRINUSE") return reportPortInUse(config.proxyHost, config.proxyPort);
+    log.error("preview proxy failed to start", { error: String(err) });
+    process.exit(1);
+  });
   proxy.listen(config.proxyPort, config.proxyHost, () => {
     log.info("preview proxy listening", {
       url: `http://${config.proxyHost}:${config.proxyPort}`,
@@ -109,8 +161,13 @@ async function main(): Promise<void> {
       port: config.egressPort,
     });
   }
-  const egress =
+  egress =
     config.egressPort > 0 ? createEgressProxy({ config, store, providers, prices }) : undefined;
+  egress?.on("error", (err: NodeJS.ErrnoException) => {
+    if (err.code === "EADDRINUSE") return reportPortInUse(egressBindHost, config.egressPort);
+    log.error("egress proxy failed to start", { error: String(err) });
+    process.exit(1);
+  });
   egress?.listen(config.egressPort, egressBindHost, () => {
     log.info("egress proxy listening", {
       url: `http://${egressBindHost}:${config.egressPort}`,

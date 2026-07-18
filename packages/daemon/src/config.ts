@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { loadProviderKeyMap } from "./keystore.js";
 
 /**
  * Read a daemon env var with legacy fallback: `HOTCELL_<name>` wins, then the
@@ -330,19 +331,13 @@ export function loadConfig(): Config {
   };
 }
 
-/** Collect provider keys from `HOTCELL_PROVIDER_KEY_<NAME>` env vars (name
- *  lowercased); legacy `SBX_PROVIDER_KEY_<NAME>` still read, HOTCELL_ wins. */
+/**
+ * Collect provider keys from every backend (file `~/.hotcell/keys.json`, the
+ * macOS keychain, and `HOTCELL_PROVIDER_KEY_<NAME>` / legacy `SBX_` env vars —
+ * env wins). See `keystore.ts`. Re-called on hot-reload after `hotcell keys …`.
+ */
 function loadProviderKeys(): Record<string, string> {
-  const keys: Record<string, string> = {};
-  for (const prefix of ["SBX_PROVIDER_KEY_", "HOTCELL_PROVIDER_KEY_"]) {
-    // legacy first so HOTCELL_ overwrites on conflict
-    for (const [name, value] of Object.entries(process.env)) {
-      if (name.startsWith(prefix) && value) {
-        keys[name.slice(prefix.length).toLowerCase()] = value;
-      }
-    }
-  }
-  return keys;
+  return loadProviderKeyMap();
 }
 
 /**

@@ -102,7 +102,7 @@ export async function createCommand(
  * hint truthful about why a fresh sandbox feels bare (e.g. `-slim` = no git/node).
  */
 function describeImage(image: string): string {
-  if (/hotcell\/base/.test(image)) return "python + node + git + build tools";
+  if (/hotcell[/-]base/.test(image)) return "python + node + git + build tools";
   if (/python:.*slim/.test(image)) return "python3 + pip — no git, node, or build tools";
   if (/(^|\/)python:/.test(image)) return "python3 + pip + git + build tools (no node)";
   if (/(^|\/)node:/.test(image)) return "node + npm + git (no python)";

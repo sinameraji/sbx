@@ -433,7 +433,7 @@ export async function tuiCommand(
       new Promise<string>((res) => rl.question(`${q} ${c.dim}[${def}]${c.reset} `, (a) => res(a.trim() || def)));
     try {
       out.write(`${c.bold}${c.cyan}create sandbox${c.reset} ${c.dim}(blank = default)${c.reset}\r\n`);
-      const image = await ask("image", "python:3.11-slim-bookworm");
+      const image = await ask("image", "ghcr.io/sinameraji/hotcell-base:latest");
       const driver = await ask("driver (container|firecracker|applevz)", "container");
       const memRaw = await ask("memory MB", "");
       rl.close();

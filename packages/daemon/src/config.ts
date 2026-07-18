@@ -266,7 +266,7 @@ export function loadConfig(): Config {
   return {
     host: env("HOST") ?? "127.0.0.1",
     port: Number(env("PORT") ?? 4750),
-    defaultImage: env("IMAGE") ?? "python:3.11-slim-bookworm",
+    defaultImage: env("IMAGE") ?? "ghcr.io/sinameraji/hotcell-base:latest",
     driver: env("DRIVER") ?? "container",
     defaultMemoryMb: Number(env("DEFAULT_MEMORY_MB") ?? 0),
     defaultCpus: Number(env("DEFAULT_CPUS") ?? 0),

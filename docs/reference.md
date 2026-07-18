@@ -54,7 +54,7 @@ Set these before `hotcell start` (they're inherited by the engine) or on `hotcel
 |---|---|---|
 | `HOTCELL_HOST` / `HOTCELL_PORT` | `127.0.0.1` / `4750` | REST API bind |
 | `HOTCELL_DRIVER` | `container` | Default runtime driver — all three ship live: `container` (Docker, Linux + macOS), `firecracker` (Linux + KVM), `applevz` (macOS). Also selectable **per sandbox** at create time (`driver: …`), so one engine mixes containers and microVMs |
-| `HOTCELL_IMAGE` | `python:3.11-slim-bookworm` | Default sandbox image |
+| `HOTCELL_IMAGE` | `ghcr.io/sinameraji/hotcell-base` | Default sandbox image (python + node + git + build tools) |
 | `HOTCELL_DEFAULT_MEMORY_MB` / `HOTCELL_DEFAULT_CPUS` / `HOTCELL_DEFAULT_PIDS` | `0` (unlimited) | Default per-sandbox hard caps (RAM MiB / fractional cores / process count) |
 | `HOTCELL_ADMISSION` | `enforce` | Reject `create` when the host memory budget is exhausted (`off` to only report) |
 | `HOTCELL_HOST_MEMORY_MB` / `HOTCELL_HOST_CPUS` | auto-detect | Host capacity budget for admission (defaults to the Docker host's MemTotal/NCPU) |

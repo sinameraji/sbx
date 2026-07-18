@@ -4,7 +4,7 @@ import type { GlobalArgs } from "./cli.js";
  * hotcell images — a curated, honest list of base images to run sandboxes on.
  *
  * We reuse trusted public images for almost everything and own exactly one thin
- * image (hotcell/base) for the python+node combo no official image ships. Any
+ * image (ghcr.io/sinameraji/hotcell-base, the default) for the python+node combo. Any
  * public image works via `--image`; this is just the "what are my options?"
  * answer that was otherwise invisible.
  *
@@ -18,14 +18,13 @@ interface BaseImage {
 }
 
 const CURATED: BaseImage[] = [
+  {
+    image: "ghcr.io/sinameraji/hotcell-base",
+    has: "python + node + git + build tools",
+    use: "the default — mixed stacks & coding agents",
+  },
   { image: "node:20", has: "node + npm + git", use: "JS/TS + most agent CLIs (npm i -g …)" },
   { image: "python:3.11", has: "python3 + pip + git + build tools", use: "Python projects (non-slim = has git)" },
-  {
-    image: "hotcell/base",
-    has: "python + node + git + tools",
-    use: "mixed stacks / coding agents",
-    note: "local build for now — `docker build -t hotcell/base images/base` (GHCR publish pending)",
-  },
   { image: "mcr.microsoft.com/devcontainers/base:ubuntu", has: "ubuntu + git + tools (no runtimes)", use: "bring your own languages" },
   { image: "python:3.11-slim", has: "python3 + pip only", use: "minimal / CI (no git, no node)" },
   { image: "ubuntu:24.04", has: "bare OS", use: "full control (apt install what you need)" },

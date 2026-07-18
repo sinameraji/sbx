@@ -9,8 +9,19 @@ npm install -g hotcell        # CLI (hotcell + hc), daemon (hotcelld) + TS SDK, 
 pip install hotcell           # Python SDK (optional)
 ```
 
-<img width="1512" height="862" alt="Screenshot 2026-06-18 at 11 42 07" src="https://github.com/user-attachments/assets/621b645e-6305-4287-a7ed-300a5a927df1" />
-<img width="726" height="643" alt="Screenshot 2026-06-18 at 11 42 42" src="https://github.com/user-attachments/assets/a0612cc2-8a35-4af7-9633-a09b1262edf3" />
+<p align="center">
+  <img src="docs/media/tui-fleet.png" width="820" alt="hotcell TUI — a live fleet monitor: per-sandbox CPU, memory, uptime and cost, with attach / pause / resume / destroy controls" />
+</p>
+<p align="center">
+  <em>Your whole fleet at a glance — <code>hotcell tui</code>. Live CPU/mem/cost per sandbox; ⏎ to attach a shell, <code>p</code>/<code>r</code>/<code>d</code> to pause/resume/destroy.</em>
+</p>
+
+<p align="center">
+  <img src="docs/media/key-vs-token.png" width="820" alt="On the host, hotcell keys ls shows your real provider key; inside the sandbox, printenv OPENAI_API_KEY returns only a short-lived gateway token that dies with the sandbox" />
+</p>
+<p align="center">
+  <em>The provider key stays on the host. Inside the sandbox the agent only ever sees a short-lived gateway token — it dies with the sandbox, and can't be spent past its cap.</em>
+</p>
 ## The problem it solves for agents
 
 You want to run untrusted agent code at scale, and two things bite immediately:

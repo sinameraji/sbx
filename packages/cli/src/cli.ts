@@ -29,7 +29,18 @@ export interface GlobalArgs {
 }
 
 export async function cli(args: string[]): Promise<number> {
-  if (args.length === 0 || args[0] === "--help" || args[0] === "-h") {
+  if (args[0] === "--help" || args[0] === "-h") {
+    printHelp();
+    return 0;
+  }
+
+  // Bare `hotcell` (no command) opens the interactive UI when attached to a
+  // terminal; falls back to help for pipes/scripts so automation isn't surprised.
+  if (args.length === 0) {
+    const globals: GlobalArgs = {
+      apiKey: process.env.HOTCELL_API_KEY ?? process.env.SBX_API_KEY,
+    };
+    if (process.stdout.isTTY && process.stdin.isTTY) return tuiCommand([], globals);
     printHelp();
     return 0;
   }

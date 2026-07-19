@@ -35,7 +35,7 @@ hotcell terminal <id>      # inside: cd app && opencode
 hotcell rm --all           # done — five cells gone, your repo untouched
 ```
 
-Your OpenRouter and GitHub keys stay on the host: with `--egress`, a cell only ever holds a short-lived per-cell token, and git/PRs/LLM calls go through hotcell's gateway. Want that fully wired (OpenCode config + keyless `pr` helper) in one go? [`examples/agents.sh`](examples/agents.sh).
+Your OpenRouter and GitHub keys stay on the host: with `--egress`, a cell only ever holds a short-lived per-cell token — LLM calls go through hotcell's gateway, and each cell's git `origin` is wired through it automatically, so **`git push` works keylessly out of the box**. (OpenCode-specific wiring + a `pr` helper: [`examples/agents.sh`](examples/agents.sh).)
 
 <p align="center">
   <img src="docs/media/key-vs-token.png" width="820" alt="On the host, hotcell keys ls shows the real key; inside the sandbox, printenv shows only a short-lived token" />

@@ -913,6 +913,26 @@ async function createSandbox(
     const advertiseHost = driverName !== "container" ? "127.0.0.1" : undefined;
     if (wantEgress) env = { ...env, ...egressEnv(config, egressToken, advertiseHost) };
     if (config.egressEnforce) env = { ...env, ...proxyEnv(config, egressToken, advertiseHost) };
+
+    // Keyless git out of the box: egress wired + a GitHub repo + a `github`
+    // provider key on the host → point the clone's origin at the gateway's
+    // github-git route, authed by this sandbox's own egress token. `git push`
+    // (and fetch) then work with no GitHub credential inside the sandbox; the
+    // gateway swaps the token for the real one. Harness-agnostic — this is the
+    // generic half of what examples/agents.sh used to wire by hand.
+    if (repo && config.egressPort > 0 && config.providerKeys.github) {
+      const slug = repo.match(/^(?:https?:\/\/|git@)github\.com[:/]([^/]+\/[^/]+?)(?:\.git)?\/?$/)?.[1];
+      if (slug) {
+        const repoName = repo.replace(/\.git$/, "").replace(/\/+$/, "").split("/").pop() || "repo";
+        const gwHost = advertiseHost ?? config.egressAdvertiseHost;
+        const remote = `http://x-access-token:${egressToken}@${gwHost}:${config.egressPort}/github-git/${slug}.git`;
+        setupSteps = [
+          `git -C /workspace/${repoName} remote set-url origin ${shellEscape(remote)}`,
+          ...(setupSteps ?? []),
+        ];
+        log.info("git origin wired through the egress gateway", { sandbox: id, repo: slug });
+      }
+    }
   }
 
   try {

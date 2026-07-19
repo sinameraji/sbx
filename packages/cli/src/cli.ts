@@ -108,7 +108,7 @@ export async function cli(args: string[]): Promise<number> {
       return tuiCommand(positional, globals);
     case "rm":
     case "remove":
-      return removeCommand(positional, globals);
+      return removeCommand(positional, globals, flags);
     case "files":
       return filesCommand(positional, globals, flags);
     case "start":
@@ -264,8 +264,8 @@ Commands:
   hotcell run-code <id> "<code>" [--lang python|javascript]
     Run a code snippet in the sandbox's interpreter and print its output.
 
-  hotcell rm <id> [--endpoint <url>]
-    Destroy a sandbox, including its persistent workspace volume.
+  hotcell rm <id...> | --all
+    Destroy one, several, or every sandbox (incl. persistent workspace volumes).
 
   hotcell files <subcommand> [args] [--endpoint <url>]
     Manage files inside a sandbox. Run \`sb files\` for subcommand help.

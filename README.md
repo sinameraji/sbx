@@ -1,6 +1,6 @@
 # hotcell
 
-**Sandboxes for AI agents, on your own hardware.** Spin up many secure, persistent, observable sandboxes for coding agents (Claude Code, Codex, OpenCode, …) on *your own* hardware — a Mac, an EC2/GCE VM, or bare-metal Linux. The provider API key never enters the sandbox, and you can run as many as your hardware allows.
+**Sandboxes for AI agents, on your own hardware.** Spin up many persistent, observable sandboxes for coding agents (Claude Code, Codex, OpenCode, …) on *your own* hardware — a Mac, an EC2/GCE VM, or bare-metal Linux. The provider API key never enters the sandbox, and you can run as many as your hardware allows.
 
 🌐 **[hotcell.sh](https://hotcell.sh)** · Apache-2.0 · self-hosted · one engine
 
@@ -37,7 +37,7 @@ Prefer one-shot? **`hotcell run`** creates a sandbox, runs a command, streams th
 
 ```bash
 hotcell run --setup "pip install ruff" "ruff --version"
-hotcell run --egress "python3 agent.py"   # LLM access wired in — no provider key inside the sandbox
+hotcell run --egress "printenv OPENROUTER_BASE_URL"   # egress wired — your code reaches the model via this gateway, no key inside
 ```
 
 Bare **`hotcell`** (no arguments) opens the interactive fleet monitor. Every command is also a REST call, so AI apps can drive the same surface programmatically.
@@ -58,7 +58,7 @@ Full command + flag reference: **[docs/reference.md](docs/reference.md)**.
 
 ## Why hotcell
 
-- **The key never enters the sandbox.** You give the engine your provider keys; each sandbox gets a short-lived, per-sandbox **token** and reaches its model through a gateway that swaps the token for the real key on the way out — metered, spend-capped, revocable. A prompt injection or leaked log walks away with a worthless token, not your account. → [Egress control plane](docs/egress.md)
+- **The key never enters the sandbox.** You give the engine your provider keys; each sandbox gets a short-lived, per-sandbox **token** and reaches its model through a gateway that swaps the token for the real key on the way out — metered, spend-capped, revocable. A prompt injection or leaked log walks away with a worthless token, not your account. Lock egress down further to just the gateway + an allowlist — **kernel-enforced on microVMs (no NIC) and Linux containers; advisory on the microVM-NIC and macOS-Docker paths**. → [Egress control plane & enforcement tiers](docs/egress.md#default-deny-egress-linux)
 - **Run as many as your hardware allows.** One shared engine, near-zero per-sandbox overhead, and admission control that refuses to over-subscribe instead of OOM-ing the box.
 - **Your hardware, no lock-in.** Container driver everywhere (Docker), plus microVM drivers for VM-grade isolation — Firecracker on Linux+KVM, Apple VZ on macOS — behind one interface. Apache-2.0, predictable cost.
 
@@ -66,7 +66,7 @@ Full command + flag reference: **[docs/reference.md](docs/reference.md)**.
 
 - **[Guide](docs/guide.md)** — preinstalling packages, cloning repos, running agents (OpenCode / Codex / Claude Code / Mastra), the full feature set, and the TypeScript + Python SDKs.
 - **[Egress control plane](docs/egress.md)** — keys out of the sandbox, per-token policy, spend caps, default-deny egress, custom providers.
-- **[CLI + configuration reference](docs/reference.md)** — every command, flag, and daemon env var.
+- **[CLI + configuration reference](docs/reference.md)** — every command, flag, and engine env var.
 - **[Self-hosting on Linux](docs/self-hosting.md)** — GCP / AWS setup, egress on Linux, and the security model.
 - **[Architecture & roadmap](docs/plan.md)** — the full product spec and phased plan (and `KIMI.md` for contributor/agent context).
 
@@ -74,7 +74,7 @@ Full command + flag reference: **[docs/reference.md](docs/reference.md)**.
 
 | Package | What |
 |---|---|
-| `packages/daemon` (`@hotcell/daemon`, bin `hotcelld`) | The control-plane engine |
+| `packages/daemon` (`@hotcell/daemon`, bin `hotcelld`) | The engine — the background process that runs sandboxes. `hotcell start` launches it for you; `hotcelld` is the same thing run directly (foreground). |
 | `packages/sdk` (`@hotcell/sdk`) | TypeScript client SDK (zero runtime deps) |
 | `packages/cli` (`hotcell`, bins `hotcell` / `hc`) | Command-line interface + one-install meta-package |
 | `packages/mastra` (`@hotcell/mastra`) | Mastra `Workspace` sandbox provider |

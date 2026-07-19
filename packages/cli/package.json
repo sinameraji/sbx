@@ -16,7 +16,8 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "dev": "node --import tsx src/index.ts"
+    "dev": "node --import tsx src/index.ts",
+    "prepack": "cp ../../README.md ./README.md"
   },
   "dependencies": {
     "@hotcell/sdk": "0.1.8",

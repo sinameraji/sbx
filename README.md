@@ -61,13 +61,13 @@ Every command is also a REST call, so AI apps drive the same surface programmati
 | `hotcell run "<cmd>" [--setup "…"] [--repo URL] [--egress]` | one-shot: create → run → destroy |
 | `hotcell terminal <id>` | **open an interactive shell inside a sandbox** |
 | `hotcell tui` (alias `top`) | full-screen fleet monitor — ⏎ attach, `p`/`r`/`d` pause/resume/destroy, `c` create |
-| `hotcell ls` · `stats <id>` · `stop <id>` · `rm <id>` | list · live CPU/mem/cost · stop · destroy |
+| `hotcell ls` · `stats <id>` · `stop <id>` · `rm <id...>` / `rm --all` | list · live CPU/mem/cost · stop · destroy one, several, or all |
 
 Full command + flag reference: **[docs/reference.md](docs/reference.md)**.
 
 ## Why hotcell
 
-- **The key never enters the sandbox.** You give the daemon your provider keys; each sandbox gets a short-lived, per-sandbox **token** and reaches its model through a gateway that swaps the token for the real key on the way out — metered, spend-capped, revocable. A prompt injection or leaked log walks away with a worthless token, not your account. Lock egress down further to just the gateway + an allowlist — **kernel-enforced on microVMs (no NIC) and Linux containers; advisory on the microVM-NIC and macOS-Docker paths**. → [Egress control plane & enforcement tiers](docs/egress.md#default-deny-egress-linux)
+- **The key never enters the sandbox.** You give the daemon your provider keys; each sandbox gets a short-lived, per-sandbox **token** and reaches its model through a gateway that swaps the token for the real key on the way out — metered, spend-capped, revocable. A prompt injection or leaked log walks away with a worthless token, not your account. **GitHub works the same way**: register your token once (`hotcell keys add github --value "$(gh auth token)"`) and sandboxes clone, push, and open PRs through the gateway — keylessly. Lock egress down further to just the gateway + an allowlist — **kernel-enforced on microVMs (no NIC) and Linux containers; advisory on the microVM-NIC and macOS-Docker paths**. → [Egress control plane & enforcement tiers](docs/egress.md#default-deny-egress-linux)
 - **Run as many as your hardware allows.** One shared daemon, near-zero per-sandbox overhead, and admission control that refuses to over-subscribe instead of OOM-ing the box.
 - **Your hardware, no lock-in.** Container driver everywhere (Docker), plus microVM drivers for VM-grade isolation — Firecracker on Linux+KVM, Apple VZ on macOS — behind one interface. Apache-2.0, predictable cost.
 

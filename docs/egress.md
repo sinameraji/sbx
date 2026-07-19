@@ -53,6 +53,18 @@ export HOTCELL_PROVIDER_KEY_CFOPENAI=sk-...
 # sandboxes now reach it at http://<egress>/cfopenai/...
 ```
 
+## GitHub through the gateway (keyless git + PRs)
+
+Your GitHub token gets the same treatment as an LLM key — it stays on the host, and sandboxes reach GitHub with only their per-sandbox egress token:
+
+```bash
+hotcell keys add github --value "$(gh auth token)"   # once, on the host — never typed, never inside
+```
+
+- **API** (`gh`-style calls, PRs): `$GITHUB_BASE_URL/…` with `Authorization: Bearer $GITHUB_API_KEY` — the gateway swaps in your real token at api.github.com.
+- **git clone / fetch / push**: point the remote at the gateway's `github-git` route — `http://x-access-token:$GITHUB_API_KEY@<gateway>/github-git/<owner>/<repo>.git` — and git works keylessly end to end.
+- [`examples/agents.sh`](../examples/agents.sh) wires all of this for you: N sandboxes on one repo, OpenCode installed, git remote through the gateway, and a `pr` helper that pushes the branch + opens a PR without a token in the sandbox.
+
 ## Default-deny egress (Linux)
 
 With `HOTCELL_EGRESS_ENFORCE=true`, a sandbox can reach *only* the gateway and a DNS resolver — everything else is dropped at the host firewall (`DOCKER-USER` iptables on a dedicated bridge). The gateway forwards non-LLM traffic (pip / npm / git / apt) to an **allowlist of hosts** — package registries + source forges by default, filtered by domain/SNI not IP — and denies the rest, logging every denial. So a prompt injection has nowhere to phone home, and `git push`-style exfil to a random host is blocked. Direct calls to LLM providers are denied too, so traffic can't skip key injection.

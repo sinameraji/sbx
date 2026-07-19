@@ -21,17 +21,21 @@ hotcell run --setup "pip install ruff" "ruff check ."             # one-shot: cr
 hotcell rm --all                                                  # everything gone; your repo untouched
 ```
 
-## Five OpenCode agents on one repo
+## Five agents on one repo
 
 ```bash
-curl -fsSLO https://raw.githubusercontent.com/sinameraji/hotcell/main/examples/agents.sh
-bash agents.sh https://github.com/you/app 5
-#   #1  hotcell terminal a1b2c3d4e5f6   →  cd app && opencode
-#   …five lines — open a terminal for each, prompt each agent at a different feature
-bash agents.sh --rm        # when the PRs are open
+hotcell create -n 5 --name feat --branch --egress \
+    --repo https://github.com/you/app --setup "npm i -g opencode-ai"
 ```
 
-Each cell gets the repo, its own branch, and OpenCode wired up. Inside a cell, `pr "<title>"` pushes the branch and opens the pull request — git, the GitHub API, and the LLM all go through hotcell's gateway, so your OpenRouter and GitHub keys stay on the host. A sandbox only ever holds a per-cell token: leak it, and it's worthless.
+Five isolated cells, each with the repo cloned, its own branch (`feat-1`…`feat-5`), and your agent preinstalled. Open a terminal per cell and put each agent on a different feature:
+
+```bash
+hotcell terminal <id>      # inside: cd app && opencode
+hotcell rm --all           # done — five cells gone, your repo untouched
+```
+
+Your OpenRouter and GitHub keys stay on the host: with `--egress`, a cell only ever holds a short-lived per-cell token, and git/PRs/LLM calls go through hotcell's gateway. Want that fully wired (OpenCode config + keyless `pr` helper) in one go? [`examples/agents.sh`](examples/agents.sh).
 
 <p align="center">
   <img src="docs/media/key-vs-token.png" width="820" alt="On the host, hotcell keys ls shows the real key; inside the sandbox, printenv shows only a short-lived token" />

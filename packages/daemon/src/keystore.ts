@@ -20,7 +20,7 @@ const HOME = process.env.HOTCELL_HOME || join(homedir(), ".hotcell");
 const KEYFILE = join(HOME, "keys.json");
 const SERVICE = "hotcell";
 /** Providers we probe the keychain for (the keychain has no "list by service"). */
-export const KNOWN_PROVIDERS = ["openrouter", "openai", "anthropic", "google"];
+export const KNOWN_PROVIDERS = ["openrouter", "openai", "anthropic", "google", "github"];
 
 export type KeySource = "keychain" | "file" | "env";
 

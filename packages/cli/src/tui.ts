@@ -271,14 +271,17 @@ export async function tuiCommand(
 
   function renderFooter(): void {
     const w = width();
+    // The transient status/error gets its OWN line above the separator, so the
+    // key legend below is never overwritten by a "paused …" note. Blank when idle,
+    // which keeps the footer a stable height.
+    const note = lastError ? `${c.red}${lastError}${c.reset}` : status ? `${c.green}${status}${c.reset}` : "";
+    push(note ? ` ${note}` : "");
     push(` ${c.dim}${"─".repeat(Math.max(0, w - 2))}${c.reset}`);
     if (mode === "confirm") {
       push(` ${c.yellow}${confirmPrompt}${c.reset} ${c.dim}[y/n]${c.reset}`);
       return;
     }
-    const keys = `${c.dim}↑/↓${c.reset} move  ${c.dim}←/→${c.reset} view  ${c.bold}⏎${c.reset} attach  ${c.bold}p${c.reset} pause  ${c.bold}r${c.reset} resume  ${c.bold}d${c.reset} destroy  ${c.bold}c${c.reset} create  ${c.bold}?${c.reset} help  ${c.bold}q${c.reset} quit`;
-    const msg = lastError ? `${c.red}${lastError}${c.reset}` : status ? `${c.green}${status}${c.reset}` : keys;
-    push(` ${msg}`);
+    push(` ${c.dim}↑/↓${c.reset} move  ${c.dim}←/→${c.reset} view  ${c.bold}⏎${c.reset} attach  ${c.bold}p${c.reset} pause  ${c.bold}r${c.reset} resume  ${c.bold}d${c.reset} destroy  ${c.bold}c${c.reset} create  ${c.bold}?${c.reset} help  ${c.bold}q${c.reset} quit`);
   }
 
   function renderHelp(): void {
@@ -316,7 +319,7 @@ export async function tuiCommand(
       renderHeader(); // 2 lines
       // reserve: header(2) + list-head(1) + detail(~8) + footer(2)
       const detailLines = 2 + 6;
-      const footerLines = 2;
+      const footerLines = 3; // status/note line + separator + key legend
       const bodyRows = Math.max(3, h - 2 - detailLines - footerLines);
       renderList(bodyRows);
       // pad list area to a stable height

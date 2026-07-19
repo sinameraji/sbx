@@ -189,10 +189,14 @@ export async function tuiCommand(
 
   function renderList(bodyRows: number): void {
     const w = width();
-    // Column widths: dot(1) id(12) image(flex) cpu(7) mem(11) up(6) cost(10)
-    const idW = 12, cpuW = 7, memW = 11, upW = 6, costW = 10;
-    const imgW = Math.max(8, w - (3 + idW + 1 + cpuW + 1 + memW + 1 + upW + 1 + costW + 2));
-    const head = ` ${c.dim}  ${fit("ID", idW)} ${fit("IMAGE", imgW)} ${fit("CPU", cpuW)} ${fit("MEM", memW)} ${fit("UP", upW)} ${fit("COST", costW)}${c.reset}`;
+    // Column widths: dot(1) id(12) [name(14)] image(flex) cpu(7) mem(11) up(6) cost(10).
+    // NAME appears only when some sandbox is named (`create --name`) — five hex
+    // ids are indistinguishable; names are how a human tells agents apart.
+    const named = rows.some((r) => r.labels?.name);
+    const idW = 12, nameW = named ? 14 : 0, cpuW = 7, memW = 11, upW = 6, costW = 10;
+    const imgW = Math.max(8, w - (3 + idW + 1 + (named ? nameW + 1 : 0) + cpuW + 1 + memW + 1 + upW + 1 + costW + 2));
+    const nameHead = named ? `${fit("NAME", nameW)} ` : "";
+    const head = ` ${c.dim}  ${fit("ID", idW)} ${nameHead}${fit("IMAGE", imgW)} ${fit("CPU", cpuW)} ${fit("MEM", memW)} ${fit("UP", upW)} ${fit("COST", costW)}${c.reset}`;
     push(head);
 
     if (rows.length === 0) {
@@ -218,7 +222,8 @@ export async function tuiCommand(
         : (r.status === "paused" ? "paused" : r.status === "stopped" ? "stopped" : "—");
       const cost = m ? `$${m.cost.total.toFixed(4)}` : "—";
       const marker = sel ? `${c.bold}${c.cyan}▸${c.reset}` : " ";
-      const body = `${marker}${dot(r.status)} ${fit(shortId(r.id), idW)} ${fit(r.image, imgW)} ${fit(cpu, cpuW)} ${fit(mem, memW)} ${fit(uptime(r.createdAt), upW)} ${fit(cost, costW)}`;
+      const nameCell = named ? `${fit(r.labels?.name ?? "—", nameW)} ` : "";
+      const body = `${marker}${dot(r.status)} ${fit(shortId(r.id), idW)} ${nameCell}${fit(r.image, imgW)} ${fit(cpu, cpuW)} ${fit(mem, memW)} ${fit(uptime(r.createdAt), upW)} ${fit(cost, costW)}`;
       push(sel ? ` ${c.invert}${stripForInvert(body)}${c.reset}` : ` ${body}`);
     }
   }

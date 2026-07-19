@@ -185,7 +185,7 @@ Commands:
     --egress wires the sandbox to the LLM gateway (provider keys injected by the daemon).
     --memory/--cpus/--pids set hard resource caps (override the daemon defaults).
 
-  hotcell create [-i] [-n <count>] [--image I] [--driver container|firecracker|applevz] [--env K=V,…]
+  hotcell create [-i] [-n <count>] [--name <handle>] [--image I] [--driver container|firecracker|applevz] [--env K=V,…]
             [--sleep-after MS] [--egress] [--label K=V,…]
             [--repo <git-url>] [--ref <branch>] [--branch <name>] [--setup "cmd"]
             [--memory <MB>] [--cpus <n>] [--pids <n>]
@@ -193,7 +193,8 @@ Commands:
     --branch creates + checks out a new branch after cloning (bare --branch
     auto-names it) — one branch per sandbox = clean parallel PRs.
     -n 5 creates five identical cells in one command (one id per line);
-    -i opens the guided, interactive create instead of flags (TTY only).
+    --name gives a human handle (a NAME column in ls + the fleet; with -n it
+    suffixes: feat-1…feat-N); -i opens the guided create instead (TTY only).
     --driver picks the isolation tier per sandbox (microVMs need a VZ/KVM host).
     --repo clones a git repo into /workspace at create (great for agents).
     --setup runs a shell command once after the container starts (best-effort;

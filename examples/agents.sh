@@ -85,7 +85,7 @@ setupb64=$(base64 < "$work/setup" | tr -d '\n')
 echo "spinning up $COUNT sandbox(es) on $slug (repo + OpenCode + keyless GitHub) …"
 for i in $(seq 1 "$COUNT"); do
   (
-    id=$($HC create --egress --repo "$REPO" --label agents=1 2>/dev/null | head -1)
+    id=$($HC create --egress --repo "$REPO" --name "agent-$i" --label agents=1 2>/dev/null | head -1)
     [ -n "$id" ] || { echo "  #$i  create failed"; exit 1; }
     if $HC exec "$id" "printf '%s' '$setupb64' | base64 -d | bash" >/dev/null 2>&1; then
       echo "$id" >> "$IDS_FILE"

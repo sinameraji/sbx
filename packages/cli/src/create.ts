@@ -42,6 +42,10 @@ export async function createCommand(
     console.error(err instanceof Error ? err.message : String(err));
     return 1;
   }
+  // --name: a human handle, stored as the `name` label — shows as a column in
+  // `hotcell ls` and the fleet TUI (five hex ids are indistinguishable).
+  const name = typeof flags.name === "string" && flags.name ? flags.name : undefined;
+  if (name) labels = { ...(labels ?? {}), name };
 
   // -n / --count: create N identical cells in one command (each with its own
   // auto-named branch under `--branch`). stdout stays machine-clean: one id per
@@ -68,8 +72,13 @@ export async function createCommand(
     // A NAMED branch with -n would give every cell the same branch → colliding
     // pushes. Auto-suffix per cell (feat/x-1…N) and say so; bare --branch (auto)
     // already yields a unique name per sandbox daemon-side.
-    const optionsFor = (i: number) =>
-      branch && branch !== "auto" ? { ...options, branch: `${branch}-${i + 1}` } : options;
+    const optionsFor = (i: number) => {
+      let o = options;
+      if (branch && branch !== "auto") o = { ...o, branch: `${branch}-${i + 1}` };
+      // a shared --name is suffixed per cell too (feat → feat-1…feat-N)
+      if (name) o = { ...o, labels: { ...(o.labels ?? {}), name: `${name}-${i + 1}` } };
+      return o;
+    };
     const results = await Promise.allSettled(
       Array.from({ length: count }, (_, i) => client.getSandbox(undefined, optionsFor(i))),
     );
@@ -112,7 +121,7 @@ export async function createCommand(
       ].filter(Boolean);
       const desc = describeImage(si.image);
       const e = (s: string) => console.error(s);
-      e(`✓ created ${si.id}  ·  ${drv} · ${specParts.length ? specParts.join(" · ") : "unlimited"}`);
+      e(`✓ created ${si.id}${name ? `  (${name})` : ""}  ·  ${drv} · ${specParts.length ? specParts.join(" · ") : "unlimited"}`);
       e(`  image      ${si.image}${desc ? `   — ${desc}` : ""}`);
       e(`  workspace  /workspace${repo ? " (repo cloned)" : " (empty)"}`);
       if (branch) e(`  branch     ${branch === "auto" ? "new (auto-named)" : branch}`);

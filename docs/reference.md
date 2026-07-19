@@ -5,7 +5,7 @@
 ## CLI
 
 ```
-# engine (the background daemon that runs your sandboxes)
+# the daemon (the background process that runs your sandboxes)
 hotcell start [--foreground]                 # start it in the background; returns your terminal
 hotcell status                               # is it running? on what port? how much headroom?
 hotcell stop                                 # stop it (logs: ~/.hotcell/daemon.log)
@@ -44,16 +44,16 @@ hotcell egress <id> [--list] [--revoke TOKEN]
 Global: --endpoint <url> (HOTCELL_ENDPOINT) · --api-key <key> (HOTCELL_API_KEY)
 ```
 
-> `hotcell start` with no arguments starts the engine. `hotcell start <id>` resumes a stopped sandbox, and `hotcell start <id> "<cmd>"` launches a background process inside one — the arity disambiguates. `hotcell stop` with no arguments stops the engine; `hotcell stop <id>` stops a sandbox.
+> `hotcell start` with no arguments starts the daemon. `hotcell start <id>` resumes a stopped sandbox, and `hotcell start <id> "<cmd>"` launches a background process inside one — the arity disambiguates. `hotcell stop` with no arguments stops the daemon; `hotcell stop <id>` stops a sandbox.
 
-## Configuration (engine env)
+## Configuration (daemon env)
 
-Set these before `hotcell start` (they're inherited by the engine) or on `hotcelld` directly.
+Set these before `hotcell start` (they're inherited by the daemon) or on `hotcelld` directly.
 
 | Var | Default | What |
 |---|---|---|
 | `HOTCELL_HOST` / `HOTCELL_PORT` | `127.0.0.1` / `4750` | REST API bind |
-| `HOTCELL_DRIVER` | `container` | Default runtime driver — all three ship live: `container` (Docker, Linux + macOS), `firecracker` (Linux + KVM), `applevz` (macOS). Also selectable **per sandbox** at create time (`driver: …`), so one engine mixes containers and microVMs |
+| `HOTCELL_DRIVER` | `container` | Default runtime driver — all three ship live: `container` (Docker, Linux + macOS), `firecracker` (Linux + KVM), `applevz` (macOS). Also selectable **per sandbox** at create time (`driver: …`), so one daemon mixes containers and microVMs |
 | `HOTCELL_IMAGE` | `ghcr.io/sinameraji/hotcell-base` | Default sandbox image (python + node + git + build tools) |
 | `HOTCELL_DEFAULT_MEMORY_MB` / `HOTCELL_DEFAULT_CPUS` / `HOTCELL_DEFAULT_PIDS` | `0` (unlimited) | Default per-sandbox hard caps (RAM MiB / fractional cores / process count) |
 | `HOTCELL_ADMISSION` | `enforce` | Reject `create` when the host memory budget is exhausted (`off` to only report) |

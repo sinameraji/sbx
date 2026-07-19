@@ -90,7 +90,7 @@ export async function keysCommand(
     const source = storeKey(provider, value.trim());
     const applied = await reload(globals);
     console.log(`${green("✓")} stored ${green(provider)}   ${dim(`· ${source === "keychain" ? "macOS keychain" : "~/.hotcell/keys.json (chmod 600)"}`)}`);
-    console.log(applied ? dim("  applied live — the gateway can use it now") : dim("  (start the engine to use it: hotcell start)"));
+    console.log(applied ? dim("  applied live — the gateway can use it now") : dim("  (start the daemon to use it: hotcell start)"));
     return 0;
   }
 

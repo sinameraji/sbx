@@ -96,7 +96,7 @@ export async function cli(args: string[]): Promise<number> {
     case "files":
       return filesCommand(positional, globals, flags);
     case "start":
-      // Arity overload: no args starts the background engine (daemon); `hotcell
+      // Arity overload: no args starts the background daemon; `hotcell
       // start <id>` resumes a stopped sandbox; `hotcell start <id> "<cmd>"` launches
       // a process inside it.
       if (positional.length === 0) return startEngine(globals, flags);
@@ -111,7 +111,7 @@ export async function cli(args: string[]): Promise<number> {
     case "keys":
       return keysCommand(positional, globals, flags);
     case "stop":
-      // No args stops the engine; `hotcell stop <id>` stops a sandbox.
+      // No args stops the daemon; `hotcell stop <id>` stops a sandbox.
       return positional.length === 0 ? stopEngine(globals) : stopCommand(positional, globals);
     case "pause":
       return pauseCommand(positional, globals);
@@ -147,7 +147,7 @@ function printHelp(): void {
 
 Usage: hotcell <command> [options]
 
-Engine (the background daemon that runs your sandboxes):
+Daemon (the background process that runs your sandboxes):
   hotcell start [--foreground]   Start it in the background; returns your terminal.
   hotcell status                 Is it running? On what port? How much headroom?
   hotcell stop                   Stop it. (Logs: ~/.hotcell/daemon.log)

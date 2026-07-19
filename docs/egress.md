@@ -4,7 +4,7 @@
 
 A single chokepoint that every outbound byte from a sandbox flows through. This is hotcell's answer to the two things that bite when you run *agents* and not just containers: **credentials** (a real key in the sandbox is one prompt injection away from being stolen) and **blast radius** (a runaway agent spending unboundedly or phoning data out anywhere).
 
-**The real key never enters the sandbox.** Give the engine your provider keys; each sandbox gets a per-sandbox **token** instead. It points its LLM SDK at the gateway, the engine swaps the token for the real key on the way out, forwards the call, and meters it. Leak the token and it's worthless — revoke that one, and the real key (plus every other sandbox) is untouched.
+**The real key never enters the sandbox.** Give the daemon your provider keys; each sandbox gets a per-sandbox **token** instead. It points its LLM SDK at the gateway, the daemon swaps the token for the real key on the way out, forwards the call, and meters it. Leak the token and it's worthless — revoke that one, and the real key (plus every other sandbox) is untouched.
 
 ```bash
 # keys live on the host, never in a sandbox:
@@ -58,7 +58,7 @@ export HOTCELL_PROVIDER_KEY_CFOPENAI=sk-...
 With `HOTCELL_EGRESS_ENFORCE=true`, a sandbox can reach *only* the gateway and a DNS resolver — everything else is dropped at the host firewall (`DOCKER-USER` iptables on a dedicated bridge). The gateway forwards non-LLM traffic (pip / npm / git / apt) to an **allowlist of hosts** — package registries + source forges by default, filtered by domain/SNI not IP — and denies the rest, logging every denial. So a prompt injection has nowhere to phone home, and `git push`-style exfil to a random host is blocked. Direct calls to LLM providers are denied too, so traffic can't skip key injection.
 
 ```bash
-# needs the engine to hold CAP_NET_ADMIN (see docs/self-hosting.md)
+# needs the daemon to hold CAP_NET_ADMIN (see docs/self-hosting.md)
 HOTCELL_EGRESS_ENFORCE=true hotcell start
 ```
 
@@ -68,7 +68,7 @@ HOTCELL_EGRESS_ENFORCE=true hotcell start
 
 | Config | Enforcement | Mechanism |
 | --- | --- | --- |
-| Container + `HOTCELL_EGRESS_ENFORCE` (Linux) | **Kernel-enforced** | host `DOCKER-USER` iptables, default-drop, on a dedicated bridge (needs `CAP_NET_ADMIN`; degrades to advisory if the engine can't install rules) |
+| Container + `HOTCELL_EGRESS_ENFORCE` (Linux) | **Kernel-enforced** | host `DOCKER-USER` iptables, default-drop, on a dedicated bridge (needs `CAP_NET_ADMIN`; degrades to advisory if the daemon can't install rules) |
 | microVM, no NIC (default) | **Enforced by construction** | no network device exists; the vsock gateway is the only route out |
 | microVM, opt-in NAT NIC (`networked: true`) | **Advisory** | proxy env points tools at the gateway; a raw socket bypasses it, unlogged |
 | Container on macOS (Docker Desktop) | **Advisory** | host firewall can't be installed (bridge lives in a VM); proxy env still set |

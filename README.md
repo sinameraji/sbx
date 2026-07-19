@@ -1,6 +1,6 @@
 # hotcell
 
-**Sandboxes for AI agents, on your own hardware.** Spin up many persistent, observable sandboxes for coding agents (Claude Code, Codex, OpenCode, …) on *your own* hardware — a Mac, an EC2/GCE VM, or bare-metal Linux. The provider API key never enters the sandbox, and you can run as many as your hardware allows.
+**Sandboxes for AI agents, on your own hardware.** Spin up many persistent, observable sandboxes for coding agents (Claude Code, Codex, OpenCode, …) on *your own* hardware — a Mac Mini on your desk, an EC2/GCE VM, or bare-metal Linux. The provider API key never enters the sandbox, and you can run as many as your hardware allows.
 
 🌐 **[hotcell.sh](https://hotcell.sh)** · Apache-2.0 · self-hosted · one daemon
 
@@ -26,8 +26,8 @@ Type **`hotcell`** and follow along — the first run opens a 30-second guided s
 hotcell start                       # start the daemon in the background; returns your terminal
 hotcell keys add openrouter         # add a provider key — stored on the host, never in a sandbox
 
-# create a sandbox with your libraries preinstalled (and, optionally, a repo cloned in):
-hotcell create --setup "pip install pandas" --repo https://github.com/me/app
+# create a sandbox with your repo cloned in and your agent preinstalled:
+hotcell create --repo https://github.com/you/app --setup "npm i -g opencode-ai"
 # → prints a sandbox id, e.g. eed060b64b2f
 
 hotcell terminal eed060b64b2f       # ← open an interactive shell INSIDE the sandbox
@@ -38,17 +38,32 @@ hotcell rm eed060b64b2f             # destroy it (workspace + egress tokens gone
 Prefer one-shot? **`hotcell run`** creates a sandbox, runs a command, streams the output, and cleans up:
 
 ```bash
-hotcell run --setup "pip install ruff" "ruff --version"
-hotcell run --egress "printenv OPENROUTER_BASE_URL"   # egress wired — your code reaches the model via this gateway, no key inside
-```
-
-Running several agents on one codebase? One command spins up N isolated cells, each on its own branch:
-
-```bash
-hotcell create -n 5 --repo https://github.com/me/app --branch --egress   # five cells, five branches, five clean PRs
+hotcell run --setup "pip install ruff" "ruff check ."
 ```
 
 Every command is also a REST call, so AI apps drive the same surface programmatically — nothing interactive is ever required.
+
+## Five OpenCode agents, one repo
+
+The workflow hotcell was built for. Instead of five clones of your repo in five terminals, spin up five isolated cells — each with the repo, **its own branch**, and OpenCode installed and wired to the gateway (your OpenRouter and GitHub keys stay on the host):
+
+```bash
+hotcell keys add openrouter          # once — the LLM key lives on the host
+curl -fsSLO https://raw.githubusercontent.com/sinameraji/hotcell/main/examples/agents.sh
+bash agents.sh https://github.com/you/app 5
+# · registered your GitHub token on the host (via 'gh auth token') — stays out of every sandbox
+#   #1  hotcell terminal a1b2c3d4e5f6   →  cd app && opencode
+#   #2  hotcell terminal f6e5d4c3b2a1   →  cd app && opencode
+#   … (five lines — open a terminal for each)
+```
+
+Open a terminal per line, run `opencode`, and prompt each agent at a different feature. Inside every cell, `pr "<title>"` pushes the branch and opens the pull request — git and the GitHub API go **through the gateway**, so no token ever lives in a sandbox. When the PRs are open:
+
+```bash
+bash agents.sh --rm        # or: hotcell rm --all — five cells gone, your repo untouched
+```
+
+Prefer plain flags? `hotcell create -n 5 --repo <url> --branch --egress` gives you the five cells (each on an auto-named branch), and `hotcell create -i` offers the OpenCode wiring interactively.
 
 ## Key commands
 
@@ -56,7 +71,7 @@ Every command is also a REST call, so AI apps drive the same surface programmati
 |---|---|
 | `hotcell` (bare) | interactive menu — first run: guided setup |
 | `hotcell start` · `stop` · `status` · `setup` | run / stop the background daemon; check headroom; guided daemon config |
-| `hotcell keys add <provider>` · `keys ls` · `keys rm` | manage provider keys (openrouter/openai/anthropic/google — kept on the host) |
+| `hotcell keys add <provider>` · `keys ls` · `keys rm` | manage provider keys (openrouter/openai/anthropic/google/github — kept on the host) |
 | `hotcell create [-i] [-n N] [--setup "…"] [--repo URL] [--branch] [--egress]` | provision persistent sandbox(es); prints id per line. `-i` = guided, `-n` = N at once |
 | `hotcell run "<cmd>" [--setup "…"] [--repo URL] [--egress]` | one-shot: create → run → destroy |
 | `hotcell terminal <id>` | **open an interactive shell inside a sandbox** |
@@ -67,7 +82,8 @@ Full command + flag reference: **[docs/reference.md](docs/reference.md)**.
 
 ## Why hotcell
 
-- **The key never enters the sandbox.** You give the daemon your provider keys; each sandbox gets a short-lived, per-sandbox **token** and reaches its model through a gateway that swaps the token for the real key on the way out — metered, spend-capped, revocable. A prompt injection or leaked log walks away with a worthless token, not your account. **GitHub works the same way**: register your token once (`hotcell keys add github --value "$(gh auth token)"`) and sandboxes clone, push, and open PRs through the gateway — keylessly. Lock egress down further to just the gateway + an allowlist — **kernel-enforced on microVMs (no NIC) and Linux containers; advisory on the microVM-NIC and macOS-Docker paths**. → [Egress control plane & enforcement tiers](docs/egress.md#default-deny-egress-linux)
+- **The key never enters the sandbox.** You give the daemon your provider keys; each sandbox gets a short-lived, per-sandbox **token** and reaches its model through a gateway that swaps the token for the real key on the way out — metered, spend-capped, revocable. A prompt injection or leaked log walks away with a worthless token, not your account.
+- **GitHub, keylessly too.** Register your token once (`hotcell keys add github --value "$(gh auth token)"`) and sandboxes clone, push, and open PRs through the same gateway — no GitHub token inside any sandbox. Lock egress down further to just the gateway + an allowlist — **kernel-enforced on microVMs (no NIC) and Linux containers; advisory on the microVM-NIC and macOS-Docker paths**. → [Egress control plane & enforcement tiers](docs/egress.md#default-deny-egress-linux)
 - **Run as many as your hardware allows.** One shared daemon, near-zero per-sandbox overhead, and admission control that refuses to over-subscribe instead of OOM-ing the box.
 - **Your hardware, no lock-in.** Container driver everywhere (Docker), plus microVM drivers for VM-grade isolation — Firecracker on Linux+KVM, Apple VZ on macOS — behind one interface. Apache-2.0, predictable cost.
 

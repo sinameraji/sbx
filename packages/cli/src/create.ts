@@ -29,6 +29,9 @@ export async function createCommand(
   const setup = typeof flags.setup === "string" ? [flags.setup] : undefined;
   const repo = typeof flags.repo === "string" ? flags.repo : undefined;
   const repoRef = typeof flags.ref === "string" ? flags.ref : undefined;
+  // --branch feat/x  → that name;  bare --branch  → an auto-generated name.
+  const branch =
+    typeof flags.branch === "string" ? flags.branch : flags.branch === true ? "auto" : undefined;
 
   let env: Record<string, string> | undefined;
   let labels: Record<string, string> | undefined;
@@ -52,6 +55,7 @@ export async function createCommand(
       setup,
       repo,
       repoRef,
+      branch,
       memoryMb,
       cpus,
       pidsLimit,
@@ -75,6 +79,7 @@ export async function createCommand(
       e(`✓ created ${si.id}  ·  ${drv} · ${specParts.length ? specParts.join(" · ") : "unlimited"}`);
       e(`  image      ${si.image}${desc ? `   — ${desc}` : ""}`);
       e(`  workspace  /workspace${repo ? " (repo cloned)" : " (empty)"}`);
+      if (branch) e(`  branch     ${branch === "auto" ? "new (auto-named)" : branch}`);
       e("");
       e(`  open a shell   hotcell terminal ${si.id}`);
       if (!setup && !repo) e(`  preinstall     recreate with  --setup "…"   ·   clone a repo:  --repo <url>`);

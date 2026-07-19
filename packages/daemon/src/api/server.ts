@@ -861,6 +861,16 @@ async function createSandbox(
     : undefined;
   const repo = typeof body.repo === "string" && body.repo ? body.repo : undefined;
   const repoRef = typeof body.repoRef === "string" && body.repoRef ? body.repoRef : undefined;
+  // --branch: create + check out a new branch right after the clone, as the first
+  // setup step (so it runs before any user setup). `auto` → a generated name.
+  const branchRaw = typeof body.branch === "string" && body.branch ? body.branch : undefined;
+  let setupSteps = setup;
+  if (branchRaw && repo) {
+    const repoName = repo.replace(/\.git$/, "").replace(/\/+$/, "").split("/").pop() || "repo";
+    const branch = branchRaw === "auto" ? `hotcell/${id.slice(0, 8)}` : branchRaw;
+    const co = `git -C /workspace/${repoName} checkout -b ${shellEscape(branch)} 2>/dev/null || git -C /workspace/${repoName} checkout ${shellEscape(branch)}`;
+    setupSteps = [co, ...(setup ?? [])];
+  }
   const networked = body.networked === true;
   const writableRootfs = body.writableRootfs === true;
   const cpuset = typeof body.cpuset === "string" && body.cpuset ? body.cpuset : undefined;
@@ -906,7 +916,7 @@ async function createSandbox(
   }
 
   try {
-    await driver.create({ id, image, driver: driverName, env, labels, persist, setup, repo, repoRef, limits, networked, writableRootfs, cpuset });
+    await driver.create({ id, image, driver: driverName, env, labels, persist, setup: setupSteps, repo, repoRef, limits, networked, writableRootfs, cpuset });
   } catch (err) {
     // Provisioning failed (e.g. repo clone) — release the pending reservation,
     // tear down the half-built container so it doesn't orphan, and report the

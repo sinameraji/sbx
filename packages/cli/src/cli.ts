@@ -162,9 +162,11 @@ Commands:
 
   hotcell create [--image I] [--driver container|firecracker|applevz] [--env K=V,…]
             [--sleep-after MS] [--egress] [--label K=V,…]
-            [--repo <git-url>] [--ref <branch>] [--setup "cmd"]
+            [--repo <git-url>] [--ref <branch>] [--branch <name>] [--setup "cmd"]
             [--memory <MB>] [--cpus <n>] [--pids <n>]
     Provision a standalone persistent sandbox and print its id.
+    --branch creates + checks out a new branch after cloning (bare --branch
+    auto-names it) — one branch per sandbox = clean parallel PRs.
     --driver picks the isolation tier per sandbox (microVMs need a VZ/KVM host).
     --repo clones a git repo into /workspace at create (great for agents).
     --setup runs a shell command once after the container starts (best-effort;

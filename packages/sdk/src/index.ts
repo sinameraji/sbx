@@ -215,6 +215,8 @@ export interface CreateOptions {
   repo?: string;
   /** Branch/tag to check out when cloning `repo` (default: the repo's default branch). */
   repoRef?: string;
+  /** Create + check out a NEW branch right after cloning `repo`; `"auto"` names it for you. */
+  branch?: string;
   /**
    * Runtime driver for this sandbox: `container` (default), `firecracker`
    * (Linux + KVM microVM), or `applevz` (macOS microVM) — one daemon can run

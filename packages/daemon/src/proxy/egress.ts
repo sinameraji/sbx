@@ -106,6 +106,21 @@ export function buildProviders(config: Config): Record<string, ResolvedProvider>
       providers[name] = { baseUrl, authHeader, format, apiKey };
     }
   }
+  // GitHub as a keyless provider: a sandbox reaches api.github.com through the
+  // gateway with its egress token, and the real GitHub token (from `hotcell keys
+  // add github`, e.g. `gh auth token`) stays on the host — same as an LLM key.
+  // `github-git` (git push to github.com) is derived from the same key in handle().
+  // Defined here (not in PROVIDER_DEFAULTS) so api.github.com only joins the
+  // direct-egress deny set when github egress is actually configured.
+  const githubKey = config.providerKeys.github;
+  if (githubKey) {
+    providers.github = {
+      baseUrl: "https://api.github.com",
+      authHeader: "authorization",
+      format: (k) => `Bearer ${k}`,
+      apiKey: githubKey,
+    };
+  }
   return providers;
 }
 
@@ -228,13 +243,31 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: ResolvedD
   const [, providerName, rest] = match;
 
   const token = extractToken(req);
-  if (!token) return sendText(res, 401, "missing egress token");
+  if (!token) {
+    // git probes info/refs anonymously first and only retries with the URL creds
+    // after a Basic challenge — so answer with one. (LLM SDKs send the token
+    // preemptively and never hit this.)
+    res.setHeader("www-authenticate", 'Basic realm="hotcell-egress"');
+    return sendText(res, 401, "missing egress token");
+  }
   const record = store.resolveEgressTokenFull(token);
   if (!record) return sendText(res, 403, "invalid egress token");
   const sandboxId = record.sandboxId;
   const policy = record.policy;
 
-  const provider = providers[providerName];
+  let provider = providers[providerName];
+  // git push to GitHub: same real key as the `github` API provider, but requests
+  // go to github.com (not api.github.com) with git's Basic-auth shape
+  // (`x-access-token:<token>`). The sandbox's git remote points here; the real
+  // token is injected below, so it never lives in the sandbox.
+  if (!provider && providerName === "github-git" && providers.github) {
+    provider = {
+      baseUrl: "https://github.com",
+      authHeader: "authorization",
+      format: (k) => "Basic " + Buffer.from(`x-access-token:${k}`).toString("base64"),
+      apiKey: providers.github.apiKey,
+    };
+  }
   if (!provider) return sendText(res, 404, `unknown provider: ${providerName}`);
 
   const now = Date.now();
@@ -406,7 +439,18 @@ function extractToken(req: IncomingMessage): string | undefined {
   const direct = req.headers["x-hotcell-egress"] ?? req.headers["x-sbx-egress"];
   if (typeof direct === "string" && direct) return direct;
   const auth = req.headers["authorization"];
-  if (typeof auth === "string" && auth.startsWith("Bearer ")) return auth.slice(7);
+  if (typeof auth === "string") {
+    if (auth.startsWith("Bearer ")) return auth.slice(7);
+    // git authenticates over HTTP Basic (`http://x-access-token:<token>@…`); the
+    // egress token is the password half.
+    if (auth.startsWith("Basic ")) {
+      const decoded = Buffer.from(auth.slice(6), "base64").toString("utf8");
+      const i = decoded.indexOf(":");
+      const pass = i >= 0 ? decoded.slice(i + 1) : "";
+      const user = i >= 0 ? decoded.slice(0, i) : decoded;
+      return pass || user || undefined;
+    }
+  }
   return undefined;
 }
 

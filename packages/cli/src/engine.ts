@@ -1,11 +1,11 @@
 import { spawn } from "node:child_process";
 import { createRequire } from "node:module";
 import { openSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from "node:fs";
-import { homedir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { HotcellClient } from "@hotcell/sdk";
 import type { GlobalArgs } from "./cli.js";
+import { HOME, configExists, writeConfigFile } from "./configfile.js";
 
 /**
  * The "engine" (long-running daemon) lifecycle: `hotcell start | stop | status`.
@@ -18,7 +18,6 @@ import type { GlobalArgs } from "./cli.js";
  * debugging. Sandbox-level start/stop are dispatched separately (arity in cli.ts).
  */
 
-const HOME = process.env.HOTCELL_HOME || join(homedir(), ".hotcell");
 const PIDFILE = join(HOME, "daemon.pid");
 const LOGFILE = join(HOME, "daemon.log");
 
@@ -31,7 +30,7 @@ function daemonEntry(): string {
   return createRequire(import.meta.url).resolve("@hotcell/daemon");
 }
 
-async function isUp(endpoint: string): Promise<boolean> {
+export async function isUp(endpoint: string): Promise<boolean> {
   try {
     const r = await fetch(`${endpoint}/healthz`, { signal: AbortSignal.timeout(1000) });
     return r.ok;
@@ -51,6 +50,37 @@ export async function startEngine(
     console.log(`${green("● hotcell already running")}   ${dim("·")}   ${endpoint}`);
     return 0; // idempotent
   }
+
+  // Very first start, human at the terminal: surface the daemon-level defaults
+  // once before they silently apply (they're start-time decisions). Only the
+  // advertised keys act: Enter accepts + persists, `c` opens the full wizard,
+  // Esc/q aborts without writing. `--defaults` skips the prompt. Non-TTY
+  // (agents/scripts) never sees this and never writes config.
+  const interactive = process.stdin.isTTY && process.stdout.isTTY;
+  if (!flags.defaults && !flags.foreground && !flags.fg && !configExists() && interactive) {
+    console.log(
+      `first start — defaults: ${dim("local-only · egress open · containers · hotcell-base image")}`,
+    );
+    console.log(dim(`  ⏎ start with these   ·   c configure (hotcell setup)   ·   q abort`));
+    const { readKey } = await import("./prompts.js");
+    for (;;) {
+      const k = await readKey();
+      if (k === "\r" || k === "\n") break; // accept defaults
+      if (k === "c" || k === "C") {
+        const { setupCommand } = await import("./setup.js");
+        return setupCommand(globals, flags);
+      }
+      if (k === "q" || k === "Q" || k === "\x1b") {
+        console.log(dim("aborted — nothing written, nothing started"));
+        return 1;
+      }
+      // any other key: ignore, keep waiting for an advertised one
+    }
+    writeConfigFile({}); // defaults, by explicit choice — never asks again
+  }
+  // --defaults persists the choice only for a human (TTY): for agents it's a
+  // pure no-op flag, so a headless run can never suppress the first-run wizard.
+  if (flags.defaults === true && !configExists() && interactive) writeConfigFile({});
 
   // Foreground (debug): run the daemon in this process and block, as `hotcelld` does.
   if (flags.foreground || flags.fg) {
@@ -98,10 +128,24 @@ export async function stopEngine(globals: GlobalArgs): Promise<number> {
   }
 
   if (stopped) {
-    // give it a moment to release the port
-    for (let i = 0; i < 10 && (await isUp(client.endpoint)); i++) await sleep(300);
+    // Wait until it is actually DOWN (up to ~15s — draining sandbox ops can take
+    // a while) and say so honestly: a caller that restarts (setup) must not race
+    // a dying daemon into startEngine's "already running" check.
+    for (let i = 0; i < 50 && (await isUp(client.endpoint)); i++) await sleep(300);
+    if (await isUp(client.endpoint)) {
+      console.error(red(`hotcell is still shutting down — try again in a moment`));
+      return 1;
+    }
     console.log(`${green("● hotcell stopped")}`);
     return 0;
+  }
+  // No pidfile. If something IS answering, it's a daemon we didn't start — say
+  // so instead of claiming "stopped" while it keeps running with old config.
+  if (await isUp(client.endpoint)) {
+    console.error(
+      red(`a daemon is running at ${client.endpoint} but wasn't started by \`hotcell start\` — stop that process yourself`),
+    );
+    return 1;
   }
   console.log(dim("○ hotcell was not running"));
   return 0; // idempotent

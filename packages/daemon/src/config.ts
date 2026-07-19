@@ -1,15 +1,55 @@
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { loadProviderKeyMap } from "./keystore.js";
 
 /**
- * Read a daemon env var with legacy fallback: `HOTCELL_<name>` wins, then the
- * pre-rename `HOTCELL_<name>` — so deployments configured before the hotcell
- * rename keep working unchanged.
+ * Persisted daemon config, written by `hotcell setup` (or by hand). Lives at
+ * `${HOTCELL_HOME || ~/.hotcell}/config.json` — the same home convention as the
+ * keystore — and holds env-style keys with string values, e.g.
+ * `{"HOTCELL_HOST":"0.0.0.0","HOTCELL_EGRESS_ENFORCE":"true"}`, so the file is
+ * literally "persisted env": same names, same parsing, self-documenting.
+ * Missing file → empty; malformed file → warn once and ignore (env/defaults apply).
+ */
+export const CONFIG_FILE = join(
+  process.env.HOTCELL_HOME || join(homedir(), ".hotcell"),
+  "config.json",
+);
+const fileConfig: Record<string, string> = (() => {
+  let raw: string;
+  try {
+    raw = readFileSync(CONFIG_FILE, "utf8");
+  } catch {
+    return {}; // no file — the normal case
+  }
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    const out: Record<string, string> = {};
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      for (const [k, v] of Object.entries(parsed)) {
+        if (typeof v === "string" || typeof v === "number" || typeof v === "boolean") {
+          out[k] = String(v);
+        }
+      }
+    }
+    return out;
+  } catch {
+    console.error(`[hotcell] ignoring malformed ${CONFIG_FILE} (not valid JSON)`);
+    return {};
+  }
+})();
+
+/**
+ * Read a daemon config value, highest precedence first: `HOTCELL_<name>` env,
+ * legacy pre-rename `SBX_<name>` env, then the persisted config file. Callers
+ * append their own `?? <default>`, completing env > file > defaults.
  */
 function env(name: string): string | undefined {
-  return process.env[`HOTCELL_${name}`] ?? process.env[`HOTCELL_${name}`];
+  return (
+    process.env[`HOTCELL_${name}`] ??
+    process.env[`SBX_${name}`] ??
+    fileConfig[`HOTCELL_${name}`]
+  );
 }
 
 /**

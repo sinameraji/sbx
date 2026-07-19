@@ -43,23 +43,59 @@ export async function createCommand(
     return 1;
   }
 
+  // -n / --count: create N identical cells in one command (each with its own
+  // auto-named branch under `--branch`). stdout stays machine-clean: one id per
+  // line, so `ids=$(hotcell create -n 5 …)` splits trivially.
+  const count = Math.max(1, Math.floor(Number(flags.n ?? flags.count ?? 1)) || 1);
+  const options = {
+    image,
+    env,
+    labels,
+    sleepAfter,
+    driver,
+    egress,
+    egressSpendCapUsd,
+    setup,
+    repo,
+    repoRef,
+    branch,
+    memoryMb,
+    cpus,
+    pidsLimit,
+  };
+
+  if (count > 1) {
+    // A NAMED branch with -n would give every cell the same branch → colliding
+    // pushes. Auto-suffix per cell (feat/x-1…N) and say so; bare --branch (auto)
+    // already yields a unique name per sandbox daemon-side.
+    const optionsFor = (i: number) =>
+      branch && branch !== "auto" ? { ...options, branch: `${branch}-${i + 1}` } : options;
+    const results = await Promise.allSettled(
+      Array.from({ length: count }, (_, i) => client.getSandbox(undefined, optionsFor(i))),
+    );
+    const ok = results.filter(
+      (r): r is PromiseFulfilledResult<Awaited<ReturnType<typeof client.getSandbox>>> =>
+        r.status === "fulfilled",
+    );
+    for (const r of ok) console.log(r.value.id);
+    const failed = results.length - ok.length;
+    if (process.stderr.isTTY) {
+      console.error(`✓ created ${ok.length}/${count} sandboxes`);
+      ok.forEach((r, i) => console.error(`  #${i + 1}  hotcell terminal ${r.value.id}`));
+      if (branch === "auto") console.error(`  each on its own branch (auto-named)`);
+      else if (branch) console.error(`  branches ${branch}-1 … ${branch}-${count} (suffixed so pushes don't collide)`);
+    }
+    if (failed) {
+      const first = results.find((r) => r.status === "rejected") as PromiseRejectedResult | undefined;
+      console.error(
+        `✗ ${failed} create(s) failed: ${first ? String(first.reason?.message ?? first.reason) : "unknown"}`,
+      );
+    }
+    return failed ? 1 : 0;
+  }
+
   try {
-    const sandbox = await client.getSandbox(undefined, {
-      image,
-      env,
-      labels,
-      sleepAfter,
-      driver,
-      egress,
-      egressSpendCapUsd,
-      setup,
-      repo,
-      repoRef,
-      branch,
-      memoryMb,
-      cpus,
-      pidsLimit,
-    });
+    const sandbox = await client.getSandbox(undefined, options);
     console.log(sandbox.id); // stdout = just the id, so `id=$(hotcell create …)` + agents are unaffected
 
     // Human affordance (stderr, TTY only): the specs, what's actually installed,
@@ -87,11 +123,18 @@ export async function createCommand(
       e(`  run an agent   see examples/ (OpenCode, Codex, Claude Code, Mastra) — add --egress for keyless LLM`);
     }
 
-    if (egress) {
-      const { providers } = await sandbox.listEgressTokens();
-      if (process.stderr.isTTY) console.error("");
-      for (const p of providers) {
-        if (p.baseUrlEnv) console.error(`  ${p.baseUrlEnv}=${p.baseUrl}`);
+    // TTY-only guidance; and a token-listing hiccup must NOT flip the exit code —
+    // the sandbox exists and its id is already on stdout (agents would retry and
+    // leak sandboxes otherwise). Recoverable anytime via `hotcell egress <id>`.
+    if (egress && process.stderr.isTTY) {
+      try {
+        const { providers } = await sandbox.listEgressTokens();
+        console.error("");
+        for (const p of providers) {
+          if (p.baseUrlEnv) console.error(`  ${p.baseUrlEnv}=${p.baseUrl}`);
+        }
+      } catch (err) {
+        console.error(`  (sandbox created; egress token listing failed: ${err instanceof Error ? err.message : String(err)})`);
       }
     }
     return 0;

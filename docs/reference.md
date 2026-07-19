@@ -6,9 +6,15 @@
 
 ```
 # the daemon (the background process that runs your sandboxes)
-hotcell start [--foreground]                 # start it in the background; returns your terminal
+hotcell start [--foreground] [--defaults]    # start it in the background; returns your terminal.
+                                             # very first start on a TTY shows the defaults once
+                                             # (⏎ accept · c configure); --defaults skips that
+hotcell setup                                # guided daemon config → ~/.hotcell/config.json
 hotcell status                               # is it running? on what port? how much headroom?
 hotcell stop                                 # stop it (logs: ~/.hotcell/daemon.log)
+
+# bare `hotcell` (no command, in a terminal) = interactive menu; first run = setup.
+# non-TTY (pipes/scripts/agents) always gets --help instead — nothing ever prompts.
 
 # provider keys (kept on the host — macOS keychain, else chmod-600 ~/.hotcell/keys.json)
 hotcell keys add <provider> [--value KEY | --stdin]   # openrouter/openai/anthropic/google
@@ -17,7 +23,7 @@ hotcell keys ls | rm <provider>
 # sandboxes
 hotcell run "<cmd>" [--image I] [--keep] [--env K=V,…] [--sleep-after MS] [--egress] [--egress-spend-cap USD]
                [--memory MB] [--cpus N] [--pids N] [--repo URL] [--ref BRANCH] [--setup "cmd"]
-hotcell create [--image I] [--driver container|firecracker|applevz] [--env K=V,…] [--egress]
+hotcell create [-i] [-n N] [--image I] [--driver container|firecracker|applevz] [--env K=V,…] [--egress]
                [--egress-spend-cap USD] [--memory MB] [--cpus N] [--pids N] [--repo URL] [--ref BRANCH] [--branch NAME] [--setup "cmd"]   # prints id
 hotcell exec <id> "<cmd>" [--session SID] [--cwd DIR] [--env K=V,…]
 hotcell ls | stats <id> | stop <id> | start <id> | rm <id> | capacity | info
@@ -46,9 +52,9 @@ Global: --endpoint <url> (HOTCELL_ENDPOINT) · --api-key <key> (HOTCELL_API_KEY)
 
 > `hotcell start` with no arguments starts the daemon. `hotcell start <id>` resumes a stopped sandbox, and `hotcell start <id> "<cmd>"` launches a background process inside one — the arity disambiguates. `hotcell stop` with no arguments stops the daemon; `hotcell stop <id>` stops a sandbox.
 
-## Configuration (daemon env)
+## Configuration (daemon env + config file)
 
-Set these before `hotcell start` (they're inherited by the daemon) or on `hotcelld` directly.
+Set these before `hotcell start` (they're inherited by the daemon) or on `hotcelld` directly. The same keys can be **persisted** in `${HOTCELL_HOME:-~/.hotcell}/config.json` — written by `hotcell setup`, or by hand as env-style keys with string values, e.g. `{"HOTCELL_HOST":"0.0.0.0","HOTCELL_EGRESS_ENFORCE":"true"}`. Precedence, highest first: **`HOTCELL_*` env → legacy `SBX_*` env → config file → built-in defaults** (a malformed file is warned about and ignored). The CLI also reads `HOTCELL_API_KEY`/`HOTCELL_PORT` from the file, so an auth-enabled daemon keeps working without re-exporting env.
 
 | Var | Default | What |
 |---|---|---|

@@ -20,6 +20,8 @@ pip install hotcell           # Python SDK (optional)
 
 ## Quick start (60 seconds)
 
+Type **`hotcell`** and follow along — the first run opens a 30-second guided setup (access, egress, isolation, default image — recommended settings one keystroke away), and after that an interactive menu. Everything below is the same thing as flat, scriptable commands:
+
 ```bash
 hotcell start                       # start the daemon in the background; returns your terminal
 hotcell keys add openrouter         # add a provider key — stored on the host, never in a sandbox
@@ -40,15 +42,22 @@ hotcell run --setup "pip install ruff" "ruff --version"
 hotcell run --egress "printenv OPENROUTER_BASE_URL"   # egress wired — your code reaches the model via this gateway, no key inside
 ```
 
-Bare **`hotcell`** (no arguments) opens the interactive fleet monitor. Every command is also a REST call, so AI apps can drive the same surface programmatically.
+Running several agents on one codebase? One command spins up N isolated cells, each on its own branch:
+
+```bash
+hotcell create -n 5 --repo https://github.com/me/app --branch --egress   # five cells, five branches, five clean PRs
+```
+
+Every command is also a REST call, so AI apps drive the same surface programmatically — nothing interactive is ever required.
 
 ## Key commands
 
 | Command | What it does |
 |---|---|
-| `hotcell start` · `stop` · `status` | run / stop the background daemon; check its port + headroom |
+| `hotcell` (bare) | interactive menu — first run: guided setup |
+| `hotcell start` · `stop` · `status` · `setup` | run / stop the background daemon; check headroom; guided daemon config |
 | `hotcell keys add <provider>` · `keys ls` · `keys rm` | manage provider keys (openrouter/openai/anthropic/google — kept on the host) |
-| `hotcell create [--setup "…"] [--repo URL] [--egress]` | provision a persistent sandbox; prints its id |
+| `hotcell create [-i] [-n N] [--setup "…"] [--repo URL] [--branch] [--egress]` | provision persistent sandbox(es); prints id per line. `-i` = guided, `-n` = N at once |
 | `hotcell run "<cmd>" [--setup "…"] [--repo URL] [--egress]` | one-shot: create → run → destroy |
 | `hotcell terminal <id>` | **open an interactive shell inside a sandbox** |
 | `hotcell tui` (alias `top`) | full-screen fleet monitor — ⏎ attach, `p`/`r`/`d` pause/resume/destroy, `c` create |

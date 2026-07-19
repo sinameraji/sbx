@@ -23,6 +23,10 @@ import { startEngine, stopEngine, engineStatus } from "./engine.js";
 import { keysCommand } from "./keys.js";
 import { imagesCommand } from "./images.js";
 import { versionCommand } from "./version.js";
+import { defaultEndpoint, resolveSetting } from "./configfile.js";
+import { menuCommand } from "./menu.js";
+import { setupCommand } from "./setup.js";
+import { createWizard } from "./wizard.js";
 
 export interface GlobalArgs {
   endpoint?: string;
@@ -37,19 +41,23 @@ export async function cli(args: string[]): Promise<number> {
   }
 
   if (args[0] === "--version" || args[0] === "-v" || args[0] === "version") {
+    // Same endpoint/key resolution as every other command (env > file), or the
+    // drift check itself drifts when config.json moves the port.
     return versionCommand({
-      endpoint: process.env.HOTCELL_ENDPOINT ?? process.env.SBX_ENDPOINT,
-      apiKey: process.env.HOTCELL_API_KEY ?? process.env.SBX_API_KEY,
+      endpoint: defaultEndpoint(),
+      apiKey: process.env.HOTCELL_API_KEY ?? process.env.SBX_API_KEY ?? resolveSetting("API_KEY"),
     });
   }
 
-  // Bare `hotcell` (no command) opens the interactive UI when attached to a
-  // terminal; falls back to help for pipes/scripts so automation isn't surprised.
+  // Bare `hotcell` (no command) is the human front door: first run → setup
+  // wizard; otherwise the home menu (fleet view one Enter away). Non-TTY (pipes,
+  // scripts, agents) falls back to help so automation is never surprised.
   if (args.length === 0) {
     const globals: GlobalArgs = {
-      apiKey: process.env.HOTCELL_API_KEY ?? process.env.SBX_API_KEY,
+      endpoint: defaultEndpoint(),
+      apiKey: process.env.HOTCELL_API_KEY ?? process.env.SBX_API_KEY ?? resolveSetting("API_KEY"),
     };
-    if (process.stdout.isTTY && process.stdin.isTTY) return tuiCommand([], globals);
+    if (process.stdout.isTTY && process.stdin.isTTY) return menuCommand(globals);
     printHelp();
     return 0;
   }
@@ -57,15 +65,23 @@ export async function cli(args: string[]): Promise<number> {
   const [command, ...rest] = args;
   const { flags, positional } = parseFlags(rest);
   const globals: GlobalArgs = {
-    endpoint: flags.endpoint as string | undefined,
-    apiKey: (flags["api-key"] as string | undefined) ?? (process.env.HOTCELL_API_KEY ?? process.env.SBX_API_KEY),
+    endpoint: (flags.endpoint as string | undefined) ?? defaultEndpoint(),
+    apiKey:
+      (flags["api-key"] as string | undefined) ??
+      process.env.HOTCELL_API_KEY ??
+      process.env.SBX_API_KEY ??
+      resolveSetting("API_KEY"),
   };
 
   switch (command) {
     case "run":
       return runCommand(positional, globals, flags);
     case "create":
+      // -i / --interactive: the guided create (TTY); flags stay the agent path.
+      if (flags.i === true || flags.interactive === true) return createWizard(globals);
       return createCommand(positional, globals, flags);
+    case "setup":
+      return setupCommand(globals, flags);
     case "exec":
       return execCommand(positional, globals, flags);
     case "env":
@@ -148,9 +164,18 @@ function printHelp(): void {
 Usage: hotcell <command> [options]
 
 Daemon (the background process that runs your sandboxes):
-  hotcell start [--foreground]   Start it in the background; returns your terminal.
+  hotcell start [--foreground] [--defaults]
+                                 Start it in the background; returns your terminal.
+                                 First start on a TTY shows the defaults once
+                                 (⏎ accept · c configure); --defaults skips that.
+  hotcell setup                  Guided daemon config (access, egress, isolation,
+                                 default image) → ~/.hotcell/config.json.
+                                 Precedence: env > config file > defaults.
   hotcell status                 Is it running? On what port? How much headroom?
   hotcell stop                   Stop it. (Logs: ~/.hotcell/daemon.log)
+
+Bare \`hotcell\` (no command, in a terminal) opens the interactive menu — first
+run opens setup. Pipes/scripts always get this help instead.
 
 Commands:
   hotcell run "<command>" [--image <image>] [--keep] [--sleep-after <ms>] [--egress]
@@ -160,13 +185,15 @@ Commands:
     --egress wires the sandbox to the LLM gateway (provider keys injected by the daemon).
     --memory/--cpus/--pids set hard resource caps (override the daemon defaults).
 
-  hotcell create [--image I] [--driver container|firecracker|applevz] [--env K=V,…]
+  hotcell create [-i] [-n <count>] [--image I] [--driver container|firecracker|applevz] [--env K=V,…]
             [--sleep-after MS] [--egress] [--label K=V,…]
             [--repo <git-url>] [--ref <branch>] [--branch <name>] [--setup "cmd"]
             [--memory <MB>] [--cpus <n>] [--pids <n>]
     Provision a standalone persistent sandbox and print its id.
     --branch creates + checks out a new branch after cloning (bare --branch
     auto-names it) — one branch per sandbox = clean parallel PRs.
+    -n 5 creates five identical cells in one command (one id per line);
+    -i opens the guided, interactive create instead of flags (TTY only).
     --driver picks the isolation tier per sandbox (microVMs need a VZ/KVM host).
     --repo clones a git repo into /workspace at create (great for agents).
     --setup runs a shell command once after the container starts (best-effort;

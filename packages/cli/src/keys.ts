@@ -51,14 +51,18 @@ function readStdin(): Promise<string> {
   });
 }
 
-/** Tell a running daemon to hot-reload keys (no restart). Silent if it's down. */
-async function reload(globals: GlobalArgs): Promise<boolean> {
+/**
+ * Tell a running daemon to hot-reload keys (no restart). Distinguishes "daemon
+ * down" from "daemon rejected our API key" — conflating them told users to
+ * start a daemon that was already running.
+ */
+async function reload(globals: GlobalArgs): Promise<"ok" | "auth" | "down"> {
   const client = new HotcellClient({ endpoint: globals.endpoint, apiKey: globals.apiKey });
   try {
     await client.request("POST", "/reload-keys");
-    return true;
-  } catch {
-    return false;
+    return "ok";
+  } catch (err) {
+    return err instanceof Error && /-> 401/.test(err.message) ? "auth" : "down";
   }
 }
 
@@ -90,7 +94,13 @@ export async function keysCommand(
     const source = storeKey(provider, value.trim());
     const applied = await reload(globals);
     console.log(`${green("✓")} stored ${green(provider)}   ${dim(`· ${source === "keychain" ? "macOS keychain" : "~/.hotcell/keys.json (chmod 600)"}`)}`);
-    console.log(applied ? dim("  applied live — the gateway can use it now") : dim("  (start the daemon to use it: hotcell start)"));
+    console.log(
+      applied === "ok"
+        ? dim("  applied live — the gateway can use it now")
+        : applied === "auth"
+          ? dim("  (daemon rejected the API key — pass --api-key, or restart your shell to pick up the new one)")
+          : dim("  (start the daemon to use it: hotcell start)"),
+    );
     return 0;
   }
 

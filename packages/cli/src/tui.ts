@@ -432,8 +432,19 @@ export async function tuiCommand(
     detachInput();
     leaveScreen();
     const rl = createInterface({ input: stdin, output: out });
+    // Ctrl-C: readline swallows SIGINT unless handled; close the interface so
+    // the pending ask() REJECTS (below) instead of hanging this prompt forever
+    // while the refresh interval keeps the process alive.
+    rl.on("SIGINT", () => rl.close());
     const ask = (q: string, def: string) =>
-      new Promise<string>((res) => rl.question(`${q} ${c.dim}[${def}]${c.reset} `, (a) => res(a.trim() || def)));
+      new Promise<string>((res, rej) => {
+        const onClose = () => rej(new Error("cancelled"));
+        rl.once("close", onClose);
+        rl.question(`${q} ${c.dim}[${def}]${c.reset} `, (a) => {
+          rl.off("close", onClose);
+          res(a.trim() || def);
+        });
+      });
     try {
       out.write(`${c.bold}${c.cyan}create sandbox${c.reset} ${c.dim}(blank = default)${c.reset}\r\n`);
       const image = await ask("image", "ghcr.io/sinameraji/hotcell-base:latest");
@@ -460,6 +471,9 @@ export async function tuiCommand(
     stopped = true;
     if (timer) clearInterval(timer);
     restore();
+    // The safety-net listener would otherwise accumulate across menu → TUI →
+    // menu round-trips (MaxListenersExceededWarning after ~11 visits).
+    process.off("exit", restore);
     resolveExit(0);
   }
 

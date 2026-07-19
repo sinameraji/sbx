@@ -45,8 +45,8 @@ go test ./...          # protocol + server + transport, all on macOS (no vsock)
 go vet ./...
 
 # build for the guest (static, no cgo):
-CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o sbx-agent ./cmd/sbx-agent   # Apple VZ guest
-CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o sbx-agent ./cmd/sbx-agent   # Firecracker on x86
+CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o hotcell-agent ./cmd/hotcell-agent   # Apple VZ guest
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o hotcell-agent ./cmd/hotcell-agent   # Firecracker on x86
 ```
 
 From the repo root: `npm run test:agent` / `npm run build:agent`.

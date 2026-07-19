@@ -58,7 +58,7 @@ export async function terminalCommand(
     ws.onopen = () => {
       if (isTTY) {
         try { stdin.setRawMode?.(true); } catch {}
-        console.error(`[hotcell] attached to ${id} — Ctrl-C exits the shell, then close the socket`);
+        console.error(`[hotcell] attached to ${id} — Ctrl-C exits the shell, then the session closes`);
       }
       stdin.resume();
       stdin.on("data", onStdin);

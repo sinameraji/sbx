@@ -187,18 +187,40 @@ async function main(): Promise<void> {
       ? startSampler({ driver, store, history, intervalMs: config.metricsIntervalMs })
       : undefined;
 
+  let shuttingDown = false;
   const shutdown = async () => {
+    if (shuttingDown) return;
+    shuttingDown = true;
     log.info("shutting down");
     if (reaper) clearInterval(reaper);
     if (sampler) clearInterval(sampler);
+    // Failsafe: `server.close()`'s callback waits for every connection to drain,
+    // and an attached terminal WebSocket / SSE exec stream / keep-alive client
+    // NEVER drains — without this the process lingers forever as a listener-less
+    // zombie (ports freed, exit never reached). Hard-exit after a short grace.
+    const failsafe = setTimeout(() => {
+      try {
+        store.close();
+      } catch {
+        /* already closed */
+      }
+      process.exit(0);
+    }, 5000);
+    failsafe.unref();
     await driver.shutdown().catch(() => {}); // tear down the VZ warm pool, if any
     stopTracing();
     egress?.close();
+    egress?.closeAllConnections();
     proxy.close();
+    // L4 preview proxy may be a raw net.Server (no closeAllConnections); its
+    // lingering tunnels are covered by the failsafe timer.
+    (proxy as { closeAllConnections?: () => void }).closeAllConnections?.();
     server.close(() => {
       store.close();
       process.exit(0);
     });
+    // Sever live connections (incl. upgraded WS sockets) so close() can complete.
+    server.closeAllConnections();
   };
   process.on("SIGINT", () => void shutdown());
   process.on("SIGTERM", () => void shutdown());

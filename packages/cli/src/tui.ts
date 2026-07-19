@@ -138,8 +138,10 @@ export async function tuiCommand(
     return s + " ".repeat(w - s.length);
   };
   const shortId = (id: string) => id.slice(0, 12);
+  // Binary units (GiB/MiB), matching the header's capacity math — decimal GB here
+  // made per-row totals (8.3G) exceed the header's host total (7.8G).
   const human = (bytes: number) =>
-    bytes >= 1e9 ? `${(bytes / 1e9).toFixed(1)}G` : `${(bytes / 1e6).toFixed(0)}M`;
+    bytes >= 1024 ** 3 ? `${(bytes / 1024 ** 3).toFixed(1)}G` : `${(bytes / 1024 ** 2).toFixed(0)}M`;
   const uptime = (iso: string) => {
     const ms = Date.now() - new Date(iso).getTime();
     if (!isFinite(ms) || ms < 0) return "—";

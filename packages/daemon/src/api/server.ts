@@ -383,6 +383,16 @@ function parseEgressPolicy(body: Record<string, unknown>): { policy: EgressPolic
 }
 
 /**
+ * 503 an admission refusal with a `Retry-After` hint. Capacity frees when a
+ * sandbox exits, pauses, or is destroyed — usually seconds away under churn —
+ * so give well-behaved clients a concrete backoff instead of a bare refusal.
+ */
+function sendCapacityRefusal(res: ServerResponse, reason: string): void {
+  res.setHeader("Retry-After", "5");
+  sendJson(res, 503, { error: reason });
+}
+
+/**
  * Resolve hard resource caps for a new sandbox: each of `memoryMb`/`cpus`/
  * `pidsLimit` is the per-create body value if given, else the daemon default.
  * Only active (>0) caps are kept, so an unlimited sandbox has `limits: {}`.
@@ -887,7 +897,7 @@ async function createSandbox(
     ok: true as const,
     release: () => {},
   };
-  if (!admitted.ok) return sendJson(res, 503, { error: admitted.reason });
+  if (!admitted.ok) return sendCapacityRefusal(res, admitted.reason);
 
   // Egress wiring. `egress: true` (or a policy object) opts the sandbox's LLM SDKs
   // into the gateway (provider base-URL + key env). Independently, when egress
@@ -1004,7 +1014,7 @@ async function startSandbox(
   try {
     await resumeSandbox(driver, store, record, capacity);
   } catch (err) {
-    if (err instanceof CapacityError) return sendJson(res, 503, { error: err.reason });
+    if (err instanceof CapacityError) return sendCapacityRefusal(res, err.reason);
     throw err;
   }
   sendJson(res, 200, record);
@@ -1059,7 +1069,7 @@ async function ensureLive(
       await resumeSandbox(driver, store, record, capacity);
     } catch (err) {
       if (err instanceof CapacityError) {
-        sendJson(res, 503, { error: err.reason });
+        sendCapacityRefusal(res, err.reason);
         return null;
       }
       throw err;

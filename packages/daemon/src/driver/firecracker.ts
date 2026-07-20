@@ -109,6 +109,7 @@ export class FirecrackerDriver extends AgentDriver {
   private tapSeq = 0;
   private inFlightFills = 0;
   private fillBackoffUntil = 0;
+  private fillBackoffMs = 0; // doubles per consecutive boot failure, resets on success
   /**
    * Every live VMM this driver spawned. Firecracker ignores stdin, so — unlike
    * the VZ helper, which exits on stdin EOF — a VMM survives `process.exit()`.
@@ -508,11 +509,19 @@ export class FirecrackerDriver extends AgentDriver {
       }
       this.pool.push(vm);
       log.info("warm pool: spare microVM ready", { size: this.pool.length, target: this.poolTarget });
+      this.fillBackoffMs = 0; // healthy again — reset the failure backoff
     } catch (err) {
-      log.warn("warm pool: spare boot failed (backing off)", {
+      // Exponential backoff (5s → 60s cap) against spawn-storms, with an unref'd
+      // retry timer so the pool heals to target on its own — without one, a
+      // single failure would suppress every sibling refill until the next
+      // create happened to call fillPool.
+      this.fillBackoffMs = Math.min(Math.max(this.fillBackoffMs * 2, 5000), 60_000);
+      this.fillBackoffUntil = Date.now() + this.fillBackoffMs;
+      log.warn("warm pool: spare boot failed", {
         error: (err as Error).message,
+        retryInMs: this.fillBackoffMs,
       });
-      this.fillBackoffUntil = Date.now() + 5000; // no spawn-storm on persistent failure
+      setTimeout(() => this.fillPool(), this.fillBackoffMs + 50).unref();
     } finally {
       this.inFlightFills--;
       this.fillPool(); // keep topping up until the target is met

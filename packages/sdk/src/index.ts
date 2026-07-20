@@ -340,6 +340,9 @@ export interface CapacitySnapshot {
   running: number;
   /** Approx. number of additional default-reservation sandboxes that still fit. */
   fits: number;
+  /** Warm-pool footprint: ready spares + the MiB they reserve, counted in
+   *  committedMb (absent on daemons older than 0.1.11). */
+  pool?: { spares: number; reservedMb: number };
 }
 
 /** Daemon metadata from `GET /info`. */

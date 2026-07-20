@@ -208,6 +208,20 @@ export class DriverRouter implements Driver {
     return best;
   }
 
+  /** Combined warm-pool footprint across every instantiated driver. */
+  poolStats(): { spares: number; reservedMb: number } {
+    let spares = 0;
+    let reservedMb = 0;
+    for (const d of new Set<Driver>(this.instances.values())) {
+      const stats = d.poolStats?.();
+      if (stats) {
+        spares += stats.spares;
+        reservedMb += stats.reservedMb;
+      }
+    }
+    return { spares, reservedMb };
+  }
+
   /** Best-effort teardown of any driver-held background resources (e.g. the VZ
    *  warm pool's pre-booted spare VMs) on daemon shutdown. */
   async shutdown(): Promise<void> {

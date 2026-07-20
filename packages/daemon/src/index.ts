@@ -78,7 +78,7 @@ async function main(): Promise<void> {
 
   // Host capacity for the meter + admission control (best-effort detection).
   const host = await driver.hostInfo().catch(() => null);
-  const capacity = new Capacity(store, config, host, history);
+  const capacity = new Capacity(store, config, host, history, () => driver.poolStats());
   if (host) {
     log.info("host capacity", {
       memoryMb: host.memoryMb,

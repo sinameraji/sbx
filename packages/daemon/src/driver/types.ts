@@ -313,6 +313,14 @@ export interface Driver {
    * driver this is the Docker host/VM's `MemTotal` / `NCPU`.
    */
   hostInfo(): Promise<HostInfo>;
+
+  /**
+   * Warm-pool footprint held outside any sandbox record: ready spares plus the
+   * memory (MiB) they and any in-flight spare boots reserve. Admission control
+   * charges `reservedMb` against the host budget — pooled guests consume real
+   * RAM the store cannot see. Absent on drivers without a pool.
+   */
+  poolStats?(): { spares: number; reservedMb: number };
 }
 
 /** Total host capacity as seen by the runtime. */

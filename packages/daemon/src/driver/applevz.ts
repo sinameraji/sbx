@@ -300,6 +300,16 @@ export class AppleVzDriver extends AgentDriver {
     return this.pool.length;
   }
 
+  /** Pool footprint for admission control: ready spares + in-flight boots. */
+  poolStats(): { spares: number; reservedMb: number } {
+    // Per-spare charge = the shape's cap, else the boot-path default memMb.
+    const perSpareMb = this.poolLimits.memoryMb || 1024;
+    return {
+      spares: this.pool.length,
+      reservedMb: (this.pool.length + this.inFlightFills) * perSpareMb,
+    };
+  }
+
   /** Adoption requires the create's resolved limits to equal the pool shape exactly. */
   private poolShapeMatches(want?: ResourceLimits): boolean {
     return (

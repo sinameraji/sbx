@@ -16,6 +16,8 @@ export interface CapacitySnapshot {
   running: number;
   /** Approx. number of additional default-reservation sandboxes that still fit. */
   fits: number;
+  /** Warm-pool footprint: ready spares + the MiB they reserve (counted in committedMb). */
+  pool: { spares: number; reservedMb: number };
 }
 
 /** An admission refusal, thrown by gated paths (resume/start) so callers can 503. */
@@ -49,6 +51,9 @@ export class Capacity {
     private readonly config: Config,
     host: HostInfo | null,
     private readonly history?: MetricsHistory,
+    /** Warm-pool footprint provider (the driver router); pooled guests hold real
+     *  RAM outside any store record, so the ledger must count them. */
+    private readonly poolStats?: () => { spares: number; reservedMb: number },
   ) {
     const baseMem = config.hostMemoryMb > 0 ? config.hostMemoryMb : (host?.memoryMb ?? 0);
     this.budgetMemMb = Math.floor(baseMem * (config.overcommit || 1));
@@ -76,7 +81,7 @@ export class Capacity {
   }
 
   private committed(): { mem: number; cpu: number } {
-    let mem = 0;
+    let mem = this.poolReservedMb();
     let cpu = 0;
     for (const r of this.store.list()) {
       if (r.status !== "running") continue; // paused/stopped free their compute
@@ -84,6 +89,14 @@ export class Capacity {
       cpu += r.limits.cpus && r.limits.cpus > 0 ? r.limits.cpus : 0;
     }
     return { mem, cpu };
+  }
+
+  private poolReservedMb(): number {
+    try {
+      return this.poolStats?.().reservedMb ?? 0;
+    } catch {
+      return 0;
+    }
   }
 
   /** Decide whether a new sandbox with `requestMemoryMb` can be admitted. */
@@ -157,6 +170,15 @@ export class Capacity {
         this.config.defaultReservationMb > 0
           ? Math.floor(availableMb / this.config.defaultReservationMb)
           : 0,
+      pool: this.poolSnapshot(),
     };
+  }
+
+  private poolSnapshot(): { spares: number; reservedMb: number } {
+    try {
+      return this.poolStats?.() ?? { spares: 0, reservedMb: 0 };
+    } catch {
+      return { spares: 0, reservedMb: 0 };
+    }
   }
 }

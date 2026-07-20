@@ -81,11 +81,12 @@ Caveats, because this number is attractive and easy to misuse:
 
 - It is **not an official TTI measurement**. It used hotcell's Alpine base image and an `echo` probe with a custom timer, not the harness's `node:22-slim` + `node -v`. `node -v` alone adds process-spawn cost.
 - n = 10, localhost.
-- Two known bugs currently stop warm pools from serving real workload images at all, so this floor is **not reachable in normal use today**:
-  1. Setting a daemon-wide default memory limit (`HOTCELL_DEFAULT_MEMORY_MB`) makes every create ineligible for adoption — pool eligibility requires no explicit limits — so the sandbox cold-boots while a full pool sits idle.
-  2. The pool image is pinned to the built-in Alpine base image, so a `node:22-slim` create can never adopt a spare.
+- Known defects currently stop warm pools from serving real workload images, so this floor is **not reachable in normal use today**:
+  1. Setting a daemon-wide default limit (`HOTCELL_DEFAULT_MEMORY_MB` and friends) makes every create ineligible for adoption — eligibility requires no explicit limits, and the daemon folds its defaults into every request — so the sandbox cold-boots while a full pool sits idle. Affects both microVM drivers, and it is what silently defeated adoption in the two warm runs in the table above.
+  2. On Apple VZ the pool image is hardcoded to the built-in Alpine base image (`applevz.ts`, a `readonly` field), so a `node:22-slim` create can never adopt a spare. Firecracker does not share this defect — its pool image follows the daemon's configured image — though its pool was not successfully exercised in these runs.
+- **Pool depth, not adopt latency, is the real constraint.** Spares refill *serially* at ~2.55 s each (~0.39 guests/sec), while cold creates fan out in parallel at ~3.4/sec on the same host. A pool therefore only wins for the first N requests against an idle daemon; past that it refills slower than cold-booting. Sizing a pool to absorb a 100-wide burst also means holding 100 guests' worth of RAM, which no laptop has.
 
-Treat 24 ms as evidence that the adopt path is fast, not as a claimable TTI. Fixing the two bugs and re-measuring through the official harness is the open work.
+Treat 24 ms as evidence that the adopt path itself is fast, not as a TTI hotcell can currently deliver, and not as something that scales to bursts. Making adoption fire at all, refilling pools in parallel, and making pooled guests visible to admission control are the open work.
 
 ### sandbox-dax
 

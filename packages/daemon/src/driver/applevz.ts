@@ -301,14 +301,14 @@ export class AppleVzDriver extends AgentDriver {
     return this.pool.length;
   }
 
-  /** Pool footprint for admission control: ready spares + in-flight boots. */
+  /** Pool footprint for admission control. */
   poolStats(): { spares: number; reservedMb: number } {
+    // Charged at TARGET, not momentary fill: a spare below target is owed — its
+    // replacement boots without re-admission — so the budget must stay reserved
+    // across the adopt→refill window, the concurrency cap, and failure backoffs.
     // Per-spare charge = the shape's cap, else the boot-path default memMb.
     const perSpareMb = this.poolLimits.memoryMb || 1024;
-    return {
-      spares: this.pool.length,
-      reservedMb: (this.pool.length + this.inFlightFills) * perSpareMb,
-    };
+    return { spares: this.pool.length, reservedMb: this.poolTarget * perSpareMb };
   }
 
   /** Adoption requires the create's resolved limits to equal the pool shape exactly. */

@@ -315,10 +315,12 @@ export interface Driver {
   hostInfo(): Promise<HostInfo>;
 
   /**
-   * Warm-pool footprint held outside any sandbox record: ready spares plus the
-   * memory (MiB) they and any in-flight spare boots reserve. Admission control
-   * charges `reservedMb` against the host budget — pooled guests consume real
-   * RAM the store cannot see. Absent on drivers without a pool.
+   * Warm-pool footprint held outside any sandbox record: ready spares, plus the
+   * memory (MiB) the pool reserves — charged at the pool TARGET, since a spare
+   * below target is owed and its replacement boots without re-admission.
+   * Admission control charges `reservedMb` against the host budget — pooled
+   * guests consume real RAM the store cannot see. Absent on drivers without a
+   * pool.
    */
   poolStats?(): { spares: number; reservedMb: number };
 }

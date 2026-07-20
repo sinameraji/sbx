@@ -28,8 +28,11 @@ export interface VzConfig {
   diskGb: number;
   /** Cache dir for OCI→ext4 converted rootfs images + the blank workspace template. */
   imageCacheDir: string;
-  /** Pre-boot this many base-image microVMs for instant adopt (0 = off). */
+  /** Pre-boot this many microVMs for instant adopt (0 = off). */
   warmPool?: number;
+  /** Image the warm pool pre-boots; a plain create of this image adopts a spare
+   *  (default "base", the prebuilt Alpine rootfs). */
+  poolImage?: string;
   /**
    * Egress gateway port for the guest relay (0/unset = no relay). The guest gets
    * a loopback listener on this port whose connections tunnel over vsock (helper
@@ -69,7 +72,7 @@ export class AppleVzDriver extends AgentDriver {
   private poolTarget: number;
   private poolSeq = 0;
   private filling = false;
-  private readonly poolImage = "base"; // sentinel → the prebuilt Alpine base rootfs
+  private readonly poolImage: string;
   private readonly poolDir: string;
 
   constructor(private readonly cfg: VzConfig) {
@@ -83,6 +86,7 @@ export class AppleVzDriver extends AgentDriver {
       prebuiltRootfs: cfg.rootfs,
     });
     this.poolTarget = Math.max(0, cfg.warmPool ?? 0);
+    this.poolImage = cfg.poolImage ?? "base";
     this.poolDir = join(cfg.stateDir, "_pool");
     if (this.poolTarget > 0) {
       // Clear stale slots from a previous run (their helpers died with the daemon).
@@ -296,7 +300,7 @@ export class AppleVzDriver extends AgentDriver {
       !opts.limits || (!opts.limits.memoryMb && !opts.limits.cpus && !opts.limits.pidsLimit);
     const canonical = join(this.cfg.stateDir, opts.id);
     const eligible =
-      (opts.image === this.poolImage || opts.image === "alpine") &&
+      (opts.image === this.poolImage || (this.poolImage === "base" && opts.image === "alpine")) &&
       noLimits &&
       !existsSync(join(canonical, "workspace.img")); // a resume already has a workspace
     if (!eligible) return false;

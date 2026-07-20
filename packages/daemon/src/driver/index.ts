@@ -55,6 +55,8 @@ export function createNamedDriver(name: string, config: Config): Driver {
         diskGb: config.vzDiskGb,
         imageCacheDir: config.vzImageCacheDir,
         warmPool: config.vzWarmPool,
+        // A plain create of the daemon's default image adopts a spare.
+        poolImage: config.defaultImage,
         // Guest egress relay target: the gateway on this host.
         egressPort: config.egressPort,
         egressHost: config.host,

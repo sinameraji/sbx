@@ -16,7 +16,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { AgentConn } from "./agent.js";
 import { AgentDriver } from "./agent-driver.js";
 import { VzImageCache } from "./vz-image.js";
-import type { CreateOptions, HostInfo } from "./types.js";
+import type { CreateOptions, HostInfo, ResourceLimits } from "./types.js";
 import { log } from "../logger.js";
 
 /** Config the driver factory hands the VZ driver (subset of the daemon config). */
@@ -33,6 +33,13 @@ export interface VzConfig {
   /** Image the warm pool pre-boots; a plain create of this image adopts a spare
    *  (default "base", the prebuilt Alpine rootfs). */
   poolImage?: string;
+  /**
+   * Resource shape the pool's spares boot with. Adoption requires the create's
+   * resolved limits to EQUAL this shape (a looser match would hand out a VM
+   * bigger than admission control charged for — VZ memorySize is fixed at boot).
+   * Pass the daemon's default limits so plain creates stay pool-eligible.
+   */
+  poolLimits?: ResourceLimits;
   /**
    * Egress gateway port for the guest relay (0/unset = no relay). The guest gets
    * a loopback listener on this port whose connections tunnel over vsock (helper
@@ -73,6 +80,7 @@ export class AppleVzDriver extends AgentDriver {
   private poolSeq = 0;
   private filling = false;
   private readonly poolImage: string;
+  private readonly poolLimits: ResourceLimits;
   private readonly poolDir: string;
 
   constructor(private readonly cfg: VzConfig) {
@@ -87,6 +95,7 @@ export class AppleVzDriver extends AgentDriver {
     });
     this.poolTarget = Math.max(0, cfg.warmPool ?? 0);
     this.poolImage = cfg.poolImage ?? "base";
+    this.poolLimits = cfg.poolLimits ?? {};
     this.poolDir = join(cfg.stateDir, "_pool");
     if (this.poolTarget > 0) {
       // Clear stale slots from a previous run (their helpers died with the daemon).
@@ -287,6 +296,15 @@ export class AppleVzDriver extends AgentDriver {
     return this.pool.length;
   }
 
+  /** Adoption requires the create's resolved limits to equal the pool shape exactly. */
+  private poolShapeMatches(want?: ResourceLimits): boolean {
+    return (
+      (want?.memoryMb ?? 0) === (this.poolLimits.memoryMb ?? 0) &&
+      (want?.cpus ?? 0) === (this.poolLimits.cpus ?? 0) &&
+      (want?.pidsLimit ?? 0) === (this.poolLimits.pidsLimit ?? 0)
+    );
+  }
+
   /**
    * Adopt a pre-booted spare for `opts` when eligible — a plain create of the
    * pooled base image with default limits and no existing workspace. Renames the
@@ -296,14 +314,23 @@ export class AppleVzDriver extends AgentDriver {
    */
   private async tryClaimFromPool(opts: CreateOptions): Promise<boolean> {
     if (this.poolTarget <= 0) return false;
-    const noLimits =
-      !opts.limits || (!opts.limits.memoryMb && !opts.limits.cpus && !opts.limits.pidsLimit);
     const canonical = join(this.cfg.stateDir, opts.id);
-    const eligible =
-      (opts.image === this.poolImage || (this.poolImage === "base" && opts.image === "alpine")) &&
-      noLimits &&
-      !existsSync(join(canonical, "workspace.img")); // a resume already has a workspace
-    if (!eligible) return false;
+    const imageOk =
+      opts.image === this.poolImage || (this.poolImage === "base" && opts.image === "alpine");
+    const shapeOk = this.poolShapeMatches(opts.limits);
+    const fresh = !existsSync(join(canonical, "workspace.img")); // a resume already has a workspace
+    if (!imageOk || !shapeOk || !fresh) {
+      // An idle pool that never adopts is a misconfiguration operators must see.
+      if (this.pool.length > 0 && fresh) {
+        log.info("warm pool: create not eligible for adoption", {
+          sandbox: opts.id,
+          reason: imageOk
+            ? "limits differ from the pool shape"
+            : `image ${opts.image} != pool ${this.poolImage}`,
+        });
+      }
+      return false;
+    }
 
     const spare = this.pool.shift();
     if (!spare) {
@@ -342,6 +369,7 @@ export class AppleVzDriver extends AgentDriver {
             stateDir: join(this.poolDir, `slot-${n}`),
             image: this.poolImage,
             socketPath: `/tmp/hc-pool-${n}.sock`,
+            limits: this.poolLimits,
           });
           this.pool.push(vm);
           log.info("warm pool: spare guest ready", { size: this.pool.length, target: this.poolTarget });

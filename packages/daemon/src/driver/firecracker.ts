@@ -31,7 +31,7 @@ import {
   fcVsockConnect,
 } from "./fc-api.js";
 import { VzImageCache } from "./vz-image.js";
-import type { CreateOptions, HostInfo } from "./types.js";
+import type { CreateOptions, HostInfo, ResourceLimits } from "./types.js";
 import { log } from "../logger.js";
 
 /** Config the driver factory hands the Firecracker driver (subset of daemon config). */
@@ -54,6 +54,13 @@ export interface FcConfig {
   warmPool?: number;
   /** Image the warm pool pre-boots (a plain create of this image adopts a spare). */
   poolImage?: string;
+  /**
+   * Resource shape the pool's spares boot with. Adoption requires the create's
+   * resolved limits to EQUAL this shape (a looser match would hand out a VM
+   * bigger than admission control charged for). Pass the daemon's default
+   * limits so plain creates stay pool-eligible.
+   */
+  poolLimits?: ResourceLimits;
   /**
    * Egress gateway port for the guest relay (0/unset = no relay). The guest gets
    * a loopback listener on this port whose connections tunnel over vsock to the
@@ -99,6 +106,7 @@ export class FirecrackerDriver extends AgentDriver {
   private tapSeq = 0;
   private filling = false;
   private readonly poolImage: string;
+  private readonly poolLimits: ResourceLimits;
   private readonly poolDir: string;
 
   constructor(private readonly cfg: FcConfig) {
@@ -115,6 +123,7 @@ export class FirecrackerDriver extends AgentDriver {
     });
     this.poolTarget = Math.max(0, cfg.warmPool ?? 0);
     this.poolImage = cfg.poolImage ?? "base";
+    this.poolLimits = cfg.poolLimits ?? {};
     this.poolDir = join(cfg.stateDir, "_pool");
     if (this.poolTarget > 0) {
       // Clear stale slots from a previous run (their VMMs died with the daemon).
@@ -382,6 +391,15 @@ export class FirecrackerDriver extends AgentDriver {
     return this.pool.length;
   }
 
+  /** Adoption requires the create's resolved limits to equal the pool shape exactly. */
+  private poolShapeMatches(want?: ResourceLimits): boolean {
+    return (
+      (want?.memoryMb ?? 0) === (this.poolLimits.memoryMb ?? 0) &&
+      (want?.cpus ?? 0) === (this.poolLimits.cpus ?? 0) &&
+      (want?.pidsLimit ?? 0) === (this.poolLimits.pidsLimit ?? 0)
+    );
+  }
+
   /**
    * Adopt a pre-booted spare for `opts` when eligible — a plain create of the
    * pool image with default limits and no prior state. Adoption moves nothing:
@@ -393,10 +411,22 @@ export class FirecrackerDriver extends AgentDriver {
    */
   private tryAdopt(opts: CreateOptions): boolean {
     if (this.poolTarget <= 0) return false;
-    const noLimits =
-      !opts.limits || (!opts.limits.memoryMb && !opts.limits.cpus && !opts.limits.pidsLimit);
     const canonical = join(this.cfg.stateDir, opts.id);
-    if (opts.image !== this.poolImage || !noLimits || existsSync(canonical)) return false;
+    const imageOk = opts.image === this.poolImage;
+    const shapeOk = this.poolShapeMatches(opts.limits);
+    const fresh = !existsSync(canonical);
+    if (!imageOk || !shapeOk || !fresh) {
+      // An idle pool that never adopts is a misconfiguration operators must see.
+      if (this.pool.length > 0 && fresh) {
+        log.info("warm pool: create not eligible for adoption", {
+          sandbox: opts.id,
+          reason: imageOk
+            ? "limits differ from the pool shape"
+            : `image ${opts.image} != pool ${this.poolImage}`,
+        });
+      }
+      return false;
+    }
 
     const spare = this.pool.shift();
     if (!spare) {
@@ -427,6 +457,7 @@ export class FirecrackerDriver extends AgentDriver {
             id: `pool-${n}`,
             stateDir: join(this.poolDir, `slot-${n}`),
             image: this.poolImage,
+            limits: this.poolLimits,
           });
           this.pool.push(vm);
           log.info("warm pool: spare microVM ready", { size: this.pool.length, target: this.poolTarget });

@@ -16,6 +16,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { AgentConn } from "./agent.js";
 import { AgentDriver } from "./agent-driver.js";
 import { VzImageCache } from "./vz-image.js";
+import { createHash } from "node:crypto";
 import type { CreateOptions, HostInfo, ResourceLimits } from "./types.js";
 import { log } from "../logger.js";
 
@@ -87,6 +88,11 @@ export class AppleVzDriver extends AgentDriver {
   private readonly poolImage: string;
   private readonly poolLimits: ResourceLimits;
   private readonly poolDir: string;
+  /** Short per-instance token namespacing pool relay sockets in /tmp — two
+   *  driver instances (tests; a future multi-daemon host) must never share
+   *  `pool-N` socket paths, or one instance's orphan cleanup unlinks the
+   *  other's live relay. Derived from stateDir; kept short for sun_path. */
+  private readonly poolTok: string;
 
   constructor(private readonly cfg: VzConfig) {
     super();
@@ -102,6 +108,7 @@ export class AppleVzDriver extends AgentDriver {
     this.poolImage = cfg.poolImage ?? "base";
     this.poolLimits = cfg.poolLimits ?? {};
     this.poolDir = join(cfg.stateDir, "_pool");
+    this.poolTok = createHash("sha1").update(cfg.stateDir).digest("hex").slice(0, 6);
     if (this.poolTarget > 0) {
       // Clear stale slots from a previous run (their helpers died with the daemon).
       try {
@@ -388,7 +395,7 @@ export class AppleVzDriver extends AgentDriver {
         id: `pool-${n}`,
         stateDir: join(this.poolDir, `slot-${n}`),
         image: this.poolImage,
-        socketPath: `/tmp/hc-pool-${n}.sock`,
+        socketPath: `/tmp/hcp-${this.poolTok}-${n}.sock`,
         limits: this.poolLimits,
       });
       if (this.poolTarget <= 0) {

@@ -28,7 +28,7 @@ docker run --rm --platform linux/arm64 -v "$PWD/guest:/guest" alpine:3.20 sh -c 
   mkdir -p /rootfs
   cp -a /bin /sbin /usr /etc /lib /rootfs/ 2>/dev/null || true
   # Mountpoints the init needs to exist on the read-only rootfs.
-  mkdir -p /rootfs/proc /rootfs/sys /rootfs/dev /rootfs/run /rootfs/tmp /rootfs/workspace
+  mkdir -p /rootfs/proc /rootfs/sys /rootfs/dev /rootfs/run /rootfs/tmp /rootfs/var/tmp /rootfs/workspace
   cp /guest/hotcell-agent /rootfs/sbin/hotcell-agent
   cp /guest/init.sh /rootfs/init
   chmod +x /rootfs/init /rootfs/sbin/hotcell-agent

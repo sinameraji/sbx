@@ -46,7 +46,7 @@ docker run --rm --platform "$PLATFORM" -v "$WORK:/work" alpine:3.20 sh -c '
   apk add --no-cache e2fsprogs >/dev/null 2>&1
   mkdir -p /rootfs
   tar -xf /work/rootfs.tar -C /rootfs 2>/dev/null || true
-  mkdir -p /rootfs/proc /rootfs/sys /rootfs/dev /rootfs/run /rootfs/tmp /rootfs/workspace /rootfs/sbin
+  mkdir -p /rootfs/proc /rootfs/sys /rootfs/dev /rootfs/run /rootfs/tmp /rootfs/var/tmp /rootfs/workspace /rootfs/sbin
   cp /work/hotcell-agent /rootfs/sbin/hotcell-agent
   cp /work/init /rootfs/init
   mkdir -p /rootfs/usr/local/bin

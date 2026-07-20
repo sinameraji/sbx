@@ -15,7 +15,10 @@ mkdir -p /dev/pts && mount -t devpts devpts /dev/pts 2>/dev/null  # PTYs (termin
 
 # Read-only root: back the transient write paths with tmpfs so nothing touches
 # the shared rootfs image. Process logs (/tmp/hotcell-proc-*.log) live on /tmp here.
-for d in /tmp /run; do mount -t tmpfs tmpfs "$d" 2>/dev/null; done
+# /var/tmp too — POSIX tools expect it writable, and on the shared RO rootfs any
+# write there fails with EROFS (mkdir -p first: slim images may not ship it).
+mkdir -p /var/tmp 2>/dev/null
+for d in /tmp /run /var/tmp; do mount -t tmpfs tmpfs "$d" 2>/dev/null; done
 
 # Loopback up so 127.0.0.1 (waitForPort, preview bridge to local servers) routes.
 ip link set lo up 2>/dev/null || ifconfig lo up 2>/dev/null || true

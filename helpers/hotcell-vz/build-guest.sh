@@ -15,14 +15,23 @@ set -euo pipefail
 cd "$(dirname "$0")"
 mkdir -p guest
 
+# Host-arch aware: the same script builds the arm64 rootfs on a Mac (Apple VZ)
+# and the amd64 rootfs on a Linux/KVM box (Firecracker). Override with
+# GUEST_ARCH=arm64|amd64 to cross-build.
+case "${GUEST_ARCH:-$(uname -m)}" in
+  arm64|aarch64) ARCH=arm64 ;;
+  amd64|x86_64) ARCH=amd64 ;;
+  *) echo "unsupported arch: ${GUEST_ARCH:-$(uname -m)}" >&2; exit 1 ;;
+esac
+
 # 1. Agent (built by `npm run build:agent`) → staged into the rootfs as PID-1.
-cp ../../agent/dist/hotcell-agent-linux-arm64 guest/hotcell-agent
+cp "../../agent/dist/hotcell-agent-linux-${ARCH}" guest/hotcell-agent
 
 # 2. Rootfs: alpine userland + agent + the shared guest init (guest/init.sh),
 #    booted READ-ONLY (serve.swift mounts it readOnly), so the init backs every
 #    writable path with tmpfs or the per-sandbox /dev/vdb disk. The init is the
 #    same file convert-image.sh injects into arbitrary OCI images.
-docker run --rm --platform linux/arm64 -v "$PWD/guest:/guest" alpine:3.20 sh -c '
+docker run --rm --platform "linux/${ARCH}" -v "$PWD/guest:/guest" alpine:3.20 sh -c '
   set -e
   apk add --no-cache e2fsprogs >/dev/null 2>&1
   mkdir -p /rootfs

@@ -123,15 +123,18 @@ async function main(): Promise<void> {
     assert.equal(shaped.poolSize(), before - 1, "matching-shape create should adopt a spare");
     ok(`create with pool-shaped limits adopted in ${shapedMs}ms`);
 
-    // A create with a DIFFERENT shape must not adopt — exact match only.
-    const before2 = shaped.poolSize();
+    // A create with a DIFFERENT shape must not adopt — exact match only. The
+    // background refill races any poolSize-based assertion, so use the
+    // unambiguous signal instead: adoption is ~20ms, a cold boot is seconds.
+    const tMismatch = Date.now();
     await shaped.create({
       id: "shaped02",
       image: "base",
       persist: true,
       limits: { memoryMb: 256 },
     });
-    assert.equal(shaped.poolSize(), before2, "mismatched-shape create must cold-boot");
+    const mismatchMs = Date.now() - tMismatch;
+    assert.ok(mismatchMs > 1000, `mismatched-shape create must cold-boot (took ${mismatchMs}ms)`);
     let out2 = "";
     await shaped.exec("shaped02", "echo MISMATCH_OK", {}, (e) => {
       if (e.type === "stdout") out2 += e.data;

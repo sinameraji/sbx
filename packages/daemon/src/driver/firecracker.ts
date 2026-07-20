@@ -109,6 +109,23 @@ export class FirecrackerDriver extends AgentDriver {
   private tapSeq = 0;
   private inFlightFills = 0;
   private fillBackoffUntil = 0;
+  /**
+   * Every live VMM this driver spawned. Firecracker ignores stdin, so — unlike
+   * the VZ helper, which exits on stdin EOF — a VMM survives `process.exit()`.
+   * The process-exit hook SIGKILLs the set so a daemon restart (or a test
+   * harness exiting mid-boot) can't strand gigabyte-sized zombie VMs that the
+   * next daemon's capacity ledger will never see.
+   */
+  private readonly liveVmms = new Set<ChildProcess>();
+  private readonly killLiveVmms = () => {
+    for (const p of this.liveVmms) {
+      try {
+        p.kill("SIGKILL");
+      } catch {
+        /* already gone */
+      }
+    }
+  };
   private readonly poolImage: string;
   private readonly poolLimits: ResourceLimits;
   private readonly poolDir: string;
@@ -129,6 +146,7 @@ export class FirecrackerDriver extends AgentDriver {
     this.poolImage = cfg.poolImage ?? "base";
     this.poolLimits = cfg.poolLimits ?? {};
     this.poolDir = join(cfg.stateDir, "_pool");
+    process.once("exit", this.killLiveVmms);
     if (this.poolTarget > 0) {
       // Clear stale slots from a previous run (their VMMs died with the daemon).
       try {
@@ -524,6 +542,8 @@ export class FirecrackerDriver extends AgentDriver {
     const proc = cpuset
       ? spawn("taskset", ["-c", cpuset, this.cfg.fcBin, "--api-sock", apiSock], { stdio: ["ignore", "pipe", "pipe"] })
       : spawn(this.cfg.fcBin, ["--api-sock", apiSock], { stdio: ["ignore", "pipe", "pipe"] });
+    this.liveVmms.add(proc);
+    proc.once("exit", () => this.liveVmms.delete(proc));
     proc.stdout.pipe(createWriteStream(join(stateDir, "console.log"), { flags: "a" }));
     proc.stderr.pipe(createWriteStream(join(stateDir, "console.log"), { flags: "a" }));
     const vm: FcVm = { proc, apiSock, vsockUds, workspaceImg: join(stateDir, "workspace.img"), stateDir };

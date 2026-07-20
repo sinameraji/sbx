@@ -50,6 +50,9 @@ export interface VzConfig {
   egressHost?: string;
 }
 
+/** Concurrent warm-pool spare boots: refill fast, but leave CPU for foreground creates. */
+const FILL_CONCURRENCY = 4;
+
 /** Live per-sandbox VM: the `sbx-vz serve` process + its relay socket + disk. */
 interface VmState {
   helper: HelperProcess;
@@ -78,7 +81,8 @@ export class AppleVzDriver extends AgentDriver {
   private pool: VmState[] = [];
   private poolTarget: number;
   private poolSeq = 0;
-  private filling = false;
+  private inFlightFills = 0;
+  private fillBackoffUntil = 0;
   private readonly poolImage: string;
   private readonly poolLimits: ResourceLimits;
   private readonly poolDir: string;
@@ -352,36 +356,55 @@ export class AppleVzDriver extends AgentDriver {
     return true;
   }
 
-  /** Top the pool up to its target in the background (one filler at a time). */
+  /**
+   * Top the pool up to its target with bounded-parallel spare boots. Serial
+   * refill (~2.5 s/guest) drains far slower than creates arrive; parallel boots
+   * refill at ~FILL_CONCURRENCY× that rate while leaving CPU headroom for
+   * foreground creates.
+   */
   private fillPool(): void {
-    if (this.poolTarget <= 0 || this.filling) return;
-    void this.doFill();
+    if (this.poolTarget <= 0 || Date.now() < this.fillBackoffUntil) return;
+    const missing = this.poolTarget - this.pool.length - this.inFlightFills;
+    const spawn = Math.min(missing, FILL_CONCURRENCY - this.inFlightFills);
+    for (let i = 0; i < spawn; i++) void this.fillOne();
   }
 
-  private async doFill(): Promise<void> {
-    this.filling = true;
+  private async fillOne(): Promise<void> {
+    this.inFlightFills++;
+    const n = ++this.poolSeq;
     try {
-      while (this.pool.length < this.poolTarget) {
-        const n = ++this.poolSeq;
+      const vm = await this.bootVm({
+        id: `pool-${n}`,
+        stateDir: join(this.poolDir, `slot-${n}`),
+        image: this.poolImage,
+        socketPath: `/tmp/hc-pool-${n}.sock`,
+        limits: this.poolLimits,
+      });
+      if (this.poolTarget <= 0) {
+        // Drained while booting: destroy the orphan instead of leaking it.
+        vm.helper.kill();
         try {
-          const vm = await this.bootVm({
-            id: `pool-${n}`,
-            stateDir: join(this.poolDir, `slot-${n}`),
-            image: this.poolImage,
-            socketPath: `/tmp/hc-pool-${n}.sock`,
-            limits: this.poolLimits,
-          });
-          this.pool.push(vm);
-          log.info("warm pool: spare guest ready", { size: this.pool.length, target: this.poolTarget });
-        } catch (err) {
-          log.warn("warm pool: spare boot failed (will retry on next claim)", {
-            error: (err as Error).message,
-          });
-          break; // don't hot-loop on a persistent failure
+          unlinkSync(vm.socketPath);
+        } catch {
+          /* ignore */
         }
+        try {
+          rmSync(vm.stateDir, { recursive: true, force: true });
+        } catch {
+          /* ignore */
+        }
+        return;
       }
+      this.pool.push(vm);
+      log.info("warm pool: spare guest ready", { size: this.pool.length, target: this.poolTarget });
+    } catch (err) {
+      log.warn("warm pool: spare boot failed (backing off)", {
+        error: (err as Error).message,
+      });
+      this.fillBackoffUntil = Date.now() + 5000; // no spawn-storm on persistent failure
     } finally {
-      this.filling = false;
+      this.inFlightFills--;
+      this.fillPool(); // keep topping up until the target is met
     }
   }
 

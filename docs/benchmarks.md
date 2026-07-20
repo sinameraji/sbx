@@ -4,6 +4,8 @@ hotcell measured with [computesdk/benchmarks](https://github.com/computesdk/benc
 
 Run on 2026-07-19/20 against hotcell v0.1.10 (`main@d897b0c`). Provider numbers quoted for context are from that project's published run of 2026-07-17.
 
+The four latency benchmarks below were run through the ComputeSDK harness unmodified. The [real-workload benchmark](#sandbox-dax) is the same underlying script run through hotcell's own harness on bare metal — that section says so and links the raw output.
+
 ## Read this before quoting any number
 
 **hotcell's numbers have no network in them; the leaderboard's do.** The public benchmark runs on a US CI runner and calls each provider's cloud API over the internet. hotcell is self-hosted, so the harness ran on the same machine as the daemon. That is the honest operating condition for a self-hosted sandbox — and it is *not* an apples-to-apples comparison with a hosted provider's number. Where this page compares, it says so explicitly.
@@ -20,7 +22,7 @@ The suite measures **TTI (Time to Interactive)**: wall-clock from `create()` to 
 | [Staggered TTI](#staggered-tti) | 100 sandboxes launched 200 ms apart | Degradation as load ramps |
 | [Burst TTI](#burst-tti) | 100 sandboxes created simultaneously | Behaviour under a thundering herd |
 | [Warm-pool adopt](#warm-pool-adopt) | Create against a pre-booted pool | The floor when a microVM is already running |
-| [sandbox-dax](#sandbox-dax-not-yet-run) | Clone + install + typecheck a real repo | Real dev-workload throughput — *not yet run* |
+| [sandbox-dax](#sandbox-dax) | Clone + install + typecheck a real repo | Real dev-workload throughput, and the memory/CPU a real build actually demands |
 
 Hardware: **Mac** = M-series, 8 cores / 16 GB, Docker Desktop with an 8 GB VM. **GCP** = 8 vCPU / 32 GB, nested virtualisation.
 
@@ -85,9 +87,40 @@ Caveats, because this number is attractive and easy to misuse:
 
 Treat 24 ms as evidence that the adopt path is fast, not as a claimable TTI. Fixing the two bugs and re-measuring through the official harness is the open work.
 
-### sandbox-dax (not yet run)
+### sandbox-dax
 
-The suite's real-workload benchmark: inside one sandbox, download Bun, clone a repo, install dependencies, typecheck — seven timed phases. It needs outbound network from inside the guest, and hotcell's microVMs default to no NIC (egress goes through the gateway), so this has not been run. Worth doing: in the published 2026-07-17 run, only one of nineteen providers completed all seven phases.
+The suite's real-workload benchmark: inside one sandbox, download Bun, clone the OpenCode repo, `bun install`, `bun typecheck` — seven timed phases. The `sandbox-dax` mode runs [dax's OpenCode provider benchmark](https://github.com/anomalyco/opencode) (`script/provider-benchmark.sh` on the `provider-benchmark` branch).
+
+**hotcell has run this workload extensively** — the same script, unmodified, on Firecracker microVMs. Full raw output for every run, including every failure, is in [`evidence/opencode-benchmark/`](../evidence/opencode-benchmark/). What follows is the summary; that directory is the source of truth.
+
+One difference in provenance matters: those runs used hotcell's own harness (`bench-suite.sh` — cold microVM per run, sampled peak guest memory, outcomes classified `PASS`/`OOM`/`INSTALL_FLAKE`/`ADMISSION`), *not* ComputeSDK's `--mode sandbox-dax` wrapper. So there is no ComputeSDK-format score row for hotcell here. The underlying workload and its phase timings are the same; the reporting is deeper.
+
+**Bare metal, Ryzen 9 5950X, 5 cold reps at 32 vCPU / 32 GiB** ([`32vcpu-5reps.txt`](../evidence/opencode-benchmark/raw/hetzner-5950x/32vcpu-5reps.txt)):
+
+| Phase | Median |
+| --- | --- |
+| Clone | 4.34 s |
+| Install | 13.44 s |
+| Typecheck | 17.42 s |
+| **Workload total** (clone + install + typecheck) | **35.385 s** |
+| Full script total (all seven phases) | 58.45 s |
+
+The same script on the bare host, no VM at all, totals 30.411 s ([`control-bare-host.txt`](../evidence/opencode-benchmark/raw/hetzner-5950x/control-bare-host.txt)) — so the microVM costs about 16 % on this workload, which is the honest price of the isolation.
+
+Against the published 2026-07-17 run, where **only one of nineteen providers (Modal) completed all seven phases** — full-script total 62.594 s, install 20.361 s, typecheck 24.896 s, from a single iteration:
+
+- At **32 vCPU** hotcell's full-script total is 58.45 s, about 7 % faster than Modal's — but on 32 dedicated bare-metal cores, which is almost certainly a larger machine than Modal's sandbox. Not a like-for-like win.
+- At **8 vCPU** hotcell totals ~70 s, about 12 % *slower* than Modal.
+- **Install came in under Modal's 20.4 s at every rung tested** (11.7–19.4 s), though only marginally so at 2 vCPU — it is bound more by disk than by cores.
+- **Typecheck tracks cores**: 30.7 s at 8 vCPU, 20.2 s at 16, 17.4 s at 32 — so Modal's 24.9 s sits between hotcell's 8- and 16-vCPU rungs.
+
+The more useful result is not a single row but the **demand curve** — what this workload actually requires, which no leaderboard reports:
+
+- **Memory floor is a band, not a line.** Peak working set varies 11.0–14.2 GiB across byte-identical reps, so rungs near the edge flip: ≤ 8 GiB always OOMs, 12 GiB passed 1 of 3, 16 GiB passed 3 of 3 in one session but OOM'd in an earlier one, ≥ 24 GiB has never failed. Provision ≥ 24 GiB for this workload, not 16.
+- **CPU knee at 8–16 vCPU.** Typecheck median at 32 GiB: 102.8 s (2 vCPU) → 53.9 s (4) → 30.7 s (8) → 20.2 s (16) → 17.4 s (32). Gains per doubling fall 1.91× → 1.76× → 1.52× → 1.16×. Past 16 cores you are buying very little.
+- **Default-deny egress is free.** With the guest holding no NIC and all traffic crossing the vsock gateway, the same workload ran 3/3 at 46.211 s median at 8 vCPU — no measurable cost against the NAT rung at the same config. The workload needs exactly three allowlist entries (`nodejs.org`, `api.github.com`, `pkg.pr.new`), measured from denial logs.
+
+Measuring this also surfaced and fixed three product bugs (a `writableRootfs` gap, a git 407-CONNECT failure, and a resume-path admission gap), and one open one: in the microVM guest `bun install` source-builds `tree-sitter-powershell` instead of using the shipped prebuilt, worked around by putting npm's bundled `node-gyp` on PATH at a cost of ~1.3 s. Root cause still open, documented in [`nodegyp-diagnostic.txt`](../evidence/opencode-benchmark/raw/hetzner-5950x/nodegyp-diagnostic.txt).
 
 ## Summary
 
@@ -96,6 +129,7 @@ The suite's real-workload benchmark: inside one sandbox, download Bun, clone a r
 - **Cold microVM boots are slow** — ~2.6 s, second-slowest against the published field, until warm pools cover real images.
 - **Single-host burst is the weak spot** — one machine is one machine.
 - **Failures are clean** — typed 4xx/5xx from admission control, no hangs; 11 of 13 runs at 100 % success, worst case 30/100 under deliberate memory pressure.
+- **Real build workloads run at roughly a 16 % virtualisation cost**, with default-deny egress adding nothing measurable — and the demand curve behind that number (memory floor, CPU knee) is published rather than reduced to one row.
 
 ## Reproducing this
 

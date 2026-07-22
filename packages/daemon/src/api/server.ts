@@ -60,7 +60,7 @@ interface Deps {
 /**
  * Phase 0/1 REST surface:
  *   GET    /healthz
- *   POST   /sandboxes                      -> create
+ *   POST   /sandboxes                      -> create ({detach: true} returns a `creating` record immediately; poll GET /sandboxes/:id)
  *   GET    /sandboxes                      -> list
  *   GET    /sandboxes/:id                  -> get
  *   DELETE /sandboxes/:id                  -> destroy (removes volume too)
@@ -191,7 +191,7 @@ async function handleTerminalUpgrade(
     socket.destroy();
     return;
   }
-  if (record.status === "stopped") {
+  if (record.status === "stopped" || record.status === "creating" || record.status === "error") {
     socket.write("HTTP/1.1 409 Conflict\r\n\r\n");
     socket.destroy();
     return;
@@ -945,17 +945,6 @@ async function createSandbox(
     }
   }
 
-  try {
-    await driver.create({ id, image, driver: driverName, env, labels, persist, setup: setupSteps, repo, repoRef, limits, networked, writableRootfs, cpuset });
-  } catch (err) {
-    // Provisioning failed (e.g. repo clone) — release the pending reservation,
-    // tear down the half-built container so it doesn't orphan, and report the
-    // failure instead of leaking it.
-    admitted.release();
-    await driver.destroy(id).catch(() => {});
-    return sendJson(res, 422, { error: `sandbox provisioning failed: ${errorMessage(err)}` });
-  }
-
   // Per-sandbox LLM spend ceiling: per-create value (if a valid non-negative
   // number) overrides the daemon default; 0 = unlimited.
   const egressSpendCapUsd =
@@ -963,11 +952,18 @@ async function createSandbox(
       ? body.egressSpendCapUsd
       : config.egressSpendCapUsd;
 
+  // The record exists (status `creating`) BEFORE provisioning runs, in both
+  // modes: a detached create needs something to poll, and registering the
+  // egress token up front means setup traffic through the gateway can
+  // authenticate even under enforcement. The pending capacity reservation is
+  // held until the terminal state (`committed()` only counts `running`).
+  const detach = body.detach === true;
   const now = new Date().toISOString();
   const record: SandboxRecord = {
     id,
     image,
-    status: "running",
+    status: "creating",
+    statusReason: "starting",
     createdAt: now,
     driver: driverName,
     labels,
@@ -980,11 +976,73 @@ async function createSandbox(
     usage: emptyUsage(),
   };
   store.add(record);
-  // The record is now `running` and counted by the meter itself, so drop the
-  // pending reservation synchronously (no await between the write and this).
-  admitted.release();
   if (egressToken) store.addEgressToken(egressToken, id, egressPolicy);
+
+  const provision = () =>
+    driver.create({
+      id, image, driver: driverName, env, labels, persist, setup: setupSteps,
+      repo, repoRef, limits, networked, writableRootfs, cpuset,
+      onProgress: (phase) => {
+        const r = store.get(id);
+        if (r?.status === "creating") {
+          r.statusReason = phase;
+          store.add(r);
+        }
+      },
+    });
+
+  // Terminal transitions. Both re-check the store: a DELETE mid-create is the
+  // cancel path, and must win — never resurrect a destroyed record.
+  const finishOk = (): SandboxRecord | null => {
+    admitted.release();
+    const r = store.get(id);
+    if (!r) {
+      void driver.destroy(id).catch(() => {});
+      return null;
+    }
+    r.status = "running";
+    r.statusReason = undefined;
+    r.lastActivityAt = new Date().toISOString();
+    store.add(r);
+    return r;
+  };
+  const finishFail = async (err: unknown, keepRecord: boolean): Promise<void> => {
+    admitted.release();
+    // Tear down the half-built container so it doesn't orphan.
+    await driver.destroy(id).catch(() => {});
+    const r = store.get(id);
+    if (!r || !keepRecord) {
+      store.remove(id);
+      store.clearSandbox(id);
+      return;
+    }
+    r.status = "error";
+    r.statusReason = errorMessage(err);
+    store.add(r);
+    store.clearRuntimeState(id);
+    for (const t of store.listEgressTokens(id)) store.removeEgressToken(t.token);
+  };
+
+  if (!detach) {
+    try {
+      await provision();
+    } catch (err) {
+      await finishFail(err, /* keepRecord */ false);
+      return sendJson(res, 422, { error: `sandbox provisioning failed: ${errorMessage(err)}` });
+    }
+    const r = finishOk();
+    if (!r) return sendJson(res, 404, { error: "sandbox was destroyed during create" });
+    return sendJson(res, 201, r);
+  }
+
+  // Detached: respond now, keep provisioning in the background. The client
+  // polls GET /sandboxes/:id until `running` or `error`. No response object is
+  // held past this point, so a client disconnect changes nothing server-side.
   sendJson(res, 201, record);
+  void provision()
+    .then(() => void finishOk())
+    .catch((err) => finishFail(err, /* keepRecord */ true))
+    .catch((err) => log.error("background create cleanup failed", { sandbox: id, error: errorMessage(err) }));
 }
 
 async function stopSandbox(
@@ -994,6 +1052,8 @@ async function stopSandbox(
 ): Promise<void> {
   const record = store.get(id);
   if (!record) return sendJson(res, 404, { error: "not found" });
+  const blocked = notReadyRefusal(res, record);
+  if (blocked) return;
   if (record.status === "stopped") return sendJson(res, 200, record);
   await driver.stop(id);
   // Processes and exposed ports die with the container; sessions persist.
@@ -1010,6 +1070,8 @@ async function startSandbox(
 ): Promise<void> {
   const record = store.get(id);
   if (!record) return sendJson(res, 404, { error: "not found" });
+  const blocked = notReadyRefusal(res, record);
+  if (blocked) return;
   if (record.status === "running") return sendJson(res, 200, record);
   try {
     await resumeSandbox(driver, store, record, capacity);
@@ -1033,6 +1095,8 @@ async function pauseSandboxRoute(
 ): Promise<void> {
   const record = store.get(id);
   if (!record) return sendJson(res, 404, { error: "not found" });
+  const blocked = notReadyRefusal(res, record);
+  if (blocked) return;
   if (record.status === "paused") return sendJson(res, 200, record);
   if (record.status === "stopped") {
     return sendJson(res, 409, { error: "sandbox is stopped; start it first" });
@@ -1042,11 +1106,32 @@ async function pauseSandboxRoute(
 }
 
 /**
+ * Refuse an operation on a sandbox that hasn't finished (or failed) creating.
+ * Sends the 409 itself and returns true when the request was refused; the only
+ * operation these states allow is DELETE (cancel / clean up).
+ */
+function notReadyRefusal(res: ServerResponse, record: SandboxRecord): boolean {
+  if (record.status === "creating") {
+    const phase = record.statusReason ? ` (${record.statusReason})` : "";
+    sendJson(res, 409, { error: `sandbox is still being created${phase}` });
+    return true;
+  }
+  if (record.status === "error") {
+    sendJson(res, 409, {
+      error: `sandbox creation failed: ${record.statusReason ?? "unknown error"}; destroy it with DELETE /sandboxes/:id`,
+    });
+    return true;
+  }
+  return false;
+}
+
+/**
  * Resolve a sandbox that must be live to do work. Records the activity (so the
  * idle reaper sees recent use), transparently resumes a `paused` sandbox
- * (admission-gated — an over-budget wake is a 503), and rejects a manually
- * `stopped` one (409 — the user must `start` it). Sends the error response
- * itself and returns null on failure.
+ * (admission-gated — an over-budget wake is a 503), rejects a manually
+ * `stopped` one (409 — the user must `start` it), and refuses `creating`/
+ * `error` sandboxes (409 — not live yet / never will be). Sends the error
+ * response itself and returns null on failure.
  */
 async function ensureLive(
   res: ServerResponse,
@@ -1060,6 +1145,7 @@ async function ensureLive(
     sendJson(res, 404, { error: "not found" });
     return null;
   }
+  if (notReadyRefusal(res, record)) return null;
   if (record.status === "stopped") {
     sendJson(res, 409, { error: "sandbox is stopped; start it first" });
     return null;

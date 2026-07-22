@@ -142,6 +142,13 @@ export interface CreateOptions {
    * disclosed benchmark topology. Ignored by the container driver.
    */
   cpuset?: string;
+  /**
+   * In-process callback invoked as create advances phases ("launching container",
+   * "cloning repo", "running setup"). Feeds `statusReason` on a `creating`
+   * record so clients polling a detached create see where it is. Optional;
+   * drivers may skip phases they don't have. Never serialized.
+   */
+  onProgress?: (phase: string) => void;
 }
 
 /**

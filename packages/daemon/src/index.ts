@@ -76,6 +76,20 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
+  // A `creating` record at boot means a create was interrupted by a daemon
+  // restart. We can't know how far provisioning got, so be honest: mark it
+  // `error` (pollers see the reason and can destroy/retry) and tear down
+  // whatever half-built resources materialized.
+  for (const record of store.list()) {
+    if (record.status !== "creating") continue;
+    record.status = "error";
+    record.statusReason = "daemon restarted during create";
+    store.add(record);
+    for (const t of store.listEgressTokens(record.id)) store.removeEgressToken(t.token);
+    void driver.destroy(record.id).catch(() => {});
+    log.warn("create was interrupted by a daemon restart; marked error", { sandbox: record.id });
+  }
+
   // Host capacity for the meter + admission control (best-effort detection).
   const host = await driver.hostInfo().catch(() => null);
   const capacity = new Capacity(store, config, host, history, () => driver.poolStats());

@@ -160,6 +160,7 @@ export class SandboxStore {
     this.ensureColumn("sandboxes", "limits", "TEXT NOT NULL DEFAULT '{}'");
     this.ensureColumn("sandboxes", "egressSpendCap", "REAL NOT NULL DEFAULT 0");
     this.ensureColumn("sandboxes", "driver", "TEXT NOT NULL DEFAULT ''");
+    this.ensureColumn("sandboxes", "statusReason", "TEXT NOT NULL DEFAULT ''");
     this.ensureColumn("egress_tokens", "policy", "TEXT NOT NULL DEFAULT '{}'");
     this.ensureColumn("egress_tokens", "spendUsd", "REAL NOT NULL DEFAULT 0");
   }
@@ -234,11 +235,11 @@ export class SandboxStore {
     this.db
       .prepare(
         `INSERT INTO sandboxes
-           (id, image, status, createdAt, driver, labels, env, persist, lastActivityAt, sleepAfterMs, usage, limits, egressSpendCap)
+           (id, image, status, statusReason, createdAt, driver, labels, env, persist, lastActivityAt, sleepAfterMs, usage, limits, egressSpendCap)
          VALUES
-           ($id, $image, $status, $createdAt, $driver, $labels, $env, $persist, $lastActivityAt, $sleepAfterMs, $usage, $limits, $egressSpendCap)
+           ($id, $image, $status, $statusReason, $createdAt, $driver, $labels, $env, $persist, $lastActivityAt, $sleepAfterMs, $usage, $limits, $egressSpendCap)
          ON CONFLICT(id) DO UPDATE SET
-           image=$image, status=$status, createdAt=$createdAt, driver=$driver,
+           image=$image, status=$status, statusReason=$statusReason, createdAt=$createdAt, driver=$driver,
            labels=$labels, env=$env, persist=$persist,
            lastActivityAt=$lastActivityAt, sleepAfterMs=$sleepAfterMs, usage=$usage, limits=$limits,
            egressSpendCap=$egressSpendCap`,
@@ -247,6 +248,7 @@ export class SandboxStore {
         id: record.id,
         image: record.image,
         status: record.status,
+        statusReason: record.statusReason ?? "",
         createdAt: record.createdAt,
         driver: record.driver ?? "",
         labels: JSON.stringify(record.labels),
@@ -592,6 +594,7 @@ function rowToSandbox(row: any): SandboxRecord {
     id: row.id,
     image: row.image,
     status: row.status,
+    statusReason: row.statusReason || undefined,
     createdAt: row.createdAt,
     driver: row.driver || undefined,
     labels: JSON.parse(row.labels),

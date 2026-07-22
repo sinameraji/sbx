@@ -52,8 +52,10 @@ export const DASHBOARD_HTML = String.raw`<!doctype html>
   .badge { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11px;
     font-weight: 600; }
   .badge.running { background: rgba(63,185,80,.15); color: var(--green); }
+  .badge.creating { background: rgba(88,166,255,.15); color: var(--blue, #58a6ff); }
   .badge.paused { background: rgba(210,153,34,.15); color: var(--yellow); }
   .badge.stopped { background: rgba(139,148,158,.15); color: var(--muted); }
+  .badge.error { background: rgba(248,81,73,.15); color: var(--red, #f85149); }
   .num { font-family: var(--mono); text-align: right; }
   .actions { white-space: nowrap; }
   .actions button { padding: 3px 8px; font-size: 12px; margin-left: 4px; }
@@ -242,7 +244,7 @@ function refresh() {
       html += "<td class=\"actions\">";
       if (s.status === "running" || s.status === "paused") {
         html += "<button class=\"secondary\" data-act=\"stop\" data-id=\"" + s.id + "\">Stop</button>";
-      } else {
+      } else if (s.status === "stopped") {
         html += "<button class=\"secondary\" data-act=\"start\" data-id=\"" + s.id + "\">Start</button>";
       }
       html += "<button class=\"danger\" data-act=\"rm\" data-id=\"" + s.id + "\">Destroy</button>";

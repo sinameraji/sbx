@@ -67,6 +67,56 @@ async function main(): Promise<number> {
     }
     console.error("[smoke] setup command ran");
 
+    // Detached create: 201 with a `creating` record immediately, ops 409 until
+    // provisioning finishes in the background, then the status flips to running.
+    const detachRes = await fetch(`${endpoint}/sandboxes`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ detach: true, setup: ["sleep 3"] }),
+    });
+    if (detachRes.status !== 201) throw new Error(`detach create failed: ${detachRes.status}`);
+    const detached = (await detachRes.json()) as { id: string; status: string };
+    if (detached.status !== "creating") {
+      throw new Error(`detach create returned status "${detached.status}", expected "creating"`);
+    }
+    const earlyExec = await fetch(`${endpoint}/sandboxes/${detached.id}/exec`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ command: "true" }),
+    });
+    if (earlyExec.status !== 409) {
+      throw new Error(`exec during creating: ${earlyExec.status}, expected 409`);
+    }
+    await earlyExec.body?.cancel();
+    const detachedFinal = await pollStatus(endpoint, detached.id, 30_000);
+    if (detachedFinal.status !== "running") {
+      throw new Error(
+        `detached create ended as "${detachedFinal.status}" (${detachedFinal.statusReason ?? ""})`,
+      );
+    }
+    console.error(`[smoke] detached create reached running (${detached.id})`);
+
+    // Detached create that fails (unresolvable repo): ends as `error` with a
+    // reason, stays listed for inspection, and DELETE cleans it up.
+    const badRes = await fetch(`${endpoint}/sandboxes`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ detach: true, repo: "https://invalid.invalid/nope.git" }),
+    });
+    if (badRes.status !== 201) throw new Error(`failing detach create: ${badRes.status}`);
+    const bad = (await badRes.json()) as { id: string };
+    const failed = await pollStatus(endpoint, bad.id, 60_000);
+    if (failed.status !== "error" || !failed.statusReason) {
+      throw new Error(
+        `failing detach create ended as "${failed.status}" (${failed.statusReason ?? "no reason"})`,
+      );
+    }
+    for (const sid of [detached.id, bad.id]) {
+      const del = await fetch(`${endpoint}/sandboxes/${sid}`, { method: "DELETE" });
+      if (!del.ok) throw new Error(`cleanup of ${sid} failed: ${del.status}`);
+    }
+    console.error("[smoke] failing detached create surfaced its error and cleaned up");
+
     // Run command.
     const execRes = await fetch(`${endpoint}/sandboxes/${id}/exec`, {
       method: "POST",
@@ -1013,6 +1063,23 @@ type ExecEvent =
   | { type: "stdout"; data: string }
   | { type: "stderr"; data: string }
   | { type: "exit"; exitCode: number };
+
+/** Poll GET /sandboxes/:id until it leaves `creating` (or the deadline passes). */
+async function pollStatus(
+  endpoint: string,
+  id: string,
+  timeoutMs: number,
+): Promise<{ status: string; statusReason?: string }> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const res = await fetch(`${endpoint}/sandboxes/${id}`);
+    if (!res.ok) throw new Error(`poll of ${id} failed: ${res.status}`);
+    const record = (await res.json()) as { status: string; statusReason?: string };
+    if (record.status !== "creating") return record;
+    if (Date.now() > deadline) return record;
+    await setTimeout(500);
+  }
+}
 
 async function* parseSSE(
   body: ReadableStream<Uint8Array>,

@@ -123,7 +123,9 @@ export class AppleVzDriver extends AgentDriver {
   // --- lifecycle ------------------------------------------------------------
 
   async create(opts: CreateOptions): Promise<void> {
+    opts.onProgress?.("booting vm");
     await this.launch(opts);
+    if (opts.setup?.length) opts.onProgress?.("running setup");
     // Best-effort setup commands, mirroring the container driver (non-fatal).
     for (const command of opts.setup ?? []) {
       const code = await this.exec(opts.id, command, {}, () => {}).catch(() => -1);

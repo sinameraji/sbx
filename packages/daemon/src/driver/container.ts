@@ -220,8 +220,13 @@ export class ContainerDriver implements Driver {
   }
 
   async create(opts: CreateOptions): Promise<void> {
+    opts.onProgress?.("launching container");
     await this.launchContainer(opts);
-    if (opts.repo) await this.cloneRepo(opts.id, opts.repo, opts.repoRef);
+    if (opts.repo) {
+      opts.onProgress?.("cloning repo");
+      await this.cloneRepo(opts.id, opts.repo, opts.repoRef);
+    }
+    if (opts.setup?.length) opts.onProgress?.("running setup");
     await this.runSetup(opts.id, opts.setup ?? []);
   }
 

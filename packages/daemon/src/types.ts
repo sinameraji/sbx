@@ -1,12 +1,16 @@
 // Shared daemon types.
 
 /**
- * Lifecycle states. `running` and `stopped` are explicit (user-driven via
- * start/stop); `paused` is auto-entered by the idle reaper after `sleepAfterMs`
- * of inactivity and auto-resumes on the next operation. A `stopped` sandbox is
- * left alone by the reaper and does *not* auto-resume — the user must `start` it.
+ * Lifecycle states. `creating` is the initial state while provisioning (launch +
+ * clone + setup) runs — a detached create returns the record in this state and
+ * flips it to `running` (or `error`, with the reason in `statusReason`) in the
+ * background. `running` and `stopped` are explicit (user-driven via start/stop);
+ * `paused` is auto-entered by the idle reaper after `sleepAfterMs` of inactivity
+ * and auto-resumes on the next operation. A `stopped` sandbox is left alone by
+ * the reaper and does *not* auto-resume — the user must `start` it. `error` is
+ * terminal: the backing resources are already destroyed; only DELETE applies.
  */
-export type SandboxStatus = "running" | "paused" | "stopped";
+export type SandboxStatus = "creating" | "running" | "paused" | "stopped" | "error";
 
 /**
  * Hard per-sandbox resource caps, enforced by the driver (cgroups via Docker).
@@ -26,6 +30,12 @@ export interface SandboxRecord {
   id: string;
   image: string;
   status: SandboxStatus;
+  /**
+   * Human-readable elaboration of `status`: the provisioning phase while
+   * `creating` ("cloning repo", "running setup"), the failure reason after
+   * `error`. Unset in the other states.
+   */
+  statusReason?: string;
   createdAt: string;
   /**
    * Runtime driver backing this sandbox (`container` | `applevz` | `firecracker`).

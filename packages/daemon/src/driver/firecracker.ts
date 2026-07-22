@@ -162,7 +162,9 @@ export class FirecrackerDriver extends AgentDriver {
   // --- lifecycle ------------------------------------------------------------
 
   async create(opts: CreateOptions): Promise<void> {
+    opts.onProgress?.("booting vm");
     await this.launch(opts);
+    if (opts.setup?.length) opts.onProgress?.("running setup");
     for (const command of opts.setup ?? []) {
       const code = await this.exec(opts.id, command, {}, () => {}).catch(() => -1);
       if (code === 0) log.info("setup command ok", { sandbox: opts.id, command });

@@ -90,6 +90,9 @@ async function bridgeAndSplice(
   if (record?.status === "stopped") {
     return respond(socket, 502, "Sandbox is stopped; start it first");
   }
+  if (record?.status === "creating" || record?.status === "error") {
+    return respond(socket, 502, "Sandbox is not ready");
+  }
   if (record?.status === "paused") {
     try {
       await resumeSandbox(driver, store, record, capacity);

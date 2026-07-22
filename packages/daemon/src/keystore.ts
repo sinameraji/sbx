@@ -27,7 +27,15 @@ const LEGACY_KEYCHAIN_PROBES = ["openrouter", "openai", "anthropic", "google", "
 
 export type KeySource = "keychain" | "file" | "env";
 
-const onMac = () => process.platform === "darwin";
+/**
+ * Backend override (`HOTCELL_KEYSTORE=file|keychain`). The macOS keychain is
+ * global to the login session: it ignores `HOTCELL_HOME`, so a test or a scratch
+ * install pointed at a throwaway home still reads and OVERWRITES the real
+ * entries. `file` confines everything to `$HOTCELL_HOME/keys.json`, which is what
+ * makes an isolated run genuinely isolated. Default behaviour is unchanged.
+ */
+const onMac = () =>
+  process.platform === "darwin" && (process.env.HOTCELL_KEYSTORE ?? "keychain") !== "file";
 
 function keychainGet(provider: string): string | null {
   try {

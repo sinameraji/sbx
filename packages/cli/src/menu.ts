@@ -74,7 +74,8 @@ async function keysMenu(globals: GlobalArgs): Promise<void> {
     const pick = await select("provider keys", [
       { label: "Show keys" },
       { label: "Add a key", hint: "any provider · hidden input · applies live" },
-      { label: "Import a .env", hint: "file path or paste — stores every KEY=VALUE" },
+      { label: "Import a .env", hint: "file path or paste — you set each variable" },
+      { label: "Review decisions", hint: "change what a variable does, later" },
       { label: "Remove a key" },
       { label: "Back" },
     ], 0, { pad: true, erase: true });
@@ -89,6 +90,8 @@ async function keysMenu(globals: GlobalArgs): Promise<void> {
     } else if (pick === 2) {
       await importEnvInteractive(globals);
     } else if (pick === 3) {
+      await keysCommand(["review"], globals, {});
+    } else if (pick === 4) {
       const names = Object.keys(loadKeys());
       if (names.length === 0) {
         process.stdout.write(`  ${c.dim}no keys stored${c.reset}\n`);

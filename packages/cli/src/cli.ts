@@ -202,13 +202,18 @@ Commands:
     --setup runs a shell command once after the container starts (best-effort;
     chain with && for multiple steps, e.g. --setup "npm i x && pip install y").
 
-  hotcell keys add <provider> [--value <key>]  ·  keys import [.env]  ·  keys ls  ·  keys rm <provider>
+  hotcell keys add <provider> [--value <key>]  ·  keys import [.env]  ·  keys review  ·  keys ls  ·  keys rm <provider>
     Store API keys on the host (macOS keychain, else chmod-600 ~/.hotcell/keys.json)
-    — never inside a sandbox. <provider> is any name; the egress gateway routes
-    openai/anthropic/openrouter/google/github out of the box, anything else once the
-    daemon has HOTCELL_PROVIDER_<NAME>_BASEURL/_AUTHHEADER/_FORMAT set. import
-    bulk-loads a .env, mapping names (OPENAI_API_KEY → openai, GH_TOKEN → github).
-    Human: hidden prompt. Agent: --value/--stdin, or pipe a .env to import.
+    — never inside a sandbox. <provider> is any name; openai/anthropic/openrouter/
+    google/github route out of the box, and any other provider once you give its
+    base URL + auth header (asked once, saved to .hotcell/env.json).
+    import reads a .env and asks you to set every variable to one of:
+      gateway  key stays here; the sandbox gets a per-sandbox token
+      inject   the real value is copied into every sandbox
+      skip     never leaves this machine
+    hotcell does not guess which is which. review re-opens those decisions later.
+    Human: hidden prompt / review screen. Agent: --value/--stdin; for import,
+    --set NAME=gateway|inject|skip (repeatable) or --default-unknown=skip|inject.
 
   hotcell tui   (alias: hotcell top)
     Full-screen fleet monitor + control panel. Arrow-key nav, live CPU/mem/cost,
@@ -310,6 +315,17 @@ export interface ParsedArgs {
   positional: string[];
 }
 
+/**
+ * Repeated value flags accumulate comma-separated rather than overwriting, so
+ * `--set A=gateway --set B=inject` and `--set A=gateway,B=inject` are the same
+ * input. Every consumer already splits on commas (`--env`, `--label`, `--set`),
+ * so this is uniform; a repeated flag silently dropping all but the last value
+ * is the alternative, and with dispositions that would lose decisions.
+ */
+function accumulate(existing: string | boolean | undefined, value: string): string {
+  return typeof existing === "string" ? `${existing},${value}` : value;
+}
+
 export function parseFlags(args: string[]): ParsedArgs {
   const flags: Record<string, string | boolean> = {};
   const positional: string[] = [];
@@ -321,7 +337,7 @@ export function parseFlags(args: string[]): ParsedArgs {
       const key = eq === -1 ? arg.slice(2) : arg.slice(2, eq);
       const value = eq === -1 ? args[i + 1] : arg.slice(eq + 1);
       if (eq === -1 && value !== undefined && !value.startsWith("-")) {
-        flags[key] = value;
+        flags[key] = accumulate(flags[key], value);
         i++;
       } else {
         flags[key] = true;

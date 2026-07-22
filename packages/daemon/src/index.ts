@@ -2,7 +2,7 @@
 import { get as httpGet } from "node:http";
 import { BackupRegistry } from "./backups.js";
 import { Capacity } from "./capacity.js";
-import { loadConfig } from "./config.js";
+import { loadConfig, loadProviderConfigs } from "./config.js";
 import { DriverRouter } from "./driver/router.js";
 import { startReaper } from "./lifecycle.js";
 import { configureLogger, log } from "./logger.js";
@@ -107,6 +107,9 @@ async function main(): Promise<void> {
   let egress: EgressServer | undefined;
   const reloadKeys = () => {
     config.providerKeys = loadProviderKeyMap();
+    // Shapes too: `hotcell keys add <new-provider>` writes a base URL + auth
+    // header alongside the key, and a route needs both to exist.
+    config.providerConfigs = loadProviderConfigs();
     const rebuilt = buildProviders(config);
     egress?.reloadProviders(rebuilt);
     log.info("provider keys reloaded", { providers: Object.keys(rebuilt).length });

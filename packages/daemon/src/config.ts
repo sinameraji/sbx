@@ -15,7 +15,8 @@ export const CONFIG_FILE = join(
   process.env.HOTCELL_HOME || join(homedir(), ".hotcell"),
   "config.json",
 );
-const fileConfig: Record<string, string> = (() => {
+/** Read the persisted config fresh (used by hot-reload paths); never throws. */
+function readFileConfig(): Record<string, string> {
   let raw: string;
   try {
     raw = readFileSync(CONFIG_FILE, "utf8");
@@ -37,7 +38,10 @@ const fileConfig: Record<string, string> = (() => {
     console.error(`[hotcell] ignoring malformed ${CONFIG_FILE} (not valid JSON)`);
     return {};
   }
-})();
+}
+
+/** Snapshot read once at startup for scalar settings (`env()` precedence). */
+const fileConfig: Record<string, string> = readFileConfig();
 
 /**
  * Read a daemon config value, highest precedence first: `HOTCELL_<name>` env,
@@ -387,11 +391,16 @@ function loadProviderKeys(): Record<string, string> {
  * `HOTCELL_PROVIDER_CFOPENAI_BASEURL=https://gateway.ai.cloudflare.com/v1/<acct>/<gw>/openai`
  * defines a `cfopenai` route (pair with `HOTCELL_PROVIDER_KEY_CFOPENAI`).
  */
-function loadProviderConfigs(): Record<string, ProviderConfig> {
+export function loadProviderConfigs(): Record<string, ProviderConfig> {
   const out: Record<string, ProviderConfig> = {};
+  // The persisted config file is scanned first and re-read each call, so a shape
+  // captured by `hotcell keys add`/`import` applies on the next hot-reload
+  // without a daemon restart; env still overrides it, matching `env()`.
+  const sources: Record<string, string | undefined>[] = [readFileConfig(), process.env];
   // Legacy prefix scanned first so HOTCELL_ overwrites on conflict.
+  for (const source of sources) {
   for (const prefix of ["SBX_PROVIDER_", "HOTCELL_PROVIDER_"]) {
-    for (const [name, value] of Object.entries(process.env)) {
+    for (const [name, value] of Object.entries(source)) {
       if (!name.startsWith(prefix) || !value) continue;
       if (name.startsWith("SBX_PROVIDER_KEY_") || name.startsWith("HOTCELL_PROVIDER_KEY_")) continue;
       const rest = name.slice(prefix.length); // <NAME>_<FIELD>
@@ -404,6 +413,7 @@ function loadProviderConfigs(): Record<string, ProviderConfig> {
       else if (field === "AUTHHEADER") cfg.authHeader = value.toLowerCase();
       else if (field === "FORMAT") cfg.formatTemplate = value;
     }
+  }
   }
   return out;
 }

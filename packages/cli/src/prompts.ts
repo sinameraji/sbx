@@ -269,3 +269,139 @@ export function textInput(label: string, def = ""): Promise<string> {
     });
   });
 }
+
+export interface CycleRow {
+  /** Left column — the variable name. */
+  name: string;
+  /** Dimmed middle column, e.g. a masked value. */
+  detail?: string;
+  /** Dimmed trailing note, e.g. `→ openai`. */
+  note?: string;
+  /** Chosen state, or null while the user has not decided yet. */
+  state: string | null;
+}
+
+export interface CycleListOptions {
+  /** Ordered states that `space` cycles through. */
+  states: string[];
+  /** Single-key shortcuts, e.g. `{ g: "gateway", i: "inject", s: "skip" }`. */
+  shortcuts: Record<string, string>;
+  /** Colour per state (values from `c`); unlisted states render plain. */
+  colors?: Record<string, string>;
+  /**
+   * Called before a state is applied, so a choice can demand more input (a
+   * provider shape). The list is erased first, leaving the terminal free for the
+   * hook to print and run its own prompts; the list is repainted after. Return
+   * the state to apply, or null to leave the row unchanged.
+   */
+  onSet?: (row: CycleRow, state: string, index: number) => Promise<string | null>;
+}
+
+/**
+ * Multi-row state picker: every row must be given a state before Enter is
+ * accepted. Unlike `select`, there is no default that Enter can silently commit
+ * — with secrets that is the difference between a decision and an accident, so
+ * an undecided row blocks the confirm and says which ones are outstanding.
+ *
+ * Repaints in place like `select`, but windows the rows so a long `.env` cannot
+ * outgrow the terminal (the repaint arithmetic counts physical rows, so the
+ * frame must always fit). Returns the rows with their states, or null on Esc.
+ */
+export async function cycleList(
+  title: string,
+  rows: CycleRow[],
+  opts: CycleListOptions,
+): Promise<CycleRow[] | null> {
+  const out = process.stdout;
+  const colors = opts.colors ?? {};
+  let idx = 0;
+  let top = 0;
+  let painted = 0;
+  let message = "";
+
+  const nameW = Math.min(28, Math.max(4, ...rows.map((r) => r.name.length)));
+  const stateW = Math.max(6, ...opts.states.map((s) => s.length));
+  const window = () => Math.max(3, Math.min(rows.length, (out.rows || 24) - 6));
+
+  const line = (plain: string, styled: string) => clampLine(plain, styled) + `${ESC}[K\n`;
+
+  const paint = () => {
+    const win = window();
+    if (idx < top) top = idx;
+    if (idx >= top + win) top = idx - win + 1;
+    if (painted) out.write(`${ESC}[${painted}A`);
+
+    const unset = rows.filter((r) => r.state === null).length;
+    let frame = line(`  ${title}`, `  ${c.bold}${title}${c.reset}`);
+    for (let i = top; i < Math.min(rows.length, top + win); i++) {
+      const r = rows[i];
+      const sel = i === idx;
+      const state = r.state ?? "·";
+      const colour = r.state ? (colors[r.state] ?? "") : c.dim;
+      const plain = `   ${sel ? "▸" : " "} ${r.name.padEnd(nameW)}  ${state.padEnd(stateW)}  ${r.detail ?? ""}${r.note ? `  ${r.note}` : ""}`;
+      const styled =
+        `   ${sel ? `${c.cyan}▸${c.reset}` : " "} ` +
+        `${sel ? c.bold : ""}${r.name.padEnd(nameW)}${sel ? c.reset : ""}  ` +
+        `${colour}${state.padEnd(stateW)}${c.reset}  ` +
+        `${c.dim}${r.detail ?? ""}${r.note ? `  ${r.note}` : ""}${c.reset}`;
+      frame += line(plain, styled);
+    }
+    // Pad a short window so the frame height — and therefore the cursor-up
+    // arithmetic — stays constant across scrolls.
+    for (let i = Math.min(rows.length, top + win); i < top + win; i++) frame += line("", "");
+
+    const legend = `  ↑↓ move · space cycles · ${Object.entries(opts.shortcuts)
+      .map(([k, s]) => `${k} ${s}`)
+      .join(" · ")} · enter confirm`;
+    frame += line(legend, `  ${c.dim}${legend.trim()}${c.reset}`);
+    const status = message || (unset ? `${unset} unset` : `all ${rows.length} set — enter to confirm`);
+    frame += line(`  ${status}`, `  ${unset || message ? c.yellow : c.green}${status}${c.reset}`);
+
+    out.write(frame);
+    painted = 1 + win + 2;
+  };
+
+  const erase = () => {
+    if (painted) out.write(`${ESC}[${painted}A${ESC}[J`);
+    painted = 0;
+  };
+
+  const apply = async (state: string) => {
+    const row = rows[idx];
+    if (opts.onSet) {
+      erase();
+      const resolved = await opts.onSet(row, state, idx);
+      if (resolved !== null) row.state = resolved;
+      paint();
+      return;
+    }
+    row.state = state;
+  };
+
+  if (!rows.length) return rows;
+  paint();
+  for (;;) {
+    const k = await readKey();
+    message = "";
+    if (k === `${ESC}[A` || k === "k") idx = (idx + rows.length - 1) % rows.length;
+    else if (k === `${ESC}[B` || k === "j") idx = (idx + 1) % rows.length;
+    else if (k === " ") {
+      const cur = rows[idx].state;
+      const next = opts.states[(cur === null ? -1 : opts.states.indexOf(cur)) + 1] ?? opts.states[0];
+      await apply(next);
+    } else if (opts.shortcuts[k]) {
+      await apply(opts.shortcuts[k]);
+    } else if (k === "\r" || k === "\n") {
+      const unset = rows.filter((r) => r.state === null);
+      if (!unset.length) break;
+      message = `${unset.length} still unset: ${unset.slice(0, 4).map((r) => r.name).join(" · ")}${unset.length > 4 ? " …" : ""}`;
+    } else if (k === ESC) {
+      erase();
+      out.write(`  ${c.dim}${title}  (cancelled)${c.reset}\n`);
+      return null;
+    }
+    paint();
+  }
+  erase();
+  return rows;
+}

@@ -1,6 +1,7 @@
 import { HotcellClient } from "@hotcell/sdk";
 import type { GlobalArgs } from "./cli.js";
 import { parseEnvPairs } from "./env.js";
+import { injectedEnv } from "./envconfig.js";
 import { startProgress } from "./progress.js";
 import { nodeCapableImage, OPENCODE_SETUP } from "./setups.js";
 import { formatError, parseLimitFlags } from "./util.js";
@@ -54,10 +55,17 @@ export async function createCommand(
     }
   }
 
+  // Variables the user marked `inject` at import go into every sandbox this
+  // project creates; an explicit --env still wins, so a one-off override needs
+  // no re-import. `gateway` variables are absent by design — the daemon injects
+  // a token for those, never the real key.
   let env: Record<string, string> | undefined;
   let labels: Record<string, string> | undefined;
   try {
-    if (typeof flags.env === "string") env = parseEnvPairs(flags.env.split(","));
+    const injected = injectedEnv();
+    const explicit = typeof flags.env === "string" ? parseEnvPairs(flags.env.split(",")) : {};
+    const merged = { ...injected, ...explicit };
+    if (Object.keys(merged).length) env = merged;
     if (typeof flags.label === "string") labels = parseEnvPairs(flags.label.split(","));
   } catch (err) {
     console.error(err instanceof Error ? err.message : String(err));

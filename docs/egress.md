@@ -15,6 +15,33 @@ hotcell start
 hotcell run --egress --keep "printenv OPENROUTER_BASE_URL"   # -> http://host.docker.internal:4752/openrouter
 ```
 
+## Importing a whole .env
+
+```bash
+hotcell keys import .env      # review screen: set every variable, then confirm
+hotcell keys review           # change those decisions later
+```
+
+Each variable gets one of three dispositions, chosen by you:
+
+| | what the sandbox gets |
+| --- | --- |
+| `gateway` | `<PROVIDER>_BASE_URL` → the gateway, `<PROVIDER>_API_KEY` → a per-sandbox token. The real key stays on the host. |
+| `inject` | the real value, verbatim — for credentials the gateway cannot stand in front of, and for plain config like `NODE_ENV`. |
+| `skip` | nothing. |
+
+hotcell classifies nothing. The only preselection is for env-var names the daemon already routes (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`, `GOOGLE_API_KEY`, `GEMINI_API_KEY`, `GITHUB_API_KEY`) — a lookup of existing routes, not a guess — and even those are preselected, never locked. Choosing `gateway` for an unknown provider asks for its base URL and auth header once; that shape is saved to `.hotcell/env.json`, which holds **no secret values** and is meant to be committed, so a teammate's clone inherits every decision and re-enters only the secrets themselves.
+
+The base-URL prompt is also the routability test: `postgres://…` is rejected because the gateway substitutes a credential in a request header and Postgres carries its password inside the protocol handshake. See [what the gateway can and can't protect](../README.md#what-the-gateway-can-and-cant-protect).
+
+Scripted use states each decision explicitly — there is no implicit default, because the convenient one silently copies secrets into sandboxes:
+
+```bash
+hotcell keys import .env --set OPENAI_API_KEY=gateway --set DATABASE_URL=inject \
+                         --set NODE_ENV=inject --set SENTRY_DSN=skip
+hotcell keys import .env --default-unknown=skip        # or name a blanket default
+```
+
 ## Per-token policy
 
 Mint a token scoped to exactly what one agent should be able to do:

@@ -17,8 +17,10 @@ hotcell stop                                 # stop it (logs: ~/.hotcell/daemon.
 # non-TTY (pipes/scripts/agents) always gets --help instead — nothing ever prompts.
 
 # provider keys (kept on the host — macOS keychain, else chmod-600 ~/.hotcell/keys.json)
-hotcell keys add <provider> [--value KEY | --stdin]   # openrouter/openai/anthropic/google
+hotcell keys add <provider> [--value KEY | --stdin]   # any provider; asks its base URL once if new
 hotcell keys ls | rm <provider>
+hotcell keys import [.env] [--set NAME=gateway|inject|skip] [--default-unknown gateway|inject|skip]
+hotcell keys review                                   # re-open those decisions later
 
 # sandboxes
 hotcell run "<cmd>" [--image I] [--keep] [--env K=V,…] [--sleep-after MS] [--egress] [--egress-spend-cap USD]
@@ -70,6 +72,7 @@ Set these before `hotcell start` (they're inherited by the daemon) or on `hotcel
 | `HOTCELL_PROXY_PORT` | `4751` | Preview-URL proxy |
 | **Egress control plane** | | |
 | `HOTCELL_EGRESS_PORT` | `4752` | Egress gateway (`0` disables) |
+| `HOTCELL_KEYSTORE` | `keychain` | Force the key backend to `file` (`$HOTCELL_HOME/keys.json`). The macOS keychain is global to the login session and ignores `HOTCELL_HOME`, so isolated/test installs need this to avoid touching real entries |
 | `HOTCELL_PROVIDER_KEY_*` | — | Provider keys (`_OPENAI`, `_ANTHROPIC`, `_OPENROUTER`, `_GOOGLE`, or any custom name). `hotcell keys add` is the friendly equivalent |
 | `HOTCELL_PROVIDER_<NAME>_BASEURL` / `_AUTHHEADER` / `_FORMAT` | — | Define a custom provider (e.g. a Cloudflare AI Gateway); pair with `HOTCELL_PROVIDER_KEY_<NAME>` |
 | `HOTCELL_MODEL_PRICES` | built-in | JSON file overriding the model price table (used to compute cost when a provider doesn't report it) |

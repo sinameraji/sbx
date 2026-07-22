@@ -55,6 +55,22 @@ Your OpenRouter and GitHub keys stay on the host: with `--egress`, a cell only e
 - **As many as the hardware allows.** One daemon, live CPU/mem/cost per sandbox, admission control that refuses to over-subscribe instead of OOM-ing the box.
 - **Containers or microVMs** — Docker everywhere, Firecracker (Linux/KVM) and Apple VZ (macOS) for VM-grade isolation, all behind one interface.
 
+## What the gateway can and can't protect
+
+`hotcell keys import .env` asks you to set every variable to `gateway` (the real key stays on the host; the sandbox gets a per-sandbox token), `inject` (the real value is copied into every sandbox), or `skip`. hotcell does not guess which is which — a name cannot tell you whether a value is a secret, and both wrong answers are silent. The confirm step lists every value that will enter a sandbox before anything is stored.
+
+**Protected** — any API whose credential travels in an HTTP request header. OpenAI, Anthropic, OpenRouter, GitHub, Stripe, Slack, Cloudflare and most REST APIs work identically; there is no LLM-only carve-out. Providers beyond the five built-in routes need their base URL and auth header once, saved to `.hotcell/env.json` (no secrets — commit it, and a teammate's clone inherits every decision).
+
+**Not protected** — the real value enters the sandbox if you choose `inject`:
+
+- **Non-HTTP protocols** (Postgres, Redis, MongoDB) — the credential rides inside the wire handshake, so there is no header to substitute. `gateway` is unreachable for these: the base-URL prompt rejects `postgres://`.
+- **Request-signing schemes** (AWS SigV4) — the key signs the request locally and is never transmitted, so there is nothing to swap.
+- **mTLS / client certificates**, and OAuth refresh-token exchanges.
+
+**Protected, but not drop-in** — an SDK that hardcodes its host ignores the injected `<PROVIDER>_BASE_URL` and calls the provider directly. LLM SDKs read it; many others take a host in code and need one line to pass it through. Under `HOTCELL_EGRESS_ENFORCE` those direct calls are denied rather than quietly leaving the gateway out of the loop.
+
+**Names can shift.** A `gateway` variable reaches the sandbox under its route's name — import `GH_TOKEN` as the `github` route and the sandbox sees `GITHUB_API_KEY`. The review screen shows the route for each row.
+
 Docs: [guide](docs/guide.md) · [egress & keys](docs/egress.md) · [every command & config](docs/reference.md) · [Linux self-hosting](docs/self-hosting.md) · [benchmarks](docs/benchmarks.md) · Python SDK: `pip install hotcell`
 
 ## License

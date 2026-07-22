@@ -2,6 +2,7 @@ import { HotcellClient } from "@hotcell/sdk";
 import { formatError, parseLimitFlags } from "./util.js";
 import type { GlobalArgs } from "./cli.js";
 import { parseEnvPairs } from "./env.js";
+import { injectedEnv } from "./envconfig.js";
 
 export async function runCommand(
   positional: string[],
@@ -30,14 +31,17 @@ export async function runCommand(
   const setup = typeof flags.setup === "string" ? [flags.setup] : undefined;
   const repo = typeof flags.repo === "string" ? flags.repo : undefined;
   const repoRef = typeof flags.ref === "string" ? flags.ref : undefined;
+  // Project `inject` variables, overridable per-run by an explicit --env.
   let env: Record<string, string> | undefined;
-  if (typeof flags.env === "string") {
-    try {
-      env = parseEnvPairs(flags.env.split(","));
-    } catch (err) {
-      console.error(formatError(err));
-      return 1;
-    }
+  try {
+    const merged = {
+      ...injectedEnv(),
+      ...(typeof flags.env === "string" ? parseEnvPairs(flags.env.split(",")) : {}),
+    };
+    if (Object.keys(merged).length) env = merged;
+  } catch (err) {
+    console.error(formatError(err));
+    return 1;
   }
 
   let sandbox;

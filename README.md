@@ -26,11 +26,11 @@ hotcell rm --all                                                  # everything g
 ## Five agents on one repo
 
 ```bash
-hotcell create -n 5 --name feat --branch --egress \
-    --repo https://github.com/you/app --setup "npm i -g opencode-ai"
+hotcell create -n 5 --name feat --branch auto --opencode \
+    --repo https://github.com/you/app
 ```
 
-Five isolated cells, each with the repo cloned, its own branch (`feat-1`…`feat-5`), and your agent preinstalled. Open a terminal per cell and put each agent on a different feature:
+Five isolated cells, each with the repo cloned, its own branch (`feat-1`…`feat-5`), and OpenCode preinstalled and pointed at the gateway (`--opencode` implies `--egress`). Live per-cell progress while they provision — slow setups can't falsely time out. Open a terminal per cell and put each agent on a different feature:
 
 ```bash
 hotcell terminal <id>      # inside: cd app && opencode

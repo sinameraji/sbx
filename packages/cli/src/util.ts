@@ -3,6 +3,17 @@ export function formatError(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
+/**
+ * Quote a value for copy-paste into a POSIX shell. Values made of safe
+ * characters pass through untouched (typical URLs/images/branches stay
+ * readable); anything else is single-quoted, with embedded single quotes
+ * escaped via the `'\''` idiom.
+ */
+export function shellQuote(value: string): string {
+  if (/^[A-Za-z0-9@%_+=:,./-]+$/.test(value)) return value;
+  return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
 /** Parse the resource-limit flags (`--memory <MB>`, `--cpus <n>`, `--pids <n>`). */
 export function parseLimitFlags(flags: Record<string, string | boolean>): {
   memoryMb?: number;

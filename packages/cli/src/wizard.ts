@@ -3,21 +3,17 @@ import { resolveSetting } from "./configfile.js";
 import { createCommand } from "./create.js";
 import { loadKeys } from "./keystore.js";
 import { c, confirm, select, textInput } from "./prompts.js";
+import { nodeCapableImage, OPENCODE_SETUP } from "./setups.js";
+import { shellQuote } from "./util.js";
 
 /**
  * Guided sandbox create (`hotcell create -i`, or Create in the home menu).
  *
  * Every answer maps to an existing flag, and the assembled command is printed
- * before running — the wizard teaches the scriptable path, never replaces it.
- * The create-time irreversible facts (image, repo, branch) come first.
+ * before running — the wizard teaches the scriptable path, never replaces it,
+ * so every printed token must be real and copy-pasteable. The create-time
+ * irreversible facts (image, repo, branch) come first.
  */
-
-// Verified OpenCode wiring (same as examples/agents.sh): install, then point its
-// openrouter provider at the egress gateway env the daemon injects.
-const OPENCODE_SETUP =
-  `npm i -g opencode-ai >/dev/null 2>&1 && mkdir -p ~/.config/opencode && ` +
-  `printf '{"provider":{"openrouter":{"options":{"baseURL":"%s/v1","apiKey":"%s"}}}}' ` +
-  `"$OPENROUTER_BASE_URL" "$OPENROUTER_API_KEY" > ~/.config/opencode/opencode.json`;
 
 export async function createWizard(globals: GlobalArgs): Promise<number> {
   if (!process.stdin.isTTY || !process.stdout.isTTY) {
@@ -50,18 +46,20 @@ export async function createWizard(globals: GlobalArgs): Promise<number> {
   let image = img < 3 ? IMAGES[img] : await textInput("image", "");
   if (image) {
     flags.image = image;
-    parts.push(`--image ${image}`);
+    parts.push(`--image ${shellQuote(image)}`);
   }
 
   // repo + branch
   const repo = await textInput("clone a repo (git url)");
   if (repo) {
     flags.repo = repo;
-    parts.push(`--repo ${repo}`);
+    parts.push(`--repo ${shellQuote(repo)}`);
     if (await confirm("create a new branch after cloning?", true)) {
       const name = await textInput("branch name", "auto");
       flags.branch = name === "auto" ? true : name;
-      parts.push(name === "auto" ? "--branch" : `--branch ${name}`);
+      // `--branch auto` and bare `--branch` parse identically; print the value
+      // so the next flag can't read as the branch name (`--branch -n 5`).
+      parts.push(`--branch ${shellQuote(name)}`);
     }
   }
 
@@ -88,17 +86,17 @@ export async function createWizard(globals: GlobalArgs): Promise<number> {
     flags.egress = true;
     parts.push("--egress");
     // OpenCode needs npm — only offer it on images that have node.
-    const nodeCapable = image === undefined || /node|hotcell-base/.test(image);
+    const nodeCapable = nodeCapableImage(image);
     if (keys.openrouter && nodeCapable && (await confirm("install OpenCode, ready to run?", false))) {
-      flags.setup = OPENCODE_SETUP;
-      parts.push(`--setup '<install opencode + point it at the gateway>'`);
+      flags.opencode = true;
+      parts.push("--opencode");
     } else if (keys.openrouter && !nodeCapable) {
       out.write(`  ${c.dim}(OpenCode skipped — ${image} has no node/npm)${c.reset}\n`);
     }
   }
 
   out.write(`\n  ${c.dim}equivalent:${c.reset} ${parts.join(" ")}\n`);
-  if (flags.setup) out.write(`  ${c.dim}(the full --setup string: ${OPENCODE_SETUP})${c.reset}\n`);
+  if (flags.opencode) out.write(`  ${c.dim}(--opencode runs: ${OPENCODE_SETUP})${c.reset}\n`);
   if (!(await confirm("create?", true))) {
     out.write(`  ${c.dim}cancelled${c.reset}\n`);
     return 0;

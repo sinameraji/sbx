@@ -26,12 +26,14 @@ export async function listCommand(globals: GlobalArgs): Promise<number> {
       ? Math.max(4, ...sandboxes.map((s) => (s.labels?.name ?? "").length))
       : 0;
 
+    const maxStatus = Math.max(6, ...sandboxes.map((s) => s.status.length));
+
     console.log(
-      `${padRight("ID", maxId)}  ${named ? padRight("NAME", maxName) + "  " : ""}${padRight("IMAGE", maxImage)}  STATUS   CREATED`,
+      `${padRight("ID", maxId)}  ${named ? padRight("NAME", maxName) + "  " : ""}${padRight("IMAGE", maxImage)}  ${padRight("STATUS", maxStatus)}  CREATED`,
     );
     for (const s of sandboxes) {
       console.log(
-        `${padRight(s.id, maxId)}  ${named ? padRight(s.labels?.name ?? "—", maxName) + "  " : ""}${padRight(s.image, maxImage)}  ${padRight(s.status, 7)}  ${s.createdAt}`,
+        `${padRight(s.id, maxId)}  ${named ? padRight(s.labels?.name ?? "—", maxName) + "  " : ""}${padRight(s.image, maxImage)}  ${padRight(s.status, maxStatus)}  ${s.createdAt}`,
       );
     }
     return 0;

@@ -153,6 +153,7 @@ export async function tuiCommand(
   };
   const dot = (st: string) =>
     st === "running" ? `${c.green}●${c.reset}`
+    : st === "creating" ? `${c.cyan}●${c.reset}`
     : st === "paused" ? `${c.yellow}●${c.reset}`
     : st === "stopped" ? `${c.dim}○${c.reset}`
     : `${c.red}●${c.reset}`;
@@ -371,9 +372,10 @@ export async function tuiCommand(
         client.capacity().catch(() => null),
       ]);
       const oldIndex = selIndex(); // position in the *previous* rows, for clamping
-      // running first, then by createdAt (newest first) — a stable, useful order.
+      // running first, then in-flight creates, then by createdAt (newest first).
       list.sort((a, b) => {
-        const pri = (s: string) => (s === "running" ? 0 : s === "paused" ? 1 : 2);
+        const pri = (s: string) =>
+          s === "running" ? 0 : s === "creating" ? 1 : s === "paused" ? 2 : 3;
         return pri(a.status) - pri(b.status) || (a.createdAt < b.createdAt ? 1 : -1);
       });
       rows = list;

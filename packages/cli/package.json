@@ -1,6 +1,6 @@
 {
   "name": "hotcell",
-  "version": "0.1.11",
+  "version": "0.1.12",
   "description": "Sandboxes for AI agents, on your own hardware — CLI + daemon for the hotcell sandbox platform",
   "license": "Apache-2.0",
   "type": "module",
@@ -17,11 +17,11 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "dev": "node --import tsx src/index.ts",
-    "prepack": "cp ../../README.md ./README.md"
+    "prepack": "cp ../../README.md ./README.md && chmod +x dist/index.js dist/daemon.js"
   },
   "dependencies": {
-    "@hotcell/sdk": "0.1.11",
-    "@hotcell/daemon": "0.1.11"
+    "@hotcell/daemon": "0.1.12",
+    "@hotcell/sdk": "0.1.12"
   },
   "devDependencies": {
     "@types/node": "^20.14.0",

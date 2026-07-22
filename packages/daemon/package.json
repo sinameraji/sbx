@@ -1,6 +1,6 @@
 {
   "name": "@hotcell/daemon",
-  "version": "0.1.11",
+  "version": "0.1.12",
   "description": "hotcell sandbox daemon: containers + Firecracker/Apple-VZ microVMs, egress credential gateway",
   "license": "Apache-2.0",
   "type": "module",
@@ -11,17 +11,18 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "dev": "node --import tsx src/index.ts",
-    "start": "node dist/index.js"
+    "start": "node dist/index.js",
+    "prepack": "chmod +x dist/index.js"
   },
   "dependencies": {
     "dockerode": "^4.0.2"
   },
   "devDependencies": {
+    "@hotcell/sdk": "0.1.12",
     "@types/dockerode": "^3.3.31",
     "@types/node": "^22.5.0",
     "tsx": "^4.16.0",
-    "typescript": "^5.5.0",
-    "@hotcell/sdk": "0.1.11"
+    "typescript": "^5.5.0"
   },
   "repository": {
     "type": "git",

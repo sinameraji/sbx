@@ -31,7 +31,7 @@ export interface ExecResult {
   success: boolean;
 }
 
-export type SandboxStatus = "running" | "paused" | "stopped";
+export type SandboxStatus = "creating" | "running" | "paused" | "stopped" | "error";
 
 /** Hard per-sandbox resource caps (0/absent = unlimited). */
 export interface SandboxLimits {
@@ -47,11 +47,15 @@ export interface SandboxInfo {
   id: string;
   image: string;
   /**
-   * Lifecycle state. `paused` is entered automatically after `sleepAfterMs` of
-   * inactivity (the next operation transparently resumes it); `stopped` is a
-   * manual stop that does not auto-resume.
+   * Lifecycle state. `creating` is a detached create still provisioning (see
+   * `CreateOptions.detach`); `paused` is entered automatically after
+   * `sleepAfterMs` of inactivity (the next operation transparently resumes it);
+   * `stopped` is a manual stop that does not auto-resume; `error` is a create
+   * that failed (reason in `statusReason` — destroy it).
    */
   status: SandboxStatus;
+  /** Elaboration of `status`: the provisioning phase while `creating`, the failure reason after `error`. */
+  statusReason?: string;
   createdAt: string;
   labels: Record<string, string>;
   /** Whether `/workspace` is backed by a volume that survives stop/start. */
@@ -236,6 +240,24 @@ export interface CreateOptions {
   cpus?: number;
   /** Hard process/thread cap (overrides the daemon default; 0 = unlimited). */
   pidsLimit?: number;
+  /**
+   * Ask the daemon to return immediately (status `creating`) and provision in
+   * the background; the SDK then polls the sandbox until it is usable. This
+   * changes the transport, not the promise: `getSandbox` still resolves only
+   * once the sandbox is running and throws (with the daemon's reason) if the
+   * create fails. Use it for slow creates (repo clone + heavy `setup`) — a
+   * single blocking request is killed by fetch's ~5-minute response timeout in
+   * Node. An older daemon ignores the flag and blocks, which degrades
+   * gracefully. Defaults to false.
+   */
+  detach?: boolean;
+  /**
+   * Observe status/phase transitions during a detached create: called with the
+   * record on creation and again whenever `status` or `statusReason` changes
+   * ("creating (cloning repo)" → … → `running`, or `error`). Only fires when
+   * `detach` is set.
+   */
+  onStatus?: (status: SandboxStatus, info: SandboxInfo) => void;
 }
 
 export interface WriteFileOptions {
@@ -406,8 +428,53 @@ export class HotcellClient {
       const info = await this.request<SandboxInfo>("GET", `/sandboxes/${id}`);
       return new Sandbox(this, info);
     }
-    const info = await this.request<SandboxInfo>("POST", "/sandboxes", options ?? {});
+    const { onStatus, ...wire } = options ?? {};
+    let info = await this.request<SandboxInfo>("POST", "/sandboxes", wire);
+    if (wire.detach) {
+      onStatus?.(info.status, info);
+      if (info.status === "creating") info = await this.waitForReady(info.id, onStatus);
+    }
     return new Sandbox(this, info);
+  }
+
+  /**
+   * Poll a detached create until it leaves `creating`. Resolves with the ready
+   * record, throws on `error` (with the daemon's reason) or if the record
+   * disappears (destroyed mid-create). Transient poll failures (daemon restart,
+   * network blip) are retried; there is no overall timeout — creates are
+   * legitimately long, and each poll is a short request that cannot trip
+   * fetch's response timeout.
+   */
+  private async waitForReady(
+    id: string,
+    onStatus?: (status: SandboxStatus, info: SandboxInfo) => void,
+  ): Promise<SandboxInfo> {
+    let lastSeen = "";
+    let failures = 0;
+    for (;;) {
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      let info: SandboxInfo;
+      try {
+        info = await this.request<SandboxInfo>("GET", `/sandboxes/${id}`);
+        failures = 0;
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        if (message.includes("-> 404")) {
+          throw new Error(`sandbox ${id} was destroyed while being created`);
+        }
+        if (++failures >= 10) throw err;
+        continue;
+      }
+      const seen = `${info.status}\0${info.statusReason ?? ""}`;
+      if (seen !== lastSeen) {
+        lastSeen = seen;
+        onStatus?.(info.status, info);
+      }
+      if (info.status === "error") {
+        throw new Error(`sandbox create failed: ${info.statusReason ?? "unknown error"}`);
+      }
+      if (info.status !== "creating") return info;
+    }
   }
 
   /** List all sandboxes managed by the daemon. */

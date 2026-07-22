@@ -18,9 +18,12 @@ import { join } from "node:path";
 
 const HOME = process.env.HOTCELL_HOME || join(homedir(), ".hotcell");
 const KEYFILE = join(HOME, "keys.json");
+/** Names (not secrets) of keychain-stored providers — the keychain has no "list
+ * by service", so this index is what makes arbitrary provider names loadable. */
+const KEYCHAIN_INDEX = join(HOME, "keychain-index.json");
 const SERVICE = "hotcell";
-/** Providers we probe the keychain for (the keychain has no "list by service"). */
-export const KNOWN_PROVIDERS = ["openrouter", "openai", "anthropic", "google", "github"];
+/** Probe list for keychain entries that predate the index file. */
+const LEGACY_KEYCHAIN_PROBES = ["openrouter", "openai", "anthropic", "google", "github"];
 
 export type KeySource = "keychain" | "file" | "env";
 
@@ -51,6 +54,18 @@ function keychainDelete(provider: string): void {
   }
 }
 
+function indexRead(): string[] {
+  try {
+    return existsSync(KEYCHAIN_INDEX) ? (JSON.parse(readFileSync(KEYCHAIN_INDEX, "utf8")) as string[]) : [];
+  } catch {
+    return [];
+  }
+}
+function indexWrite(names: string[]): void {
+  mkdirSync(HOME, { recursive: true });
+  writeFileSync(KEYCHAIN_INDEX, JSON.stringify([...new Set(names)].sort()) + "\n");
+}
+
 function fileRead(): Record<string, string> {
   try {
     return existsSync(KEYFILE) ? (JSON.parse(readFileSync(KEYFILE, "utf8")) as Record<string, string>) : {};
@@ -74,6 +89,7 @@ export function storeKey(provider: string, value: string): KeySource {
   if (onMac()) {
     try {
       keychainSet(provider, value);
+      indexWrite([...indexRead(), provider]);
       return "keychain";
     } catch {
       /* fall through to the file */
@@ -94,6 +110,8 @@ export function removeKey(provider: string): boolean {
       keychainDelete(provider);
       removed = true;
     }
+    const idx = indexRead();
+    if (idx.includes(provider)) indexWrite(idx.filter((n) => n !== provider));
   }
   const obj = fileRead();
   if (provider in obj) {
@@ -109,7 +127,7 @@ export function loadKeys(): Record<string, { value: string; source: KeySource }>
   const out: Record<string, { value: string; source: KeySource }> = {};
   for (const [k, v] of Object.entries(fileRead())) out[k.toLowerCase()] = { value: v, source: "file" };
   if (onMac()) {
-    for (const p of KNOWN_PROVIDERS) {
+    for (const p of new Set([...LEGACY_KEYCHAIN_PROBES, ...indexRead()])) {
       const v = keychainGet(p);
       if (v) out[p] = { value: v, source: "keychain" };
     }

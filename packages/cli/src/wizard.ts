@@ -78,11 +78,13 @@ export async function createWizard(globals: GlobalArgs): Promise<number> {
 
   // egress + opencode
   const keys = loadKeys();
-  const hasLlmKey = ["openrouter", "openai", "anthropic", "google"].some((p) => keys[p]);
-  if (!hasLlmKey) {
-    out.write(`  ${c.dim}no LLM provider key on the host yet (hotcell keys add openrouter) — egress would inject nothing${c.reset}\n`);
+  // Any key counts — provider names are free-form, so we can't tell an LLM key
+  // from a Stripe one by name, and guessing would misreport custom-named keys.
+  const hasKey = Object.keys(keys).length > 0;
+  if (!hasKey) {
+    out.write(`  ${c.dim}no provider key on the host yet (hotcell keys add <provider>) — egress would inject nothing${c.reset}\n`);
   }
-  if (await confirm("wire keyless egress (LLM/GitHub through the gateway)?", hasLlmKey)) {
+  if (await confirm("wire keyless egress (providers through the gateway)?", hasKey)) {
     flags.egress = true;
     parts.push("--egress");
     // OpenCode needs npm — only offer it on images that have node.

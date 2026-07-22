@@ -21,7 +21,8 @@ hotcell            # first run: 30-second guided setup — then your live fleet
 ## The commands that matter
 
 ```bash
-hotcell keys add openrouter                                       # LLM key — stays on the host, never in a sandbox
+hotcell keys add openrouter                                       # any provider's key — stays on the host, never in a sandbox
+hotcell keys import .env                                          # or bulk-import a .env (OPENAI_API_KEY → openai, …)
 hotcell create -n 5 --repo https://github.com/you/app --branch    # five isolated cells, each on its own branch
 hotcell terminal <id>                                             # shell inside a cell
 hotcell run --setup "pip install ruff" "ruff check ."             # one-shot: create → run → destroy

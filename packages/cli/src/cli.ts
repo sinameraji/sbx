@@ -202,10 +202,13 @@ Commands:
     --setup runs a shell command once after the container starts (best-effort;
     chain with && for multiple steps, e.g. --setup "npm i x && pip install y").
 
-  hotcell keys add <provider> [--value <key>]   ·   hotcell keys ls   ·   hotcell keys rm <provider>
-    Manage the provider API keys the daemon uses (openrouter, openai, anthropic,
-    google). Stored on the host (macOS keychain, else chmod-600 ~/.hotcell/keys.json)
-    — never inside a sandbox. Human: prompts for the secret (hidden). Agent: --value/--stdin.
+  hotcell keys add <provider> [--value <key>]  ·  keys import [.env]  ·  keys ls  ·  keys rm <provider>
+    Store API keys on the host (macOS keychain, else chmod-600 ~/.hotcell/keys.json)
+    — never inside a sandbox. <provider> is any name; the egress gateway routes
+    openai/anthropic/openrouter/google/github out of the box, anything else once the
+    daemon has HOTCELL_PROVIDER_<NAME>_BASEURL/_AUTHHEADER/_FORMAT set. import
+    bulk-loads a .env, mapping names (OPENAI_API_KEY → openai, GH_TOKEN → github).
+    Human: hidden prompt. Agent: --value/--stdin, or pipe a .env to import.
 
   hotcell tui   (alias: hotcell top)
     Full-screen fleet monitor + control panel. Arrow-key nav, live CPU/mem/cost,

@@ -2,9 +2,9 @@ import { HotcellClient } from "@hotcell/sdk";
 import type { GlobalArgs } from "./cli.js";
 import { configExists, defaultEndpoint, resolveSetting } from "./configfile.js";
 import { isUp, startEngine } from "./engine.js";
-import { keysCommand } from "./keys.js";
-import { loadKeys, KNOWN_PROVIDERS } from "./keystore.js";
-import { c, confirm, readKey, select } from "./prompts.js";
+import { importEnvInteractive, keysCommand } from "./keys.js";
+import { loadKeys } from "./keystore.js";
+import { c, confirm, readKey, select, textInput } from "./prompts.js";
 import { setupCommand } from "./setup.js";
 import { tuiCommand } from "./tui.js";
 import { createWizard } from "./wizard.js";
@@ -55,7 +55,7 @@ export async function menuCommand(globals: GlobalArgs): Promise<number> {
     const pick = await select(`${c.cyan}● hotcell${c.reset}`, [
       { label: "View / manage sandboxes", hint: "live fleet — attach, pause, cost" },
       { label: "Create a sandbox", hint: "guided: image · repo · branch · egress" },
-      { label: "Manage provider keys", hint: "openrouter · openai · anthropic · google · github" },
+      { label: "Manage provider keys", hint: "any provider — stored on host, never in a sandbox" },
       { label: "Daemon setup", hint: "access · egress · isolation · default image" },
       { label: "Quit" },
     ], 0, { pad: true, erase: true });
@@ -73,7 +73,8 @@ async function keysMenu(globals: GlobalArgs): Promise<void> {
   for (;;) {
     const pick = await select("provider keys", [
       { label: "Show keys" },
-      { label: "Add a key", hint: "hidden input · keychain · applies live" },
+      { label: "Add a key", hint: "any provider · hidden input · applies live" },
+      { label: "Import a .env", hint: "file path or paste — stores every KEY=VALUE" },
       { label: "Remove a key" },
       { label: "Back" },
     ], 0, { pad: true, erase: true });
@@ -83,12 +84,11 @@ async function keysMenu(globals: GlobalArgs): Promise<void> {
       await readKey();
       process.stdout.write(`\r\x1b[2K`); // eat the hint — the key table stays, the nag doesn't
     } else if (pick === 1) {
-      const opts = [...KNOWN_PROVIDERS.map((p) => ({ label: p })), { label: "cancel" }];
-      const which = await select("provider", opts, KNOWN_PROVIDERS.length);
-      if (which >= 0 && which < KNOWN_PROVIDERS.length) {
-        await keysCommand(["add", KNOWN_PROVIDERS[which]], globals, {});
-      }
+      const name = await textInput("provider name (openai, stripe, github, …)");
+      if (name) await keysCommand(["add", name], globals, {});
     } else if (pick === 2) {
+      await importEnvInteractive(globals);
+    } else if (pick === 3) {
       const names = Object.keys(loadKeys());
       if (names.length === 0) {
         process.stdout.write(`  ${c.dim}no keys stored${c.reset}\n`);

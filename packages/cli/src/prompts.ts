@@ -158,6 +158,31 @@ export async function confirm(label: string, def = true): Promise<boolean> {
   }
 }
 
+/** Cooked-mode multi-line paste: collects lines until an empty one (or EOF).
+ * Input echoes — the caller is pasting from their own file, not typing a secret
+ * blind, and seeing the lines land is the confirmation. */
+export function multilineInput(label: string): Promise<string> {
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  process.stdout.write(`  ${c.bold}${label}${c.reset} ${c.dim}(finish with an empty line)${c.reset}\n`);
+  return new Promise((resolve) => {
+    const lines: string[] = [];
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      rl.close();
+      resolve(lines.join("\n"));
+    };
+    rl.on("SIGINT", () => {
+      rl.close();
+      process.stdout.write("\n");
+      process.exit(130);
+    });
+    rl.on("line", (l) => (l.trim() === "" ? finish() : lines.push(l)));
+    rl.on("close", finish);
+  });
+}
+
 /** Cooked-mode text input with a dimmed default (blank = default). */
 export function textInput(label: string, def = ""): Promise<string> {
   const rl = createInterface({ input: process.stdin, output: process.stdout });

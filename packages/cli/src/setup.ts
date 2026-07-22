@@ -4,8 +4,8 @@ import { existsSync } from "node:fs";
 import type { GlobalArgs } from "./cli.js";
 import { CONFIG_FILE, configExists, readConfigFile, writeConfigFile } from "./configfile.js";
 import { isUp, startEngine, stopEngine } from "./engine.js";
-import { keysCommand } from "./keys.js";
-import { loadKeys, KNOWN_PROVIDERS } from "./keystore.js";
+import { importEnvInteractive, keysCommand } from "./keys.js";
+import { loadKeys } from "./keystore.js";
 import { c, confirm, readKey, select, textInput } from "./prompts.js";
 import { HotcellClient } from "@hotcell/sdk";
 
@@ -105,13 +105,17 @@ export async function setupCommand(
     const which = await select(
       "add a provider key now?",
       [
-        ...KNOWN_PROVIDERS.map((p) => ({ label: p })),
+        { label: "type one in", hint: "any provider — openrouter, anthropic, stripe, …" },
+        { label: "import a .env", hint: "file path or paste — stores every KEY=VALUE" },
         { label: "skip", hint: "add later: hotcell keys add <provider>" },
       ],
-      KNOWN_PROVIDERS.length, // default = skip; an explicit choice, never forced
+      2, // default = skip; an explicit choice, never forced
     );
-    if (which >= 0 && which < KNOWN_PROVIDERS.length) {
-      await keysCommand(["add", KNOWN_PROVIDERS[which]], globals, {});
+    if (which === 0) {
+      const name = await textInput("provider name");
+      if (name) await keysCommand(["add", name], globals, {});
+    } else if (which === 1) {
+      await importEnvInteractive(globals);
     }
   }
 

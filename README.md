@@ -1,5 +1,10 @@
 # hotcell
 
+[![npm version](https://img.shields.io/npm/v/hotcell?logo=npm&color=cb3837)](https://www.npmjs.com/package/hotcell)
+[![weekly downloads](https://img.shields.io/npm/dw/hotcell?color=0969da)](https://www.npmjs.com/package/hotcell)
+[![license](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
+[![sponsor](https://img.shields.io/badge/sponsor-%E2%9D%A4-ea4aaa?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/sinameraji)
+
 **Sandboxes for AI agents, on your own hardware.** A Mac Mini on your desk, a cloud VM, a bare-metal box — as many isolated agent sandboxes as it can hold, and your API keys never enter any of them.
 
 **Benchmarks** ([full results](docs/benchmarks.md)) — [sequential TTI](docs/benchmarks.md#sequential-tti) · [staggered TTI](docs/benchmarks.md#staggered-tti) · [burst TTI](docs/benchmarks.md#burst-tti) · [warm-pool adopt](docs/benchmarks.md#warm-pool-adopt) · [sandbox-dax real workload](docs/benchmarks.md#sandbox-dax) — measured with the [ComputeSDK harness](https://github.com/computesdk/benchmarks), plus dax's OpenCode benchmark on bare metal ([raw evidence](evidence/opencode-benchmark/)).

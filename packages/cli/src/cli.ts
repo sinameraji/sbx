@@ -30,7 +30,7 @@ import { createWizard } from "./wizard.js";
 
 export interface GlobalArgs {
   endpoint?: string;
-  /** API key for an auth-enabled daemon. Falls back to SBX_API_KEY. */
+  /** API key for an auth-enabled daemon. Falls back to HOTCELL_API_KEY (legacy SBX_API_KEY still read). */
   apiKey?: string;
 }
 
@@ -274,7 +274,7 @@ Commands:
     Destroy one, several, or every sandbox (incl. persistent workspace volumes).
 
   hotcell files <subcommand> [args] [--endpoint <url>]
-    Manage files inside a sandbox. Run \`sb files\` for subcommand help.
+    Manage files inside a sandbox. Run \`hotcell files\` for subcommand help.
 
   hotcell watch <id> [path] [--interval <ms>]
     Stream file-change events (created/modified/deleted) until Ctrl-C.
@@ -299,8 +299,8 @@ Commands:
     Expose a port and print its preview URL.
 
 Global options:
-  --endpoint <url>   Daemon URL (default: http://127.0.0.1:4750 or SBX_ENDPOINT)
-  --api-key <key>    API key for an auth-enabled daemon (or SBX_API_KEY)
+  --endpoint <url>   Daemon URL (default: http://127.0.0.1:4750 or HOTCELL_ENDPOINT)
+  --api-key <key>    API key for an auth-enabled daemon (or HOTCELL_API_KEY)
   -h, --help         Show this help
   -v, --version      Show the CLI + running daemon versions (flags any drift)`);
 }

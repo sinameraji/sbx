@@ -56,11 +56,11 @@ export async function egressCommand(
     console.log(`Egress token: ${minted.token}`);
     if (minted.providers.length === 0) {
       console.log(
-        "\n(no providers configured — set SBX_PROVIDER_KEY_OPENAI / _ANTHROPIC / _OPENROUTER on the daemon)",
+        "\n(no providers configured — add a key on the daemon host: hotcell keys add <provider>)",
       );
       return 0;
     }
-    console.log("\n# Configure the sandbox's LLM SDK with these (token replaces the real key):");
+    console.log("\n# Configure the sandbox's SDK/client with these (token replaces the real key):");
     for (const p of minted.providers) {
       console.log(`# ${p.name}`);
       if (p.baseUrlEnv) console.log(`export ${p.baseUrlEnv}=${p.baseUrl}`);

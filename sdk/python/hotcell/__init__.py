@@ -17,11 +17,12 @@ from __future__ import annotations
 
 import json
 import os
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
-from typing import Any, Dict, Iterator, List, Optional
+from typing import Any, Callable, Dict, Iterator, List, Optional
 
 __all__ = [
     "HotcellClient",
@@ -81,13 +82,16 @@ class ExecEvent:
 class SandboxInfo:
     id: str
     image: str
-    status: str  # "running" | "paused" | "stopped"
+    status: str  # "creating" | "running" | "paused" | "stopped" | "error"
     created_at: str
     labels: Dict[str, str]
     persist: bool
     last_activity_at: str
     sleep_after_ms: int
     limits: Dict[str, Any]  # {memoryMb?, cpus?, pidsLimit?}; {} = unlimited
+    # Elaboration of `status`: the provisioning phase while "creating", the
+    # failure reason after "error". None in the other states.
+    status_reason: Optional[str] = None
 
     @classmethod
     def from_dict(cls, d: Dict[str, Any]) -> "SandboxInfo":
@@ -101,6 +105,7 @@ class SandboxInfo:
             last_activity_at=d.get("lastActivityAt", ""),
             sleep_after_ms=d.get("sleepAfterMs", 0),
             limits=d.get("limits", {}),
+            status_reason=d.get("statusReason"),
         )
 
 
@@ -348,8 +353,19 @@ class HotcellClient:
         memory_mb: Optional[float] = None,
         cpus: Optional[float] = None,
         pids_limit: Optional[int] = None,
+        detach: Optional[bool] = None,
+        on_status: Optional[Callable[[str, SandboxInfo], None]] = None,
     ) -> "Sandbox":
-        """Attach to a sandbox by id, or (id omitted) provision a fresh one."""
+        """Attach to a sandbox by id, or (id omitted) provision a fresh one.
+
+        With ``detach=True`` the daemon returns immediately (status "creating")
+        and provisions in the background; this method then polls until the
+        sandbox is usable. It changes the transport, not the contract: the call
+        still returns only once the sandbox is running and raises (with the
+        daemon's reason) if the create fails. Use it for slow creates (repo
+        clone + heavy setup). ``on_status`` observes each status/phase
+        transition. An older daemon ignores the flag and blocks.
+        """
         if id:
             info = self.request("GET", f"/sandboxes/{id}")
             return Sandbox(self, SandboxInfo.from_dict(info))
@@ -378,8 +394,58 @@ class HotcellClient:
             body["cpus"] = cpus
         if pids_limit is not None:
             body["pidsLimit"] = pids_limit
-        info = self.request("POST", "/sandboxes", body)
-        return Sandbox(self, SandboxInfo.from_dict(info))
+        if detach is not None:
+            body["detach"] = detach
+        parsed = SandboxInfo.from_dict(self.request("POST", "/sandboxes", body))
+        if detach:
+            if on_status is not None:
+                on_status(parsed.status, parsed)
+            if parsed.status == "creating":
+                parsed = self._wait_for_ready(parsed.id, on_status)
+        return Sandbox(self, parsed)
+
+    def _wait_for_ready(
+        self,
+        id: str,
+        on_status: Optional[Callable[[str, SandboxInfo], None]] = None,
+    ) -> SandboxInfo:
+        """Poll a detached create until it leaves "creating".
+
+        Returns the ready record; raises on "error" (with the daemon's reason)
+        or if the record disappears (destroyed mid-create). Transient poll
+        failures are retried; there is no overall timeout — creates are
+        legitimately long, and each poll is a short request.
+        """
+        last_seen = ""
+        failures = 0
+        while True:
+            time.sleep(1.5)
+            try:
+                info = SandboxInfo.from_dict(self.request("GET", f"/sandboxes/{id}"))
+                failures = 0
+            except HotcellError as err:
+                if err.status == 404:
+                    raise RuntimeError(f"sandbox {id} was destroyed while being created") from err
+                failures += 1
+                if failures >= 10:
+                    raise
+                continue
+            except (urllib.error.URLError, OSError):
+                failures += 1
+                if failures >= 10:
+                    raise
+                continue
+            seen = f"{info.status}\0{info.status_reason or ''}"
+            if seen != last_seen:
+                last_seen = seen
+                if on_status is not None:
+                    on_status(info.status, info)
+            if info.status == "error":
+                raise RuntimeError(
+                    f"sandbox create failed: {info.status_reason or 'unknown error'}"
+                )
+            if info.status != "creating":
+                return info
 
     def list(self) -> List[SandboxInfo]:
         data = self.request("GET", "/sandboxes")

@@ -19,8 +19,75 @@ export const c = {
   red: `${ESC}[38;5;203m`,
 };
 
-/** Read one raw key chunk (arrow keys arrive as a single escape sequence). */
+/**
+ * Keys decoded from a chunk that carried more than one keypress, handed out by
+ * later `readKey` calls.
+ *
+ * Why this exists: `readKey` used to resolve with the whole stdin chunk, and
+ * `select`/`confirm` compare it against exact key literals — so a chunk holding
+ * two keys matched no branch and BOTH were silently discarded. That is reachable
+ * at human typing speed: between prompts `readKey` pauses stdin and the tty
+ * returns to canonical mode, so anything typed ahead while the CLI does async
+ * work (starting the daemon, a REST call) accumulates in the line discipline and
+ * arrives as ONE chunk on the next resume. The visible symptom was a prompt that
+ * ignored a keystroke and then committed the DEFAULT instead of the choice the
+ * user actually made — on `hotcell setup`, that means access binding, egress
+ * enforcement and isolation driver.
+ */
+let pending: string[] = [];
+/** A trailing, still-incomplete escape sequence, prepended to the next chunk. */
+let partial = "";
+
+/**
+ * Split a raw stdin chunk into individual keypresses. Returns any trailing
+ * incomplete escape sequence separately so it can be completed by the next
+ * chunk. A lone `ESC` is deliberately NOT treated as incomplete — it must stay
+ * an immediate cancel, so we only wait when `ESC [` / `ESC O` proves more bytes
+ * are coming.
+ */
+export function tokenizeKeys(s: string): { keys: string[]; partial: string } {
+  const keys: string[] = [];
+  let i = 0;
+  while (i < s.length) {
+    if (s[i] === ESC && (s[i + 1] === "[" || s[i + 1] === "O")) {
+      if (s[i + 1] === "O") {
+        // SS3 (application-mode arrows, F1-F4): ESC O <one byte>
+        if (i + 2 >= s.length) return { keys, partial: s.slice(i) };
+        keys.push(s.slice(i, i + 3));
+        i += 3;
+        continue;
+      }
+      // CSI: ESC [ <params> <final byte in @-~>
+      let j = i + 2;
+      while (j < s.length && !/[A-Za-z~]/.test(s[j])) j++;
+      if (j >= s.length) return { keys, partial: s.slice(i) };
+      keys.push(s.slice(i, j + 1));
+      i = j + 1;
+      continue;
+    }
+    // Whole code point, so a multi-byte character stays a single key.
+    const cp = String.fromCodePoint(s.codePointAt(i)!);
+    keys.push(cp);
+    i += cp.length;
+  }
+  return { keys, partial: "" };
+}
+
+/** Ctrl-C: restore the terminal, then exit like a signal would. */
+function bailOnCtrlC(k: string): void {
+  if (k === "\x03") {
+    process.stdout.write("\n");
+    process.exit(130);
+  }
+}
+
+/** Read one keypress. Extra keys in the same chunk are buffered, not dropped. */
 export function readKey(): Promise<string> {
+  const buffered = pending.shift();
+  if (buffered !== undefined) {
+    bailOnCtrlC(buffered);
+    return Promise.resolve(buffered);
+  }
   return new Promise((resolve) => {
     const stdin = process.stdin;
     const wasRaw = stdin.isRaw;
@@ -31,6 +98,10 @@ export function readKey(): Promise<string> {
     }
     stdin.resume();
     const onData = (b: Buffer) => {
+      const decoded = tokenizeKeys(partial + b.toString("utf8"));
+      partial = decoded.partial;
+      // Nothing but an incomplete escape sequence so far — keep listening.
+      if (!decoded.keys.length) return;
       stdin.off("data", onData);
       try {
         stdin.setRawMode?.(wasRaw ?? false);
@@ -38,13 +109,10 @@ export function readKey(): Promise<string> {
         /* ignore */
       }
       stdin.pause();
-      const s = b.toString("utf8");
-      if (s === "\x03") {
-        // Ctrl-C: restore the terminal, then exit like a signal would.
-        process.stdout.write("\n");
-        process.exit(130);
-      }
-      resolve(s);
+      pending = decoded.keys.slice(1);
+      const k = decoded.keys[0];
+      bailOnCtrlC(k);
+      resolve(k);
     };
     stdin.on("data", onData);
   });

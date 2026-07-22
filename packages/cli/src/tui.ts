@@ -1,5 +1,6 @@
 import { createInterface } from "node:readline";
 import { HotcellClient, type SandboxInfo } from "@hotcell/sdk";
+import { tokenizeKeys } from "./prompts.js";
 import { terminalCommand } from "./terminal.js";
 import { formatError } from "./util.js";
 import type { GlobalArgs } from "./cli.js";
@@ -487,9 +488,22 @@ export async function tuiCommand(
   }
 
   // --- input -------------------------------------------------------------
-  function handleKey(buf: Buffer): void {
-    const s = buf.toString("utf8");
+  /** Trailing incomplete escape sequence, completed by the next chunk. */
+  let keyPartial = "";
 
+  /**
+   * One stdin chunk can carry several keypresses (type-ahead landing while the
+   * TUI awaits a REST call, a paste, a slow link). The comparisons below are
+   * against exact key literals, so a multi-key chunk used to match nothing and
+   * be dropped silently — `j` then Enter typed quickly did nothing at all.
+   */
+  function handleKey(buf: Buffer): void {
+    const decoded = tokenizeKeys(keyPartial + buf.toString("utf8"));
+    keyPartial = decoded.partial;
+    for (const k of decoded.keys) handleOneKey(k);
+  }
+
+  function handleOneKey(s: string): void {
     if (mode === "confirm") {
       if (s === "y" || s === "Y") {
         mode = "list";

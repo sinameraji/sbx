@@ -49,15 +49,16 @@ export async function menuCommand(globals: GlobalArgs): Promise<number> {
     }
   }
 
+  // erase: the menu vanishes when a pick is made and repaints on return, so
+  // bouncing in and out of submenus doesn't stack a "● hotcell …" row per visit.
   for (;;) {
-    process.stdout.write("\n");
     const pick = await select(`${c.cyan}● hotcell${c.reset}`, [
       { label: "View / manage sandboxes", hint: "live fleet — attach, pause, cost" },
       { label: "Create a sandbox", hint: "guided: image · repo · branch · egress" },
       { label: "Manage provider keys", hint: "openrouter · openai · anthropic · google · github" },
       { label: "Daemon setup", hint: "access · egress · isolation · default image" },
       { label: "Quit" },
-    ]);
+    ], 0, { pad: true, erase: true });
     if (pick === 0) await tuiCommand([], globals);
     else if (pick === 1) await createWizard(globals);
     else if (pick === 2) await keysMenu(globals);
@@ -70,18 +71,17 @@ export async function menuCommand(globals: GlobalArgs): Promise<number> {
 
 async function keysMenu(globals: GlobalArgs): Promise<void> {
   for (;;) {
-    process.stdout.write("\n");
     const pick = await select("provider keys", [
       { label: "Show keys" },
       { label: "Add a key", hint: "hidden input · keychain · applies live" },
       { label: "Remove a key" },
       { label: "Back" },
-    ]);
+    ], 0, { pad: true, erase: true });
     if (pick === 0) {
       await keysCommand(["ls"], globals, {});
       process.stdout.write(`  ${c.dim}(any key to continue)${c.reset}`);
       await readKey();
-      process.stdout.write("\n");
+      process.stdout.write(`\r\x1b[2K`); // eat the hint — the key table stays, the nag doesn't
     } else if (pick === 1) {
       const opts = [...KNOWN_PROVIDERS.map((p) => ({ label: p })), { label: "cancel" }];
       const which = await select("provider", opts, KNOWN_PROVIDERS.length);

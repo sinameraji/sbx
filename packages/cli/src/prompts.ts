@@ -69,12 +69,29 @@ function clampLine(plain: string, styled: string): string {
   return plain.slice(0, Math.max(0, width - 1)) + "…";
 }
 
+export interface SelectBehavior {
+  /** Lead the frame with a blank spacer row, erased along with the menu. */
+  pad?: boolean;
+  /**
+   * On pick or Esc, erase the whole menu instead of collapsing to a `label
+   * chosen` line — for menu loops that repaint on every return, so revisiting
+   * the menu doesn't stack a residue row per visit.
+   */
+  erase?: boolean;
+}
+
 /**
  * Arrow-key radio select. Renders inline (no alt-screen), repaints in place, and
- * collapses to a single `label  chosen` line once picked. Returns the chosen
- * index, or **-1 on Esc** — callers map that to back/cancel/default.
+ * collapses to a single `label  chosen` line once picked (or vanishes entirely
+ * with `erase`). Returns the chosen index, or **-1 on Esc** — callers map that
+ * to back/cancel/default.
  */
-export async function select(label: string, options: SelectOption[], def = 0): Promise<number> {
+export async function select(
+  label: string,
+  options: SelectOption[],
+  def = 0,
+  behavior: SelectBehavior = {},
+): Promise<number> {
   const out = process.stdout;
   let idx = def;
   let painted = 0;
@@ -82,7 +99,7 @@ export async function select(label: string, options: SelectOption[], def = 0): P
   const line = (text: string, styled: string) => clampLine(text, styled) + `${ESC}[K\n`;
   const paint = () => {
     if (painted) out.write(`${ESC}[${painted}A`); // cursor back to first line
-    let frame = "";
+    let frame = behavior.pad ? `${ESC}[K\n` : "";
     frame += line(`  ${visible(label)}`, `  ${c.bold}${label}${c.reset}`);
     for (let i = 0; i < options.length; i++) {
       const o = options[i];
@@ -93,7 +110,7 @@ export async function select(label: string, options: SelectOption[], def = 0): P
       frame += line(plain, `   ${marker} ${text}${o.hint ? `  ${c.dim}${o.hint}${c.reset}` : ""}`);
     }
     out.write(frame);
-    painted = options.length + 1;
+    painted = options.length + 1 + (behavior.pad ? 1 : 0);
   };
 
   paint();
@@ -106,14 +123,14 @@ export async function select(label: string, options: SelectOption[], def = 0): P
     else if (k === ESC) {
       // Esc = back/cancel: erase the menu and let the caller decide.
       out.write(`${ESC}[${painted}A${ESC}[J`);
-      out.write(`  ${c.dim}${label}  (cancelled)${c.reset}\n`);
+      if (!behavior.erase) out.write(`  ${c.dim}${label}  (cancelled)${c.reset}\n`);
       return -1;
     }
     paint();
   }
-  // Collapse the menu to one confirmation line.
   out.write(`${ESC}[${painted}A${ESC}[J`);
-  out.write(`  ${c.dim}${label}${c.reset}  ${c.green}${options[idx].label}${c.reset}\n`);
+  // Collapse the menu to one confirmation line (unless it should vanish).
+  if (!behavior.erase) out.write(`  ${c.dim}${label}${c.reset}  ${c.green}${options[idx].label}${c.reset}\n`);
   return idx;
 }
 

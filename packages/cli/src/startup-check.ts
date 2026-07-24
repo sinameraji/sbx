@@ -16,7 +16,7 @@
  */
 
 import assert from "node:assert/strict";
-import { explainStartupFailure } from "./engine.js";
+import { explainStartupFailure, sliceLogBytes } from "./engine.js";
 import { formatError } from "./util.js";
 
 let checks = 0;
@@ -131,6 +131,28 @@ function checkExplain(): void {
   ok("returns [] when there is nothing actionable to show");
 }
 
+function checkByteOffsetSlice(): void {
+  // Regression: `hotcell start` captures the log offset as BYTES (statSync size)
+  // and must slice the log Buffer by bytes. An earlier run wrote em-dash-bearing
+  // lines (multi-byte), so slicing a decoded string by that offset overshoots and
+  // drops this run's reason — the intermittent "daemon exited 1" fallback.
+  const run1 = pretty(ERR, CONTAINER_HDR, { error: DOCKER_MSG }) + "\n"; // has em dashes
+  const run2 = pretty(ERR, VZ_HDR, { error: VZ_MSG }) + "\n";
+  const full = Buffer.from(run1 + run2, "utf8");
+  const offset = Buffer.byteLength(run1, "utf8"); // where run2 begins, in bytes
+
+  const sliced = sliceLogBytes(full, offset);
+  assert.equal(sliced, run2, "byte-offset slice recovers the appended run intact");
+  assert.deepEqual(explainStartupFailure(sliced), [VZ_MSG], "reason extracted from the byte slice");
+
+  // Prove it's a real regression: the naive char-index slice misaligns and yields
+  // no reason — exactly the observed fallback.
+  const naive = full.toString("utf8").slice(offset);
+  assert.notEqual(naive, run2, "char-index slice misaligns on multi-byte content");
+  assert.deepEqual(explainStartupFailure(naive), [], "char-index slice surfaces no reason (the bug)");
+  ok("slices the daemon log by byte offset (multi-byte safe)");
+}
+
 function checkFormatError(): void {
   const unreachable = new Error("The hotcell daemon isn't running (couldn't reach it at http://127.0.0.1:4750).");
   (unreachable as { code?: string }).code = "DAEMON_UNREACHABLE";
@@ -146,6 +168,7 @@ function checkFormatError(): void {
 
 function main(): void {
   checkExplain();
+  checkByteOffsetSlice();
   checkFormatError();
   console.log(`\nstartup-check: ${checks} checks passed`);
 }

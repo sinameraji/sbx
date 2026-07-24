@@ -135,12 +135,23 @@ export async function startEngine(
 }
 
 /** Read this run's slice of the daemon log (best-effort). */
-function readStartupLog(fromOffset: number): string {
+function readStartupLog(fromByteOffset: number): string {
   try {
-    return readFileSync(LOGFILE, "utf8").slice(fromOffset);
+    return sliceLogBytes(readFileSync(LOGFILE), fromByteOffset);
   } catch {
     return "";
   }
+}
+
+/**
+ * Decode a log slice starting at a BYTE offset. `logStart` comes from
+ * `statSync().size` (bytes), so we must slice the raw Buffer by bytes and then
+ * decode — slicing a decoded string by that offset misaligns on any multi-byte
+ * char already in the log (e.g. the em dashes in these very messages) and drops
+ * the reason line we mean to surface.
+ */
+export function sliceLogBytes(buf: Buffer, fromByteOffset: number): string {
+  return buf.subarray(fromByteOffset).toString("utf8");
 }
 
 /**

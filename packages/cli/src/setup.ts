@@ -1,6 +1,8 @@
 import { randomBytes } from "node:crypto";
 import { platform } from "node:os";
 import { existsSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { GlobalArgs } from "./cli.js";
 import { CONFIG_FILE, configExists, readConfigFile, writeConfigFile } from "./configfile.js";
 import { isUp, startEngine, stopEngine } from "./engine.js";
@@ -8,6 +10,15 @@ import { importEnvInteractive, keysCommand } from "./keys.js";
 import { loadKeys } from "./keystore.js";
 import { c, confirm, readKey, select, textInput } from "./prompts.js";
 import { HotcellClient } from "@hotcell/sdk";
+
+// The microVM drivers (Apple VZ / Firecracker) need build artifacts — the VZ
+// helper binary, guest kernel, rootfs — that only exist in a source checkout;
+// they don't ship in the npm package. Detect a checkout by the VZ helper's Swift
+// package at the repo root. When absent (a normal `npm i -g hotcell`), setup
+// offers only the Docker driver, so a user can't select a driver that can't run.
+const RUNNING_FROM_SOURCE = existsSync(
+  resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "helpers", "hotcell-vz", "Package.swift"),
+);
 
 /**
  * hotcell setup — the guided daemon configuration.
@@ -175,16 +186,24 @@ async function customize(): Promise<{ values: Record<string, string>; generatedK
   const isoOptions = mac
     ? [
         { label: "containers (Docker)", hint: "recommended — needs Docker Desktop/colima" },
-        { label: "Apple VZ microVMs", hint: "VM-grade isolation, no NIC by default" },
+        ...(RUNNING_FROM_SOURCE
+          ? [{ label: "Apple VZ microVMs", hint: "VM-grade isolation, no NIC by default" }]
+          : []),
       ]
     : [
         { label: "containers (Docker)", hint: "recommended" },
-        {
-          label: "Firecracker microVMs",
-          hint: existsSync("/dev/kvm") ? "VM-grade isolation (KVM detected)" : "needs /dev/kvm — not detected!",
-        },
+        ...(RUNNING_FROM_SOURCE
+          ? [{
+              label: "Firecracker microVMs",
+              hint: existsSync("/dev/kvm") ? "VM-grade isolation (KVM detected)" : "needs /dev/kvm — not detected!",
+            }]
+          : []),
       ];
-  const iso = Math.max(0, await select("isolation — default driver for new sandboxes?", isoOptions));
+  // Only ask when there's a real choice; an install offers Docker only.
+  const iso =
+    isoOptions.length > 1
+      ? Math.max(0, await select("isolation — default driver for new sandboxes?", isoOptions))
+      : 0;
   if (iso === 1) values["HOTCELL_DRIVER"] = mac ? "applevz" : "firecracker";
 
   const img = Math.max(0, await select("default image for new sandboxes?", [

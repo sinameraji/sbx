@@ -1,7 +1,30 @@
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { loadProviderKeyMap } from "./keystore.js";
+
+// Build-time artifacts (the VZ helper binary, guest kernels, rootfs images) live
+// in the source tree under helpers/ and do NOT ship in the published npm package.
+// Anchor their path defaults to this module's location so they resolve the same
+// no matter what directory the daemon is launched from — a bare "helpers/…"
+// default resolves against process.cwd() and so only works when the daemon is
+// started from the repo root (users who `npm i -g hotcell` and run from $HOME hit
+// a path that never exists).
+const MODULE_DIR = dirname(fileURLToPath(import.meta.url));
+// .../packages/daemon/{src,dist}/config.js → the repo root is three levels up.
+const REPO_ROOT = resolve(MODULE_DIR, "..", "..", "..");
+const repoAsset = (rel: string): string => join(REPO_ROOT, rel);
+
+/**
+ * True only when running from a source checkout — detected by the VZ helper's
+ * Swift package sitting next to us. In an npm install those build artifacts
+ * aren't present, so the microVM drivers report they're unavailable and steer
+ * the user to Docker rather than suggesting a `npm run build:vz` they can't run.
+ */
+export const RUNNING_FROM_SOURCE = existsSync(
+  join(REPO_ROOT, "helpers", "hotcell-vz", "Package.swift"),
+);
 
 /**
  * Persisted daemon config, written by `hotcell setup` (or by hand). Lives at
@@ -347,16 +370,16 @@ export function loadConfig(): Config {
     costMemGbPerHour: Number(env("COST_MEM_GB_PER_HOUR") ?? 0.005),
     costEgressPerGb: Number(env("COST_EGRESS_PER_GB") ?? 0.01),
     modelPricesPath: env("MODEL_PRICES") ?? "",
-    vzHelperPath: env("VZ_HELPER_PATH") ?? "helpers/hotcell-vz/dist/hotcell-vz",
-    vzKernel: env("VZ_KERNEL") ?? "helpers/hotcell-vz/guest/vmlinux-vz",
-    vzRootfs: env("VZ_ROOTFS") ?? "helpers/hotcell-vz/guest/rootfs.img",
+    vzHelperPath: env("VZ_HELPER_PATH") ?? repoAsset("helpers/hotcell-vz/dist/hotcell-vz"),
+    vzKernel: env("VZ_KERNEL") ?? repoAsset("helpers/hotcell-vz/guest/vmlinux-vz"),
+    vzRootfs: env("VZ_ROOTFS") ?? repoAsset("helpers/hotcell-vz/guest/rootfs.img"),
     vzStateDir: env("VZ_STATE_DIR") ?? join(stateRoot(), "vz"),
     vzDiskGb: Number(env("VZ_DISK_GB") ?? 4),
     vzImageCacheDir: env("VZ_IMAGE_CACHE") ?? join(stateRoot(), "vz", "images"),
     vzWarmPool: Number(env("VZ_WARM_POOL") ?? 0),
     fcBin: env("FC_BIN") ?? "firecracker",
-    fcKernel: env("FC_KERNEL") ?? "helpers/hotcell-vz/guest/vmlinux-fc",
-    fcRootfs: env("FC_ROOTFS") ?? "helpers/hotcell-vz/guest/rootfs.img",
+    fcKernel: env("FC_KERNEL") ?? repoAsset("helpers/hotcell-vz/guest/vmlinux-fc"),
+    fcRootfs: env("FC_ROOTFS") ?? repoAsset("helpers/hotcell-vz/guest/rootfs.img"),
     fcStateDir: env("FC_STATE_DIR") ?? join(stateRoot(), "fc"),
     fcDiskGb: Number(env("FC_DISK_GB") ?? 8),
     fcWarmPool: Number(env("FC_WARM_POOL") ?? 0),

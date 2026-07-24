@@ -18,6 +18,7 @@ import { AgentDriver } from "./agent-driver.js";
 import { VzImageCache } from "./vz-image.js";
 import { createHash } from "node:crypto";
 import type { CreateOptions, HostInfo, ResourceLimits } from "./types.js";
+import { RUNNING_FROM_SOURCE } from "../config.js";
 import { log } from "../logger.js";
 
 /** Config the driver factory hands the VZ driver (subset of the daemon config). */
@@ -529,9 +530,19 @@ export class AppleVzDriver extends AgentDriver {
     try {
       res = await this.oneShot("probe");
     } catch (err) {
+      // Installed users don't have the repo (the helper isn't shipped in the npm
+      // package), so a "build it" hint is useless — steer them to Docker. Only a
+      // source checkout can actually build the helper.
+      if (!RUNNING_FROM_SOURCE) {
+        throw new Error(
+          `The Apple VZ driver isn't available in this install — its helper (hotcell-vz) isn't bundled. ` +
+            `Use the Docker driver instead: run 'hotcell setup' and choose containers ` +
+            `(or set HOTCELL_DRIVER=container).`,
+        );
+      }
       throw new Error(
         `The Apple VZ helper (hotcell-vz) isn't built yet — it's missing at "${this.cfg.helperPath}". ` +
-          `Run 'npm run build:vz' to build it, then run 'hotcell start' again. ` +
+          `Build it with 'npm run build:vz', then run 'hotcell start' again. ` +
           `(underlying: ${(err as Error).message})`,
       );
     }

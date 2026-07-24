@@ -530,13 +530,18 @@ export class AppleVzDriver extends AgentDriver {
       res = await this.oneShot("probe");
     } catch (err) {
       throw new Error(
-        `applevz: cannot run the sbx-vz helper at "${this.cfg.helperPath}" (${(err as Error).message}). ` +
-          `Build it with 'npm run build:vz', or set SBX_VZ_HELPER_PATH.`,
+        `The Apple VZ helper (hotcell-vz) isn't built yet — it's missing at "${this.cfg.helperPath}". ` +
+          `Run 'npm run build:vz' to build it, then run 'hotcell start' again. ` +
+          `(underlying: ${(err as Error).message})`,
       );
     }
     const r = res.result as { available?: boolean; reason?: string } | undefined;
     if (!res.ok || !r?.available) {
-      throw new Error(`applevz: Virtualization.framework not available: ${r?.reason || res.error || "unknown"}`);
+      throw new Error(
+        `Apple Virtualization isn't available on this machine — the applevz driver needs macOS on ` +
+          `Apple Silicon. Switch drivers with 'hotcell setup' (or HOTCELL_DRIVER=container). ` +
+          `(reason: ${r?.reason || res.error || "unknown"})`,
+      );
     }
   }
 

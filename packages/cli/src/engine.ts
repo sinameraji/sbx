@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { createRequire } from "node:module";
-import { openSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from "node:fs";
+import { openSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { HotcellClient } from "@hotcell/sdk";
@@ -89,11 +89,21 @@ export async function startEngine(
   }
 
   mkdirSync(HOME, { recursive: true });
+  // Record where this run's log output begins: the daemon's stdio is appended to
+  // LOGFILE, so on failure we read from here to isolate just this attempt.
+  const logStart = existsSync(LOGFILE) ? statSync(LOGFILE).size : 0;
   const out = openSync(LOGFILE, "a");
   const child = spawn(process.execPath, ["--no-warnings", daemonEntry()], {
     detached: true,
     stdio: ["ignore", out, out],
     env: process.env,
+  });
+  // The daemon's fail-fast preflight (Docker down, VZ helper missing, …) exits in
+  // well under a second. Track that so we can report the real reason immediately
+  // instead of waiting out the full readiness window.
+  let exited: number | null = null;
+  child.on("exit", (code) => {
+    exited = code ?? 0;
   });
   writeFileSync(PIDFILE, String(child.pid ?? ""));
   child.unref();
@@ -104,10 +114,79 @@ export async function startEngine(
       console.log(dim(`  stop it: hotcell stop`));
       return 0;
     }
+    if (exited !== null) break; // preflight already failed — don't keep polling
     await sleep(500);
   }
-  console.error(red(`hotcell failed to become ready in 15s — check ${LOGFILE}`));
+
+  // Surface the daemon's own reason (it wrote an actionable message to the log
+  // before exiting), not a generic timeout. Fall back to the log path if we
+  // couldn't extract anything human-readable.
+  const reasons = explainStartupFailure(readStartupLog(logStart));
+  if (reasons.length > 0) {
+    console.error(red("hotcell couldn't start:"));
+    for (const line of reasons) console.error(`  ${line}`);
+    console.error(dim(`  full log: ${LOGFILE}`));
+  } else if (exited !== null) {
+    console.error(red(`hotcell couldn't start (daemon exited ${exited}) — check ${LOGFILE}`));
+  } else {
+    console.error(red(`hotcell didn't become ready in 15s — it may still be starting; check ${LOGFILE}`));
+  }
   return 1;
+}
+
+/** Read this run's slice of the daemon log (best-effort). */
+function readStartupLog(fromOffset: number): string {
+  try {
+    return readFileSync(LOGFILE, "utf8").slice(fromOffset);
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Render the daemon's `error`/`warn` log lines from a log slice as clean,
+ * user-facing text. Handles both log formats: `json` (one object per line) and
+ * the default `pretty` (`HH:MM:SS.mmm <TAG> <msg> key=val …`). Prefers the
+ * `error` field — the driver's full actionable sentence — over the terse `msg`
+ * header. Returns [] when nothing usable is found, so the caller can fall back.
+ */
+export function explainStartupFailure(slice: string): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  const push = (s: string) => {
+    const line = s.trim();
+    if (line && !seen.has(line)) {
+      seen.add(line);
+      out.push(line);
+    }
+  };
+  for (const raw of slice.split("\n")) {
+    const line = raw.trim();
+    if (!line) continue;
+    // JSON format.
+    if (line.startsWith("{")) {
+      try {
+        const rec = JSON.parse(line) as { level?: string; msg?: string; error?: string };
+        if (rec.level === "error" || rec.level === "warn") push(rec.error || rec.msg || "");
+        continue;
+      } catch {
+        /* not JSON after all — fall through to pretty parsing */
+      }
+    }
+    // Pretty format: strip ANSI, then require an ERR/WRN tag.
+    const plain = line.replace(/\x1b\[[0-9;]*m/g, "");
+    const m = /^\d{2}:\d{2}:\d{2}\.\d{3}\s+(ERR|WRN)\s+(.*)$/.exec(plain);
+    if (!m) continue;
+    const rest = m[2];
+    // Prefer the actionable error="..." field; else the leading message text.
+    const errField = /(?:^|\s)error=(?:"((?:[^"\\]|\\.)*)"|(\S+))/.exec(rest);
+    if (errField) {
+      push(errField[1] !== undefined ? errField[1].replace(/\\(.)/g, "$1") : errField[2]);
+    } else {
+      push(rest.replace(/\s+\w+=.*$/, ""));
+    }
+  }
+  return out;
 }
 
 export async function stopEngine(globals: GlobalArgs): Promise<number> {

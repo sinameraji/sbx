@@ -517,11 +517,24 @@ export class HotcellClient {
 
   /** @internal */
   async request<T>(method: string, path: string, body?: unknown): Promise<T> {
-    const res = await fetch(this.endpoint + path, {
-      method,
-      headers: this.authHeaders(body ? { "content-type": "application/json" } : undefined),
-      body: body ? JSON.stringify(body) : undefined,
-    });
+    let res: Response;
+    try {
+      res = await fetch(this.endpoint + path, {
+        method,
+        headers: this.authHeaders(body ? { "content-type": "application/json" } : undefined),
+        body: body ? JSON.stringify(body) : undefined,
+      });
+    } catch {
+      // A transport failure means the daemon isn't reachable — undici's raw
+      // "fetch failed" is useless, so surface a clear, tagged error the CLI can
+      // turn into a "start it" hint. (No CLI-specific text here: keep the SDK
+      // CLI-agnostic.)
+      const err = new Error(
+        `The hotcell daemon isn't running (couldn't reach it at ${this.endpoint}).`,
+      );
+      (err as { code?: string }).code = "DAEMON_UNREACHABLE";
+      throw err;
+    }
     if (!res.ok) {
       const text = await res.text();
       throw new Error(`hotcell ${method} ${path} -> ${res.status}: ${text}`);

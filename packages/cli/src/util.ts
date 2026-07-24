@@ -1,6 +1,11 @@
 /** Normalize a thrown value to a message string (shared by all CLI commands). */
 export function formatError(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
+  const msg = err instanceof Error ? err.message : String(err);
+  // The SDK tags an unreachable-daemon error; add the concrete next step.
+  if ((err as { code?: string })?.code === "DAEMON_UNREACHABLE") {
+    return `${msg}\n  → start it: hotcell start`;
+  }
+  return msg;
 }
 
 /**

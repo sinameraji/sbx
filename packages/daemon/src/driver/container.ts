@@ -74,7 +74,14 @@ export class ContainerDriver implements Driver {
   }
 
   async ping(): Promise<void> {
-    await this.docker.ping();
+    try {
+      await this.docker.ping();
+    } catch (err) {
+      throw new Error(
+        `You need to start Docker first — launch Docker Desktop (or colima, or Apple 'container'), ` +
+          `then run 'hotcell start' again. (underlying: ${(err as Error).message})`,
+      );
+    }
   }
 
   async hostInfo(): Promise<HostInfo> {

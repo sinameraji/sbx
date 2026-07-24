@@ -752,16 +752,17 @@ export class FirecrackerDriver extends AgentDriver {
   async ping(): Promise<void> {
     if (!existsSync("/dev/kvm")) {
       throw new Error(
-        "firecracker: /dev/kvm not present — needs a Linux host with KVM (bare metal " +
-          "or a nested-virtualization VM, e.g. GCE N2/C3). Use SBX_DRIVER=container otherwise.",
+        "The firecracker driver needs a Linux host with KVM at /dev/kvm (bare metal or a " +
+          "nested-virtualization VM, e.g. GCE N2/C3), which isn't present here. " +
+          "Switch drivers with 'hotcell setup' (or HOTCELL_DRIVER=container).",
       );
     }
     try {
       execFileSync(this.cfg.fcBin, ["--version"], { stdio: "ignore" });
     } catch (err) {
       throw new Error(
-        `firecracker: cannot run "${this.cfg.fcBin}" (${(err as Error).message}). ` +
-          "Install firecracker or set SBX_FC_BIN.",
+        `Can't run the firecracker binary at "${this.cfg.fcBin}" — install firecracker on PATH ` +
+          `or set HOTCELL_FC_BIN, then run 'hotcell start' again. (underlying: ${(err as Error).message})`,
       );
     }
   }

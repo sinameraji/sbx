@@ -15,6 +15,7 @@
     "smoke:remote": "npm run build && node packages/daemon/dist/smoke-remote.js",
     "check:egress": "npm run build --workspace @hotcell/daemon && node packages/daemon/dist/egress-check.js",
     "check:prompts": "npm run build --workspace @hotcell/sdk && npm run build --workspace hotcell && node packages/cli/dist/prompts-check.js",
+    "check:startup": "npm run build --workspace @hotcell/sdk && npm run build --workspace hotcell && node packages/cli/dist/startup-check.js",
     "check:env": "npm run build --workspace @hotcell/sdk && npm run build --workspace hotcell && node packages/cli/dist/env-check.js",
     "check:agent": "npm run build --workspace @hotcell/daemon && (cd agent && go build -o /tmp/hotcell-agent-check ./cmd/hotcell-agent) && node packages/daemon/dist/agent-check.js",
     "check:applevz": "npm run build:vz && npm run build --workspace @hotcell/daemon && node packages/daemon/dist/applevz-check.js",

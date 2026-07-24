@@ -15,6 +15,7 @@ import { buildProviders, createEgressProxy, type EgressServer } from "./proxy/eg
 import { loadProviderKeyMap } from "./keystore.js";
 import { loadModelPrices } from "./pricing.js";
 import { ensureEgressFirewall } from "./net/firewall.js";
+import { errorMessage } from "./util.js";
 
 /** A loopback bind host (unreachable from sandboxes on native-Linux dockerd). */
 function isLoopback(host: string): boolean {
@@ -66,13 +67,12 @@ async function main(): Promise<void> {
 
   // Fail fast with a friendly message if the selected driver isn't available
   // (Docker not running, or a microVM driver requested without host support).
+  // Each driver's ping() throws a complete, user-facing, actionable sentence;
+  // `hotcell start` reads this line back out of the daemon log and prints it.
   try {
     await driver.ping();
   } catch (err) {
-    log.error(`driver "${driver.name}" is not available`, { error: String(err) });
-    if (driver.name === "container") {
-      log.error("start Docker (or colima / Apple 'container') and retry");
-    }
+    log.error(`couldn't start the "${driver.name}" driver`, { error: errorMessage(err) });
     process.exit(1);
   }
 
